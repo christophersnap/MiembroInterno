@@ -1,0 +1,6 @@
+{
+  "name": "Cruz Verde Salvadoreña - Admin",
+  "description": "Sistema web para administrar el personal de Cruz Verde Salvadoreña, flota vehicular, solicitudes de combustible, solicitudes de compra y mantenimiento, cursos, certificaciones y seccionales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

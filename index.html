@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cruz Verde Salvadoreña - Admin</title>
+    <meta name="description" content="Sistema web para administrar el personal de Cruz Verde Salvadoreña, flota vehicular, solicitudes de mantenimiento y compra, cursos, certificaciones y seccionales." />
+    <meta property="og:title" content="Cruz Verde Salvadoreña - Admin" />
+    <meta property="og:description" content="Sistema web para administrar el personal de Cruz Verde Salvadoreña, flota vehicular, solicitudes de mantenimiento y compra, cursos, certificaciones y seccionales." />
+    <style>
+      #initial-loader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #f9fafb;
+        z-index: 9999;
+        font-family: system-ui, -apple-system, sans-serif;
+        transition: opacity 0.3s ease-out;
+      }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e5e7eb;
+        border-top-color: #001A70;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 16px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="initial-loader">
+      <div class="spinner"></div>
+      <div style="color: #4b5563; font-weight: 500;">Cargando sistema...</div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Remove loader once React mounts
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loader = document.getElementById('initial-loader');
+          if (loader) loader.style.display = 'none';
+        }, 500);
+      });
+    </script>
+  </body>
+</html>
+
