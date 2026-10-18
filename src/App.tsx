@@ -37,7 +37,7 @@ const Anuncios = React.lazy(() => import('./pages/Anuncios'));
 const Formularios = React.lazy(() => import('./pages/Formularios'));
 const PublicFormulario = React.lazy(() => import('./pages/PublicFormulario'));
 
-const ProtectedRoute = ({ children, requiredPermission }: { children: React.ReactNode, requiredPermission?: string }) => {
+const ProtectedRoute = ({ children, requiredPermission, anyPermission }: { children: React.ReactNode, requiredPermission?: string, anyPermission?: string[] }) => {
   const { user, permissions, requiresPasswordReset, loading } = useAuth();
 
   if (loading) {
@@ -54,6 +54,10 @@ const ProtectedRoute = ({ children, requiredPermission }: { children: React.Reac
 
   if (requiredPermission && !permissions[requiredPermission]) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
+  }
+
+  if (anyPermission && !anyPermission.some(p => permissions[p])) {
+    return <Navigate to="/" />;
   }
 
   return <>{children}</>;
@@ -100,7 +104,7 @@ export default function App() {
               <Route path="formularios" element={<ProtectedRoute requiredPermission="view_formularios"><Formularios /></ProtectedRoute>} />
               <Route path="seccionales" element={<ProtectedRoute requiredPermission="view_seccionales"><Seccionales /></ProtectedRoute>} />
               <Route path="directorio" element={<ProtectedRoute requiredPermission="view_directorio"><Directorio /></ProtectedRoute>} />
-              <Route path="configuracion" element={<ProtectedRoute requiredPermission="view_config"><Configuracion /></ProtectedRoute>} />
+              <Route path="configuracion" element={<ProtectedRoute anyPermission={['view_config', 'personalizar_colores']}><Configuracion /></ProtectedRoute>} />
               <Route path="actividad" element={<ProtectedRoute requiredPermission="view_activity"><ActivityLogs /></ProtectedRoute>} />
               <Route path="archivos" element={<ProtectedRoute requiredPermission="view_archivos"><Archivos /></ProtectedRoute>} />
               <Route path="anuncios" element={<ProtectedRoute requiredPermission="view_anuncios"><Anuncios /></ProtectedRoute>} />

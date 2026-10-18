@@ -18,7 +18,7 @@ app.use(express.json());
 // Setup Database
 const db = new Database('cruzverde.db');
 
-// Configuración SMTP efectiva (obtenida de .env o de la tabla configuracion en la base de datos)
+// Configuración SMTP efectiva (obtenida de la tabla configuracion en la base de datos o fallback .env)
 export function getMailConfig() {
   let dbConfig: Record<string, string> = {};
   try {
@@ -26,14 +26,16 @@ export function getMailConfig() {
     rows.forEach(r => { dbConfig[r.clave] = r.valor; });
   } catch (e) {}
 
-  const host = process.env.SMTP_HOST || dbConfig['smtp_host'] || 'smtp.office365.com';
+  const host = dbConfig['smtp_host'] || process.env.SMTP_HOST || 'smtp.hostinger.com';
   const defaultPort = (host.includes('hostinger') || host.includes('titan')) ? '465' : '587';
-  const port = parseInt(process.env.SMTP_PORT || dbConfig['smtp_port'] || defaultPort, 10);
-  const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : (dbConfig['smtp_secure'] ? dbConfig['smtp_secure'] === 'true' : port === 465);
-  const user = process.env.SMTP_USER || dbConfig['smtp_user'] || 'notificaciones@cruzverdesv.org';
-  const pass = process.env.SMTP_PASS || dbConfig['smtp_pass'] || '';
-  const from = process.env.SMTP_FROM || dbConfig['smtp_from'] || `Cruz Verde Salvadoreña (No Responder) <${user}>`;
-  const replyTo = process.env.SMTP_REPLY_TO || dbConfig['smtp_reply_to'] || 'noreply@cruzverdesv.org';
+  const port = parseInt(dbConfig['smtp_port'] || process.env.SMTP_PORT || defaultPort, 10);
+  const secure = dbConfig['smtp_secure'] !== undefined
+    ? (dbConfig['smtp_secure'] === 'true')
+    : (process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465);
+  const user = dbConfig['smtp_user'] || process.env.SMTP_USER || 'notificaciones@cruzverdesv.org';
+  const pass = dbConfig['smtp_pass'] || process.env.SMTP_PASS || '';
+  const from = dbConfig['smtp_from'] || process.env.SMTP_FROM || `Cruz Verde Salvadoreña (No Responder) <${user}>`;
+  const replyTo = dbConfig['smtp_reply_to'] || process.env.SMTP_REPLY_TO || 'noreply@cruzverdesv.org';
 
   return { host, port, secure, user, pass, from, replyTo };
 }
@@ -277,9 +279,9 @@ try {
     ['email_template_mostrar_logo', 'true'],
     ['email_template_legend', 'Este es un mensaje institucional generado automáticamente por el Sistema de Cruz Verde Salvadoreña desde una casilla no monitoreada. Por favor, no responda a este correo electrónico.'],
     ['email_template_telefono_contacto', '2284-0000 / 7695-7911'],
-    ['smtp_host', 'smtp.office365.com'],
-    ['smtp_port', '587'],
-    ['smtp_secure', 'false'],
+    ['smtp_host', 'smtp.hostinger.com'],
+    ['smtp_port', '465'],
+    ['smtp_secure', 'true'],
     ['smtp_user', 'notificaciones@cruzverdesv.org'],
     ['smtp_from', 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'],
     ['smtp_reply_to', 'noreply@cruzverdesv.org']
@@ -456,7 +458,7 @@ async function startServer() {
       if (!transporter) {
         return res.status(400).json({
           success: false,
-          error: 'No se ha configurado la contraseña SMTP. Para probar la conexión con Microsoft 365, ingresa la contraseña o contraseña de aplicación.'
+          error: 'No se ha configurado la contraseña SMTP. Para probar la conexión con el servidor (Hostinger / Microsoft), ingresa la contraseña en la configuración.'
         });
       }
 
@@ -468,12 +470,17 @@ async function startServer() {
     } catch (err: any) {
       let sugerencia = '';
       const msg = err.message || '';
+      const reqHost = (req.body && req.body.host) || '';
       if (msg.includes('535') || msg.includes('Authentication unsuccessful') || msg.includes('BadCredentials')) {
-        sugerencia = 'Error 535 de Microsoft: Si ya activaste "SMTP autenticado", el bloqueo se debe a: 1) "Valores predeterminados de seguridad" (Security Defaults) activos en Entra ID / Azure que bloquean la autenticación básica globalmente; 2) La cuenta tiene MFA activo (requiere desactivar MFA en este usuario o usar Contraseña de Aplicación); 3) Demora de replicación de Microsoft (15 a 60 min); 4) Contraseña incorrecta.';
+        if (reqHost.includes('hostinger') || reqHost.includes('titan')) {
+          sugerencia = 'Autenticación fallida con Hostinger: Verifica que el usuario sea el correo completo creado en hPanel de Hostinger (ej. notificaciones@cruzverdesv.org) y que la contraseña sea la correcta.';
+        } else {
+          sugerencia = 'Error 535 de autenticación: Si usas Microsoft 365, asegúrate de activar "SMTP autenticado" o usa una contraseña de aplicación. En otros servidores, verifica usuario y contraseña.';
+        }
       } else if (msg.includes('Tenant') || msg.includes('disabled') || msg.includes('Client was not authenticated')) {
-        sugerencia = 'Microsoft 365 tiene deshabilitado SMTP AUTH a nivel de inquilino o la cuenta requiere una Contraseña de Aplicación debido a MFA.';
-      } else if (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT')) {
-        sugerencia = 'No se pudo conectar al servidor SMTP. Verifica que el host sea smtp.office365.com y el puerto sea 587.';
+        sugerencia = 'El servidor de correo bloqueó el acceso SMTP AUTH o la cuenta requiere una Contraseña de Aplicación.';
+      } else if (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND')) {
+        sugerencia = 'No se pudo establecer conexión con el servidor SMTP. Para Hostinger utiliza host: smtp.hostinger.com con puerto: 465 (SSL) o 587 (TLS).';
       }
 
       res.status(500).json({
@@ -552,7 +559,7 @@ async function startServer() {
           return res.status(400).json({
             success: false,
             isRealSent: false,
-            error: `No se envió el correo a ${destinatario} porque la contraseña SMTP aún no está guardada en el sistema. Para recibir correos reales de Microsoft 365, ingresa la contraseña en la configuración SMTP abajo y haz clic en Guardar.`
+            error: `No se envió el correo a ${destinatario} porque la contraseña SMTP aún no está guardada en el sistema. Para enviar correos reales por Hostinger o tu proveedor, ingresa la contraseña en la configuración de Remitente y SMTP y haz clic en Guardar.`
           });
         }
       }

@@ -62,7 +62,7 @@ export default function Layout() {
     { name: 'Actividad', href: '/actividad', icon: Activity, show: permissions.view_activity, category: 'sistema' },
     { name: 'Accesos', href: '/accesos', icon: Shield, show: permissions.view_accesos, category: 'sistema' },
     { name: 'Configuración', href: '/configuracion', icon: Settings, show: permissions.view_config, category: 'sistema' },
-    { name: 'Colores del Sistema', href: '/configuracion?tab=colores', icon: Palette, show: permissions.view_config, category: 'sistema' },
+    { name: 'Colores del Sistema', href: '/configuracion?tab=colores', icon: Palette, show: Boolean(role === 'admin' || permissions.personalizar_colores || permissions.view_config), category: 'sistema' },
   ];
 
   const filteredNavigation = navigation.filter(item => item.show);

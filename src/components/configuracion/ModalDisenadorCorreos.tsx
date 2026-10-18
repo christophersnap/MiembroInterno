@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Palette, Type, Image as ImageIcon, Mail, FileText, CheckCircle2, 
   Send, Save, Copy, Check, Eye, EyeOff, AlertCircle, RefreshCw, 
-  ShoppingCart, Fuel, Server, Info, Key, ChevronRight, ShieldCheck
+  ShoppingCart, Fuel, Server, Info, Key, ChevronRight, ShieldCheck,
+  Code, Database, Sparkles
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
@@ -39,17 +40,23 @@ export default function ModalDisenadorCorreos({
   const [remitenteNombreGlobal, setRemitenteNombreGlobal] = useState('Cruz Verde Salvadoreña (No Responder)');
   const [usarRemitenteGlobal, setUsarRemitenteGlobal] = useState(true);
 
-  // Configuración SMTP editable directa
-  const [smtpHost, setSmtpHost] = useState('smtp.office365.com');
-  const [smtpPort, setSmtpPort] = useState('587');
-  const [smtpSecure, setSmtpSecure] = useState(false);
+  // Configuración SMTP editable directa (Predeterminado: Hostinger Webmail)
+  const [smtpHost, setSmtpHost] = useState('smtp.hostinger.com');
+  const [smtpPort, setSmtpPort] = useState('465');
+  const [smtpSecure, setSmtpSecure] = useState(true);
   const [smtpUser, setSmtpUser] = useState('notificaciones@cruzverdesv.org');
   const [smtpPass, setSmtpPass] = useState('');
   const [showSmtpPass, setShowSmtpPass] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testConnResult, setTestConnResult] = useState<{ success: boolean; message: string; sugerencia?: string } | null>(null);
 
-  // Estado del Servicio de Correo (Microsoft 365 / Hostinger / etc.)
+  // Estado de guardado y visualización SQL específico de SMTP
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const [smtpSaveSuccess, setSmtpSaveSuccess] = useState<string | null>(null);
+  const [showSqlViewer, setShowSqlViewer] = useState(false);
+  const [copiedSmtpSql, setCopiedSmtpSql] = useState(false);
+
+  // Estado del Servicio de Correo (Hostinger / Microsoft 365 / etc.)
   const [smtpStatus, setSmtpStatus] = useState<{
     configured: boolean;
     hasPassword?: boolean;
@@ -61,7 +68,7 @@ export default function ModalDisenadorCorreos({
     provider?: string;
   } | null>(null);
   const [mostrarGuiaMicrosoft, setMostrarGuiaMicrosoft] = useState(false);
-  const [guiaTab, setGuiaTab] = useState<'hostinger' | 'hotmail' | 'microsoft' | 'relay'>('microsoft');
+  const [guiaTab, setGuiaTab] = useState<'hostinger' | 'hotmail' | 'microsoft' | 'relay'>('hostinger');
 
   // Configuración de Diseño Visual
   const [headerColor, setHeaderColor] = useState('#15803d');
@@ -336,6 +343,127 @@ export default function ModalDisenadorCorreos({
     } finally {
       setSaving(false);
     }
+  };
+
+  // Guardar configuración SMTP directamente desde el apartado de Remitente y SMTP
+  const handleSaveSmtpSettings = async () => {
+    setSavingSmtp(true);
+    setSmtpSaveSuccess(null);
+    try {
+      const configDict: Record<string, string> = {
+        email_remitente_global: remitenteGlobal,
+        email_remitente_nombre_global: remitenteNombreGlobal,
+        email_remitente_no_reply_mode: String(usarRemitenteGlobal),
+        smtp_host: smtpHost,
+        smtp_port: smtpPort,
+        smtp_secure: String(smtpSecure),
+        smtp_user: smtpUser,
+        smtp_pass: smtpPass,
+        smtp_from: `${remitenteNombreGlobal} <${remitenteGlobal}>`,
+        smtp_reply_to: 'noreply@cruzverdesv.org'
+      };
+
+      if (usarRemitenteGlobal) {
+        configDict.solicitudes_correo_remitente = remitenteGlobal;
+        configDict.combustible_correo_remitente = remitenteGlobal;
+        configDict.email_remitente_correo = remitenteGlobal;
+        configDict.email_remitente_nombre = remitenteNombreGlobal;
+      }
+
+      // 1. Guardar en Backend SQLite
+      try {
+        await fetch('/api/configuracion', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(configDict)
+        });
+      } catch (errApi) {
+        console.warn('Error guardando en /api/configuracion:', errApi);
+      }
+
+      // 2. Guardar en Supabase (si está configurado)
+      try {
+        const configPairs = Object.entries(configDict).map(([clave, valor]) => ({ clave, valor }));
+        for (const pair of configPairs) {
+          const { data: existing } = await supabase
+            .from('configuracion')
+            .select('id')
+            .eq('clave', pair.clave)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase.from('configuracion').update({ valor: pair.valor }).eq('id', existing.id);
+          } else {
+            await supabase.from('configuracion').insert({ clave: pair.clave, valor: pair.valor });
+          }
+        }
+      } catch (errSupabase) {
+        console.warn('Error sincronizando con Supabase:', errSupabase);
+      }
+
+      // 3. Consultar estado actualizado de conexión SMTP desde el servidor
+      try {
+        const statusRes = await fetch('/api/smtp-config-status');
+        if (statusRes.ok) {
+          const statusJson = await statusRes.json();
+          setSmtpStatus(statusJson);
+        }
+      } catch (e) {}
+
+      await refreshSettings();
+      await logActivity(
+        `Guardó configuración de servidor SMTP (${smtpHost})`,
+        'Configuración',
+        'smtp_settings',
+        {
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpSecure,
+          user: smtpUser,
+          remitente: `${remitenteNombreGlobal} <${remitenteGlobal}>`
+        }
+      );
+
+      const providerLabel = smtpHost.includes('hostinger') 
+        ? 'Hostinger' 
+        : (smtpHost.includes('office365') ? 'Microsoft 365' : (smtpHost.includes('brevo') ? 'Brevo' : 'Servidor SMTP'));
+      
+      setSmtpSaveSuccess(`¡Ajustes de servidor SMTP (${providerLabel}) guardados exitosamente en la base de datos!`);
+      setTimeout(() => setSmtpSaveSuccess(null), 6000);
+      if (onSaved) onSaved();
+
+    } catch (err: any) {
+      console.error('Error guardando configuración SMTP:', err);
+      alert(`Error al guardar configuración SMTP: ${err.message}`);
+    } finally {
+      setSavingSmtp(false);
+    }
+  };
+
+  const getSmtpSql = () => {
+    return `-- =========================================================================
+-- CONFIGURACIÓN DE SERVIDOR SMTP EN LA BASE DE DATOS (HOSTINGER / SERVIDOR EXTERNO)
+-- Tabla: public.configuracion
+-- =========================================================================
+INSERT INTO public.configuracion (clave, valor)
+VALUES 
+  ('smtp_host', '${smtpHost}'),
+  ('smtp_port', '${smtpPort}'),
+  ('smtp_secure', '${String(smtpSecure)}'),
+  ('smtp_user', '${smtpUser}'),
+  ('smtp_pass', '${smtpPass.replace(/'/g, "''")}'),
+  ('smtp_from', '${remitenteNombreGlobal} <${remitenteGlobal}>'),
+  ('smtp_reply_to', 'noreply@cruzverdesv.org'),
+  ('email_remitente_global', '${remitenteGlobal}'),
+  ('email_remitente_nombre_global', '${remitenteNombreGlobal}'),
+  ('email_remitente_no_reply_mode', '${String(usarRemitenteGlobal)}')
+ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
+  };
+
+  const handleCopySmtpSql = () => {
+    navigator.clipboard.writeText(getSmtpSql());
+    setCopiedSmtpSql(true);
+    setTimeout(() => setCopiedSmtpSql(false), 3000);
   };
 
   const handleTestConnection = async () => {
@@ -834,8 +962,41 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
 
                   {/* Selector rápido de proveedor (Apple segmented pills) */}
                   <div>
-                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Proveedor Rápido</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider">Proveedor Rápido de Correo</label>
+                      <span className="text-3xs text-emerald-700 font-medium">Recomendado: Hostinger</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmtpHost('smtp.hostinger.com');
+                          setSmtpPort('465');
+                          setSmtpSecure(true);
+                          if (!smtpUser || smtpUser.includes('office365') || smtpUser.includes('hotmail')) {
+                            setSmtpUser('notificaciones@cruzverdesv.org');
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border relative ${
+                          smtpHost.includes('hostinger') 
+                            ? 'bg-emerald-50 border-emerald-400 text-emerald-950 shadow-xs ring-2 ring-emerald-500/20' 
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold flex items-center">
+                            Hostinger
+                            {smtpHost.includes('hostinger') && (
+                              <Check className="w-3.5 h-3.5 ml-1 text-emerald-600" />
+                            )}
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded-full text-3xs font-black bg-emerald-600 text-white">
+                            Oficial
+                          </span>
+                        </div>
+                        <span className="text-3xs text-gray-500 block mt-0.5 font-mono">smtp.hostinger.com (465 SSL)</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -846,29 +1007,19 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                             setSmtpUser('notificaciones@cruzverdesv.org');
                           }
                         }}
-                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
+                        className={`px-3 py-2 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
                           smtpHost.includes('office365') 
-                            ? 'bg-sky-50 border-sky-300 text-sky-900 shadow-2xs' 
+                            ? 'bg-sky-50 border-sky-400 text-sky-950 shadow-xs ring-2 ring-sky-500/20' 
                             : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
-                        Microsoft 365
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSmtpHost('smtp.hostinger.com');
-                          setSmtpPort('465');
-                          setSmtpSecure(true);
-                        }}
-                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
-                          smtpHost.includes('hostinger') 
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-2xs' 
-                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        Hostinger
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">Microsoft 365</span>
+                          {smtpHost.includes('office365') && (
+                            <Check className="w-3.5 h-3.5 ml-1 text-sky-600" />
+                          )}
+                        </div>
+                        <span className="text-3xs text-gray-500 block mt-0.5 font-mono">smtp.office365.com (587 TLS)</span>
                       </button>
 
                       <button
@@ -878,13 +1029,19 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                           setSmtpPort('587');
                           setSmtpSecure(false);
                         }}
-                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
+                        className={`px-3 py-2 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
                           smtpHost.includes('brevo') 
-                            ? 'bg-purple-50 border-purple-300 text-purple-900 shadow-2xs' 
+                            ? 'bg-purple-50 border-purple-400 text-purple-950 shadow-xs ring-2 ring-purple-500/20' 
                             : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
-                        Brevo (Relay API)
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">Brevo Relay API</span>
+                          {smtpHost.includes('brevo') && (
+                            <Check className="w-3.5 h-3.5 ml-1 text-purple-600" />
+                          )}
+                        </div>
+                        <span className="text-3xs text-gray-500 block mt-0.5 font-mono">smtp-relay.brevo.com</span>
                       </button>
 
                       <button
@@ -894,13 +1051,19 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                           setSmtpPort('587');
                           setSmtpSecure(false);
                         }}
-                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
+                        className={`px-3 py-2 rounded-xl text-2xs font-semibold transition-all cursor-pointer text-left border ${
                           smtpHost.includes('outlook') 
-                            ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-2xs' 
+                            ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20' 
                             : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
-                        Outlook / Hotmail
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">Outlook / Hotmail</span>
+                          {smtpHost.includes('outlook') && (
+                            <Check className="w-3.5 h-3.5 ml-1 text-amber-600" />
+                          )}
+                        </div>
+                        <span className="text-3xs text-gray-500 block mt-0.5 font-mono">smtp-mail.outlook.com</span>
                       </button>
                     </div>
                   </div>
@@ -913,8 +1076,8 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                         type="text"
                         value={smtpHost}
                         onChange={(e) => setSmtpHost(e.target.value)}
-                        placeholder="smtp.office365.com"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                        placeholder="smtp.hostinger.com"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                       />
                     </div>
                     <div>
@@ -922,15 +1085,57 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       <input
                         type="text"
                         value={smtpPort}
-                        onChange={(e) => setSmtpPort(e.target.value)}
-                        placeholder="587"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                        onChange={(e) => {
+                          setSmtpPort(e.target.value);
+                          if (e.target.value === '465') setSmtpSecure(true);
+                          else if (e.target.value === '587') setSmtpSecure(false);
+                        }}
+                        placeholder="465"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                       />
                     </div>
                   </div>
 
+                  {/* Selector Rápido de Protocolo y Seguridad SSL/TLS */}
                   <div>
-                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Usuario SMTP</label>
+                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Cifrado y Seguridad de Conexión</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmtpPort('465');
+                          setSmtpSecure(true);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer border flex items-center justify-between ${
+                          smtpSecure && smtpPort === '465'
+                            ? 'bg-emerald-50 border-emerald-400 text-emerald-900 shadow-2xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>Puerto 465 (SSL/TLS)</span>
+                        <span className="text-3xs text-emerald-700 font-bold">Hostinger</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmtpPort('587');
+                          setSmtpSecure(false);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl text-2xs font-semibold transition-all cursor-pointer border flex items-center justify-between ${
+                          !smtpSecure && smtpPort === '587'
+                            ? 'bg-sky-50 border-sky-400 text-sky-900 shadow-2xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>Puerto 587 (STARTTLS)</span>
+                        <span className="text-3xs text-sky-700 font-bold">Office 365</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Usuario SMTP (Buzón Completo)</label>
                     <input
                       type="email"
                       value={smtpUser}
@@ -939,7 +1144,7 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                         if (usarRemitenteGlobal) setRemitenteGlobal(e.target.value);
                       }}
                       placeholder="notificaciones@cruzverdesv.org"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
                   </div>
 
@@ -949,7 +1154,7 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       <button
                         type="button"
                         onClick={() => setShowSmtpPass(!showSmtpPass)}
-                        className="text-3xs text-sky-600 hover:text-sky-800 flex items-center cursor-pointer"
+                        className="text-3xs text-emerald-700 hover:text-emerald-900 flex items-center cursor-pointer font-medium"
                       >
                         {showSmtpPass ? <EyeOff className="w-3 h-3 mr-0.5" /> : <Eye className="w-3 h-3 mr-0.5" />}
                         {showSmtpPass ? 'Ocultar' : 'Mostrar'}
@@ -959,23 +1164,98 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       type={showSmtpPass ? 'text' : 'password'}
                       value={smtpPass}
                       onChange={(e) => setSmtpPass(e.target.value)}
-                      placeholder="Contraseña del buzón o de aplicación de 16 caracteres"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                      placeholder="Contraseña del buzón en Hostinger o servidor"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
                   </div>
 
-                  {/* Probar Conexión */}
+                  {/* Alerta de Éxito al Guardar Ajuste SMTP */}
+                  {smtpSaveSuccess && (
+                    <div className="p-3 bg-emerald-600 text-white rounded-xl text-xs font-medium flex items-center justify-between shadow-xs animate-in fade-in">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{smtpSaveSuccess}</span>
+                      </div>
+                      <span className="text-3xs opacity-80 uppercase tracking-wider font-bold">Base de Datos OK</span>
+                    </div>
+                  )}
+
+                  {/* BOTÓN PRINCIPAL DE GUARDAR AJUSTES SMTP */}
                   <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSaveSmtpSettings}
+                      disabled={savingSmtp}
+                      className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center transition-all cursor-pointer shadow-sm hover:shadow"
+                    >
+                      <Save className={`w-3.5 h-3.5 mr-1.5 ${savingSmtp ? 'animate-spin' : ''}`} />
+                      {savingSmtp ? 'Guardando ajustes de SMTP...' : `Guardar Ajustes de Servidor SMTP (${smtpHost.includes('hostinger') ? 'Hostinger' : 'Servidor'})`}
+                    </button>
+                  </div>
+
+                  {/* Acciones Secundarias: Probar Conexión, Copiar SQL y Ver SQL */}
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
                     <button
                       type="button"
                       onClick={handleTestConnection}
                       disabled={testingConnection || !smtpPass}
-                      className="w-full py-2 px-3 bg-slate-900 hover:bg-black disabled:opacity-40 text-white rounded-xl text-xs font-medium flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                      className="py-2 px-3 bg-slate-900 hover:bg-black disabled:opacity-40 text-white rounded-xl text-xs font-medium flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                      title="Verifica en vivo que el host, puerto y credenciales funcionen"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${testingConnection ? 'animate-spin' : ''}`} />
-                      {testingConnection ? 'Probando conexión...' : 'Probar Conexión con Servidor'}
+                      {testingConnection ? 'Probando...' : 'Probar Conexión'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopySmtpSql}
+                      className="py-2 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium flex items-center justify-center transition-all cursor-pointer shadow-2xs"
+                      title="Copiar script SQL para la base de datos externa"
+                    >
+                      {copiedSmtpSql ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                          <span className="text-emerald-700 font-semibold">¡SQL Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+                          <span>Copiar SQL SMTP</span>
+                        </>
+                      )}
                     </button>
                   </div>
+
+                  {/* Botón para alternar vista de script SQL */}
+                  <div className="text-center pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowSqlViewer(!showSqlViewer)}
+                      className="text-3xs text-slate-500 hover:text-slate-800 font-medium inline-flex items-center cursor-pointer transition-colors"
+                    >
+                      <Code className="w-3 h-3 mr-1" />
+                      {showSqlViewer ? 'Ocultar código SQL' : 'Ver script SQL para ejecutar en Base de Datos'}
+                    </button>
+                  </div>
+
+                  {/* Visor de SQL desplegable */}
+                  {showSqlViewer && (
+                    <div className="p-3 bg-slate-900 text-slate-200 rounded-xl text-3xs font-mono border border-slate-800 space-y-2 animate-in fade-in">
+                      <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                        <span className="text-slate-400 font-semibold">Script SQL (Hostinger / PostgreSQL / Supabase):</span>
+                        <button
+                          type="button"
+                          onClick={handleCopySmtpSql}
+                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-3xs font-sans transition-colors cursor-pointer"
+                        >
+                          {copiedSmtpSql ? 'Copiado' : 'Copiar'}
+                        </button>
+                      </div>
+                      <pre className="overflow-x-auto p-1 leading-relaxed whitespace-pre-wrap">
+                        {getSmtpSql()}
+                      </pre>
+                    </div>
+                  )}
 
                   {testConnResult && (
                     <div className={`p-3 rounded-xl text-xs border ${
@@ -1004,7 +1284,7 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                     >
                       <span className="flex items-center font-medium">
                         <Info className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
-                        {mostrarGuiaMicrosoft ? 'Ocultar instrucciones de configuración' : 'Ver instrucciones por proveedor (M365, Hostinger, Brevo)'}
+                        {mostrarGuiaMicrosoft ? 'Ocultar instrucciones de configuración' : 'Ver instrucciones por proveedor (Hostinger, M365, Brevo)'}
                       </span>
                       <ChevronRight className={`w-3.5 h-3.5 transition-transform ${mostrarGuiaMicrosoft ? 'rotate-90' : ''}`} />
                     </button>
@@ -1014,6 +1294,13 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                         <div className="flex gap-1 border-b border-slate-200 pb-2">
                           <button
                             type="button"
+                            onClick={() => setGuiaTab('hostinger')}
+                            className={`px-2 py-0.5 rounded-md text-3xs font-semibold ${guiaTab === 'hostinger' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                          >
+                            Hostinger (Recomendado)
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setGuiaTab('microsoft')}
                             className={`px-2 py-0.5 rounded-md text-3xs font-semibold ${guiaTab === 'microsoft' ? 'bg-sky-600 text-white' : 'text-slate-600'}`}
                           >
@@ -1021,19 +1308,23 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                           </button>
                           <button
                             type="button"
-                            onClick={() => setGuiaTab('hostinger')}
-                            className={`px-2 py-0.5 rounded-md text-3xs font-semibold ${guiaTab === 'hostinger' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
-                          >
-                            Hostinger
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => setGuiaTab('relay')}
                             className={`px-2 py-0.5 rounded-md text-3xs font-semibold ${guiaTab === 'relay' ? 'bg-purple-600 text-white' : 'text-slate-600'}`}
                           >
-                            Brevo (Recomendado)
+                            Brevo Relay
                           </button>
                         </div>
+
+                        {guiaTab === 'hostinger' && (
+                          <div className="space-y-1.5 text-3xs leading-relaxed text-slate-600">
+                            <p className="font-semibold text-slate-900">Hostinger Webmail / Correo Empresarial:</p>
+                            <p>1. Entra a tu <strong>hPanel de Hostinger</strong> &gt; sección <em>Emails</em> &gt; <em>Cuentas de Correo</em>.</p>
+                            <p>2. Crea o verifica tu cuenta institucional (ej: <code className="bg-slate-200 px-1 rounded font-mono">notificaciones@cruzverdesv.org</code>).</p>
+                            <p>3. Servidor de salida SMTP: <code className="bg-slate-200 px-1 rounded font-mono">smtp.hostinger.com</code></p>
+                            <p>4. Puerto recomendado: <code className="bg-slate-200 px-1 rounded font-mono">465</code> con <strong>SSL/TLS activado</strong> (o puerto 587 con STARTTLS).</p>
+                            <p>5. Usuario: tu dirección de correo completa. Contraseña: la misma de tu cuenta de correo en Hostinger.</p>
+                          </div>
+                        )}
 
                         {guiaTab === 'microsoft' && (
                           <div className="space-y-1.5 text-3xs leading-relaxed text-slate-600">
@@ -1042,15 +1333,6 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                             <p>2. Abre el buzón &gt; pestaña <em>Correo</em> &gt; <em>Administrar aplicaciones de correo</em>.</p>
                             <p>3. Marca <strong>"SMTP autenticado"</strong> y guarda cambios.</p>
                             <p>4. Host: <code className="bg-slate-200 px-1 rounded font-mono">smtp.office365.com</code>, Puerto: <code className="bg-slate-200 px-1 rounded font-mono">587</code>.</p>
-                          </div>
-                        )}
-
-                        {guiaTab === 'hostinger' && (
-                          <div className="space-y-1.5 text-3xs leading-relaxed text-slate-600">
-                            <p className="font-semibold text-slate-900">Hostinger Webmail:</p>
-                            <p>1. En hPanel &gt; Emails &gt; Cuentas de Correo de cruzverdesv.org.</p>
-                            <p>2. Host: <code className="bg-slate-200 px-1 rounded font-mono">smtp.hostinger.com</code>, Puerto: <code className="bg-slate-200 px-1 rounded font-mono">465</code> (SSL activado).</p>
-                            <p>3. No requiere contraseñas de aplicación especiales.</p>
                           </div>
                         )}
 
