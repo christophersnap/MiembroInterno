@@ -1,0 +1,31 @@
+# ==============================================================================
+# CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO DIST (SPA)
+# ==============================================================================
+
+DirectoryIndex index.html index.php
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Servir archivos físicos existentes directamente
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # Prevenir retornar HTML para recursos estáticos faltantes
+  RewriteCond %{REQUEST_URI} \.(js|mjs|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|json|webp|map)$ [NC]
+  RewriteRule ^ - [R=404,L]
+
+  # Enrutamiento SPA
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType application/javascript .js .mjs
+  AddType text/css .css
+  AddType image/svg+xml .svg
+  AddType font/woff2 .woff2
+  AddType application/json .json
+</IfModule>
