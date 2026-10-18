@@ -20,6 +20,7 @@ import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
 import { sendEmailNotification } from '../lib/api';
 import { generarHtmlCorreoCombustible } from '../lib/emailNotification';
+import { getElSalvadorDateTime, formatFechaSV, formatFechaHoraSV } from '../utils/dateUtils';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
@@ -130,6 +131,12 @@ NOTIFY pgrst, 'reload schema';`;
       setSeccionales(loadedSeccs);
 
       // B. Cargar Configuración de Combustible
+      let storedLocalConfig: Partial<CombustibleConfig> = {};
+      try {
+        const rawLocal = localStorage.getItem('cruz_verde_combustible_config');
+        if (rawLocal) storedLocalConfig = JSON.parse(rawLocal);
+      } catch (e) {}
+
       const { data: confData } = await supabase
         .from('configuracion')
         .select('*')
@@ -141,14 +148,17 @@ NOTIFY pgrst, 'reload schema';`;
 
         setConfig(prev => ({
           ...prev,
-          correoDestino: confMap.combustible_correo_destino || prev.correoDestino,
-          correoCcDefault: confMap.combustible_correo_cc || prev.correoCcDefault,
-          correoContactoTelefono: confMap.combustible_correo_contacto_telefono || prev.correoContactoTelefono,
-          asuntoPlantilla: confMap.combustible_correo_asunto_plantilla || prev.asuntoPlantilla,
-          enviarCopiaSolicitante: confMap.combustible_correo_enviar_copia_solicitante !== 'false',
-          correoTitulo: confMap.combustible_correo_titulo || prev.correoTitulo,
-          correoSubtitulo: confMap.combustible_correo_subtitulo || prev.correoSubtitulo,
-          correoFooterTexto: confMap.combustible_correo_footer_texto || prev.correoFooterTexto,
+          ...storedLocalConfig,
+          correoDestino: confMap.combustible_correo_destino || storedLocalConfig.correoDestino || prev.correoDestino,
+          correoCcDefault: confMap.combustible_correo_cc || storedLocalConfig.correoCcDefault || prev.correoCcDefault,
+          correoContactoTelefono: confMap.combustible_correo_contacto_telefono || storedLocalConfig.correoContactoTelefono || prev.correoContactoTelefono,
+          asuntoPlantilla: confMap.combustible_correo_asunto_plantilla || storedLocalConfig.asuntoPlantilla || prev.asuntoPlantilla,
+          enviarCopiaSolicitante: confMap.combustible_correo_enviar_copia_solicitante !== undefined 
+            ? confMap.combustible_correo_enviar_copia_solicitante !== 'false' 
+            : (storedLocalConfig.enviarCopiaSolicitante !== undefined ? storedLocalConfig.enviarCopiaSolicitante : prev.enviarCopiaSolicitante),
+          correoTitulo: confMap.combustible_correo_titulo || storedLocalConfig.correoTitulo || prev.correoTitulo,
+          correoSubtitulo: confMap.combustible_correo_subtitulo || storedLocalConfig.correoSubtitulo || prev.correoSubtitulo,
+          correoFooterTexto: confMap.combustible_correo_footer_texto || storedLocalConfig.correoFooterTexto || prev.correoFooterTexto,
 
           pdfTitulo: confMap.combustible_pdf_titulo || prev.pdfTitulo,
           pdfSubtitulo: confMap.combustible_pdf_subtitulo || prev.pdfSubtitulo,
@@ -220,30 +230,7 @@ NOTIFY pgrst, 'reload schema';`;
             setSolicitudes([]);
           }
         } else {
-          // Solicitud de demostración basada en la Imagen 2
-          const demoSolicitud: SolicitudCombustible = {
-            id: 1,
-            folio: 'COMB-2026-0042',
-            seccional_id: 1,
-            seccional_nombre: 'Aguilares',
-            director_nombre: '(AGUILARES) - JOSUE ARMANDO RAMOS URRUTIA',
-            correo_electronico: user?.email || 'christopher.snap@gmail.com',
-            actividad: 'Emergencias cotidianas',
-            entrego_liquidacion_anterior: true,
-            motivo_no_liquidacion: '',
-            nombre_solicitante: userName && userName !== 'Usuario' ? userName : 'Christopher prueba a outlook',
-            telefono_solicitante: '7742-8734',
-            observaciones: 'Dotación mensual para ambulancia y unidad de rescate.',
-            fecha_solicitud: '2026-09-09',
-            hora_solicitud: '19:35:00',
-            fecha_envio_completa: '2026-09-09 19:35:00',
-            estado: 'Pendiente',
-            correo_enviado: true,
-            correos_notificados: 'control_combustible@cruzverdesv.org',
-            created_at: new Date().toISOString()
-          };
-          setSolicitudes([demoSolicitud]);
-          sessionStorage.setItem('cruz_verde_solicitudes_combustible', JSON.stringify([demoSolicitud]));
+          setSolicitudes([]);
         }
       } else {
         let list = solData || [];
@@ -269,19 +256,43 @@ NOTIFY pgrst, 'reload schema';`;
   const handleSubmitForm = async (formData: Omit<SolicitudCombustible, 'id' | 'folio' | 'estado' | 'created_at'>) => {
     setSubmitting(true);
     try {
-      const now = new Date();
-      const year = now.getFullYear();
+      const svTime = getElSalvadorDateTime();
       const randomNum = Math.floor(1000 + Math.random() * 9000);
-      const folioGenerado = `COMB-${year}-${randomNum}`;
-      const horaStr = now.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-      const fechaStr = now.toISOString().split('T')[0];
-      const fechaCompletaStr = `${fechaStr} ${horaStr}`;
+      const folioGenerado = `COMB-${svTime.year}-${randomNum}`;
+      const horaStr = svTime.hora24;
+      const fechaStr = svTime.fechaISO; // Formato YYYY-MM-DD según día en El Salvador
+      const fechaCompletaStr = `${svTime.fechaSV} ${svTime.hora12}`;
 
-      const correosArr = [config.correoDestino];
-      if (config.correoCcDefault) correosArr.push(config.correoCcDefault);
-      if (formData.correo_electronico && config.enviarCopiaSolicitante) {
-        correosArr.push(formData.correo_electronico);
+      // Determinar destinatarios efectivos respetando la configuración guardada
+      let activeCorreoDestino = config.correoDestino;
+      let activeCorreoCc = config.correoCcDefault;
+      let activeEnviarCopia = config.enviarCopiaSolicitante;
+      try {
+        const stored = localStorage.getItem('cruz_verde_combustible_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.correoDestino && parsed.correoDestino.trim()) activeCorreoDestino = parsed.correoDestino.trim();
+          if (parsed.correoCcDefault !== undefined) activeCorreoCc = parsed.correoCcDefault;
+          if (parsed.enviarCopiaSolicitante !== undefined) activeEnviarCopia = parsed.enviarCopiaSolicitante;
+        }
+      } catch (e) {}
+
+      const correosArr: string[] = [];
+      if (activeCorreoDestino && activeCorreoDestino.trim()) {
+        correosArr.push(...activeCorreoDestino.split(',').map(c => c.trim()).filter(Boolean));
       }
+      if (activeCorreoCc && activeCorreoCc.trim()) {
+        correosArr.push(...activeCorreoCc.split(',').map(c => c.trim()).filter(Boolean));
+      }
+      if (activeEnviarCopia) {
+        if (formData.correo_electronico && formData.correo_electronico.trim()) {
+          correosArr.push(formData.correo_electronico.trim());
+        }
+        if (user?.email && !correosArr.includes(user.email.trim())) {
+          correosArr.push(user.email.trim());
+        }
+      }
+      const correosUnicos = Array.from(new Set(correosArr.filter(Boolean)));
 
       const payload = {
         ...formData,
@@ -291,7 +302,7 @@ NOTIFY pgrst, 'reload schema';`;
         fecha_envio_completa: fechaCompletaStr,
         estado: 'Pendiente' as const,
         correo_enviado: true,
-        correos_notificados: correosArr.join(', ')
+        correos_notificados: correosUnicos.join(', ')
       };
 
       let newRecord: SolicitudCombustible;
@@ -332,41 +343,47 @@ NOTIFY pgrst, 'reload schema';`;
       await logActivity('Registró solicitud de combustible', 'SolicitudCombustible', folioGenerado, {
         seccional: formData.seccional_nombre,
         solicitante: formData.nombre_solicitante,
-        actividad: formData.actividad
+        actividad: formData.actividad,
+        hora_sv: horaStr,
+        fecha_sv: fechaStr
       });
 
       // Enviar notificación automática por correo SMTP (Hostinger / Servidor)
       try {
         const asuntoGenerado = (config.asuntoPlantilla || 'Solicitud de Combustible: {folio} - {seccional}')
           .replace('{folio}', folioGenerado)
-          .replace('{seccional}', formData.seccional_nombre);
+          .replace('[FOLIO]', folioGenerado)
+          .replace('{seccional}', formData.seccional_nombre)
+          .replace('[SECCIONAL]', formData.seccional_nombre)
+          .replace('{fecha}', svTime.fechaSV)
+          .replace('[FECHA]', svTime.fechaSV)
+          .replace('[SOLICITANTE]', formData.nombre_solicitante);
 
         const htmlEmail = generarHtmlCorreoCombustible({
           folio: folioGenerado,
+          codigoSolicitud: folioGenerado,
           seccional: formData.seccional_nombre,
+          seccionalNombre: formData.seccional_nombre,
           solicitante: formData.nombre_solicitante,
-          cargoSolicitante: formData.cargo_solicitante,
-          vehiculoPlaca: formData.vehiculo_placa,
-          vehiculoMarca: formData.vehiculo_marca,
-          vehiculoModelo: formData.vehiculo_modelo,
-          tipoCombustible: formData.tipo_combustible,
-          galones: formData.galones_solicitados,
+          telefonoSolicitante: formData.telefono_solicitante,
           correoSolicitante: formData.correo_electronico,
           actividad: formData.actividad,
           entregoLiquidacionAnterior: !!formData.entrego_liquidacion_anterior,
           motivoNoLiquidacion: formData.motivo_no_liquidacion,
+          fecha: svTime.fechaSV,
           fechaEnvio: fechaCompletaStr,
+          asunto: asuntoGenerado,
           nombreArchivoPdf: `${folioGenerado}.pdf`
         });
 
         await sendEmailNotification({
-          destinatario: correosArr.join(', '),
+          destinatario: correosUnicos.join(', '),
           asunto: asuntoGenerado,
           cuerpoHtml: htmlEmail,
           tipo: 'solicitud_combustible',
           remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'
         });
-        console.log('[COMBUSTIBLE] Notificación por correo enviada a:', correosArr.join(', '));
+        console.log('[COMBUSTIBLE] Notificación por correo enviada a:', correosUnicos.join(', '));
       } catch (mailErr) {
         console.warn('[COMBUSTIBLE] Aviso al despachar correo automático:', mailErr);
       }

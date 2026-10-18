@@ -33,7 +33,7 @@ export function getMailConfig() {
     ? (dbConfig['smtp_secure'] === 'true')
     : (process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465);
   const user = dbConfig['smtp_user'] || process.env.SMTP_USER || 'notificaciones@cruzverdesv.org';
-  const pass = dbConfig['smtp_pass'] || process.env.SMTP_PASS || '';
+  const pass = dbConfig['smtp_pass'] || process.env.SMTP_PASS || 'Cvnoti17$';
   const from = dbConfig['smtp_from'] || process.env.SMTP_FROM || `Cruz Verde Salvadoreña (No Responder) <${user}>`;
   const replyTo = dbConfig['smtp_reply_to'] || process.env.SMTP_REPLY_TO || 'noreply@cruzverdesv.org';
 

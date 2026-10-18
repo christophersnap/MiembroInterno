@@ -460,19 +460,40 @@ export function generarHtmlCorreoCompra(
  * Incluye el FORMULARIO COMPLETO LLENO y el PDF OFICIAL ADJUNTO generado.
  */
 export function generarHtmlCorreoCombustible(
-  params: EmailTemplateParams, 
-  datos: DatosSolicitudCombustible, 
+  paramsOrUnified: any, 
+  datosArg?: DatosSolicitudCombustible, 
   design?: EmailDesignConfig
 ): string {
   const cfg = { ...DEFAULT_EMAIL_DESIGN, ...getStoredDesignConfig(), ...design };
-  const pdfName = datos.nombreArchivoPdf || `Solicitud_Combustible_${datos.codigoSolicitud}.pdf`;
+  
+  let p: any;
+  let d: any;
+
+  if (datosArg) {
+    p = paramsOrUnified || {};
+    d = datosArg;
+  } else {
+    // Modo unificado (un solo objeto con todos los datos)
+    d = paramsOrUnified || {};
+    p = {
+      remitenteNombre: 'Cruz Verde Salvadoreña (No Responder)',
+      remitenteCorreo: 'notificaciones@cruzverdesv.org',
+      asunto: d.asunto || `Solicitud de Combustible: ${d.folio || d.codigoSolicitud || 'CVS'} - ${d.seccional || ''}`
+    };
+  }
+
+  const codigo = d.codigoSolicitud || d.folio || 'COMB-CVS';
+  const pdfName = d.nombreArchivoPdf || `Solicitud_Combustible_${codigo}.pdf`;
+  const asuntoStr = p.asunto || `Solicitud de Combustible: ${codigo}`;
+  const datos = d;
+  const params = p;
 
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${params.asunto}</title>
+  <title>${asuntoStr}</title>
   <style>
     body { font-family: ${cfg.fontBody}; background-color: #f3f4f6; margin: 0; padding: 24px 12px; color: #1f2937; }
     .container { max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; }

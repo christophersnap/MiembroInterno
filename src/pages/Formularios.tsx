@@ -10,6 +10,7 @@ import FormResponsesModal from '../components/formularios/FormResponsesModal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
+import { generateSlug } from '../utils/slugify';
 
 export default function Formularios() {
   const { user, userName, role, permissions } = useAuth();
@@ -43,29 +44,48 @@ export default function Formularios() {
     setLoading(true);
     try {
       // 1. Cargar desde base de datos Supabase en la nube
-      const { data: supaForms, error: supaErr } = await supabase
-        .from('formularios')
-        .select(`
-          *,
-          formulario_respuestas (id)
-        `)
-        .order('id', { ascending: false });
+      let supaList: Formulario[] = [];
+      try {
+        const { data: supaForms, error: supaErr } = await supabase
+          .from('formularios')
+          .select(`
+            *,
+            formulario_respuestas (id)
+          `)
+          .order('id', { ascending: false });
 
-      if (!supaErr && supaForms && supaForms.length > 0) {
-        const formatted = supaForms.map((f: any) => ({
-          ...f,
-          respuestas_count: Array.isArray(f.formulario_respuestas) ? f.formulario_respuestas.length : 0
-        }));
-        setFormularios(formatted);
-        return;
+        if (!supaErr && supaForms) {
+          supaList = supaForms.map((f: any) => ({
+            ...f,
+            respuestas_count: Array.isArray(f.formulario_respuestas) ? f.formulario_respuestas.length : 0
+          }));
+        }
+      } catch (e) {
+        console.warn('Aviso al cargar formularios de Supabase:', e);
       }
 
-      // 2. Fallback a endpoint local SQLite
-      const res = await fetch(getApiUrl('/api/formularios'));
-      if (res.ok) {
-        const data = await res.json();
-        setFormularios(data);
-      }
+      // 2. Cargar también desde la base de datos local SQLite (/api/formularios)
+      let localList: Formulario[] = [];
+      try {
+        const res = await fetch(getApiUrl('/api/formularios'));
+        if (res.ok) {
+          localList = await res.json();
+        }
+      } catch (e) {}
+
+      // 3. Fusionar ambas fuentes sin duplicar por slug o id
+      const combinedMap = new Map<string, Formulario>();
+      // Primero los locales
+      localList.forEach(f => {
+        if (f.slug) combinedMap.set(f.slug, f);
+      });
+      // Luego Supabase (sobreescribe o complementa)
+      supaList.forEach(f => {
+        if (f.slug) combinedMap.set(f.slug, f);
+      });
+
+      const mergedList = Array.from(combinedMap.values()).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      setFormularios(mergedList);
     } catch (err) {
       console.error('Error al cargar formularios:', err);
     } finally {
@@ -101,19 +121,21 @@ export default function Formularios() {
   const handleToggleActivo = async (form: Formulario) => {
     try {
       const updatedActivo = !form.activo;
-      // 1. Actualizar en Supabase
-      await supabase
-        .from('formularios')
-        .update({ activo: updatedActivo, updated_at: new Date().toISOString() })
-        .eq('id', form.id);
-
-      // 2. Notificar API local si aplica
+      // 1. Actualizar en API local
       try {
         await fetch(getApiUrl(`/api/formularios/${form.id}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...form, activo: updatedActivo })
         });
+      } catch (e) {}
+
+      // 2. Actualizar en Supabase
+      try {
+        await supabase
+          .from('formularios')
+          .update({ activo: updatedActivo, updated_at: new Date().toISOString() })
+          .eq('id', form.id);
       } catch (e) {}
 
       setFormularios(prev => prev.map(f => f.id === form.id ? { ...f, activo: updatedActivo } : f));
@@ -128,20 +150,19 @@ export default function Formularios() {
     }
 
     try {
-      // 1. Eliminar respuestas y formulario en Supabase
-      await supabase.from('formulario_respuestas').delete().eq('formulario_id', id);
-      const { error: delErr } = await supabase.from('formularios').delete().eq('id', id);
-
-      if (delErr) {
-        console.warn('Aviso Supabase delete:', delErr);
-      }
-
-      // 2. Notificar API local
+      // 1. Eliminar en API local
       try {
         await fetch(getApiUrl(`/api/formularios/${id}`), { method: 'DELETE' });
       } catch (e) {}
 
+      // 2. Eliminar respuestas y formulario en Supabase
+      try {
+        await supabase.from('formulario_respuestas').delete().eq('formulario_id', id);
+        await supabase.from('formularios').delete().eq('id', id);
+      } catch (e) {}
+
       setFormularios(prev => prev.filter(f => f.id !== id));
+      await logActivity('Eliminó formulario dinámico', 'Formularios', String(id), { titulo });
     } catch (err: any) {
       alert('Error de red: ' + err.message);
     }
@@ -149,49 +170,86 @@ export default function Formularios() {
 
   const handleSaveForm = async (formData: Partial<Formulario>) => {
     try {
+      let targetSlug = formData.slug?.trim() || (editingForm?.slug ? editingForm.slug : generateSlug(formData.titulo || 'formulario'));
+
+      // Garantizar que el slug sea único
+      if (!editingForm) {
+        let uniqueSlug = targetSlug;
+        let counter = 1;
+        while (formularios.some(f => f.slug.toLowerCase() === uniqueSlug.toLowerCase())) {
+          uniqueSlug = `${targetSlug}-${counter}`;
+          counter++;
+        }
+        targetSlug = uniqueSlug;
+      }
+
       if (editingForm) {
-        // Actualizar en Supabase
-        const { error: upErr } = await supabase
-          .from('formularios')
-          .update({
-            ...formData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editingForm.id);
-
-        if (upErr) throw upErr;
-
+        // 1. Actualizar en API local
         try {
           await fetch(getApiUrl(`/api/formularios/${editingForm.id}`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
+            body: JSON.stringify({ ...formData, slug: targetSlug })
           });
         } catch (e) {}
+
+        // 2. Intentar actualizar en Supabase
+        try {
+          await supabase
+            .from('formularios')
+            .update({
+              ...formData,
+              slug: targetSlug,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', editingForm.id);
+        } catch (supaErr) {
+          console.warn('Aviso Supabase update formularios:', supaErr);
+        }
+
+        await logActivity('Actualizó formulario dinámico', 'Formularios', String(editingForm.id), {
+          titulo: formData.titulo,
+          slug: targetSlug
+        });
       } else {
-        // Crear en Supabase
         const payload = {
           ...formData,
+          slug: targetSlug,
           creado_por: user?.id || null,
-          creado_por_nombre: userName || 'Administración Cruz Verde',
+          creado_por_nombre: userName || user?.email || 'Administración Cruz Verde',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
 
-        const { error: insErr } = await supabase
-          .from('formularios')
-          .insert([payload]);
-
-        if (insErr) throw insErr;
-
+        let savedLocally = false;
         try {
-          await fetch(getApiUrl('/api/formularios'), {
+          const res = await fetch(getApiUrl('/api/formularios'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
+          if (res.ok) savedLocally = true;
         } catch (e) {}
+
+        // Intentar también en Supabase
+        try {
+          const { error: insErr } = await supabase
+            .from('formularios')
+            .insert([payload]);
+
+          if (insErr) {
+            console.warn('Aviso Supabase insert formularios:', insErr);
+          }
+        } catch (supaErr) {
+          console.warn('Aviso Supabase insert formularios:', supaErr);
+        }
+
+        await logActivity('Creó nuevo formulario dinámico', 'Formularios', targetSlug, {
+          titulo: formData.titulo,
+          slug: targetSlug
+        });
       }
+
       await loadFormularios();
     } catch (err: any) {
       console.error('Error guardando formulario:', err);

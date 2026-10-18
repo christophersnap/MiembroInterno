@@ -8,6 +8,7 @@ import {
 import { FormField, FormFieldType, Formulario } from '../../types/formulario';
 import PhoneInputWithCountry from './PhoneInputWithCountry';
 import { applyDuiMask } from '../../utils/phoneMasks';
+import { generateSlug } from '../../utils/slugify';
 
 interface FormBuilderModalProps {
   form: Formulario | null;
@@ -168,8 +169,10 @@ export default function FormBuilderModal({
 
     setSaving(true);
     try {
+      const generatedSlug = form?.slug || generateSlug(titulo.trim());
       await onSave({
         titulo: titulo.trim(),
+        slug: generatedSlug,
         descripcion: descripcion.trim(),
         categoria,
         requiere_autenticacion: requiereAutenticacion,

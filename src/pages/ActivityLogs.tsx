@@ -96,9 +96,10 @@ export default function ActivityLogs() {
     try {
       const date = new Date(dateString);
       return new Intl.DateTimeFormat('es-SV', {
+        timeZone: 'America/El_Salvador',
         year: 'numeric',
         month: 'short',
-        day: 'numeric',
+        day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',

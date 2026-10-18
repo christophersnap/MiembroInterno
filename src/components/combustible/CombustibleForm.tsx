@@ -23,15 +23,22 @@ export default function CombustibleForm({
   submitting,
   onSubmit
 }: CombustibleFormProps) {
-  const [seccionalId, setSeccionalId] = useState<string>(() => {
-    if (userSeccionalNombre) {
-      const match = seccionales.find(s => s.nombre.toLowerCase() === userSeccionalNombre.toLowerCase());
-      if (match) return String(match.id);
-    }
-    return seccionales[0] ? String(seccionales[0].id) : '';
-  });
+  const [seccionalId, setSeccionalId] = useState<string>('');
 
-  const selectedSec = seccionales.find(s => String(s.id) === seccionalId) || seccionales[0];
+  // Sincronizar seccional si el usuario tiene seccional asignada o cuando se cargan las seccionales
+  React.useEffect(() => {
+    if (userSeccionalNombre && seccionales.length > 0 && !seccionalId) {
+      const match = seccionales.find(s => s.nombre.toLowerCase().trim() === userSeccionalNombre.toLowerCase().trim());
+      if (match) {
+        setSeccionalId(String(match.id));
+      }
+    }
+  }, [userSeccionalNombre, seccionales, seccionalId]);
+
+  const selectedSec = seccionales.find(s => 
+    String(s.id) === String(seccionalId) || 
+    s.nombre.toLowerCase().trim() === seccionalId.toLowerCase().trim()
+  ) || null;
 
   const getDirectorDisplay = () => {
     if (selectedSec) {
@@ -40,19 +47,28 @@ export default function CombustibleForm({
       }
       return `(${selectedSec.nombre.toUpperCase()}) - ${defaultDirector || 'Director Asignado'}`;
     }
-    return defaultDirector || 'Director Seccional';
+    if (userSeccionalNombre) {
+      return `(${userSeccionalNombre.toUpperCase()}) - ${defaultDirector || 'Director Asignado'}`;
+    }
+    return '';
   };
 
   const getCorreoSeccional = () => {
-    if (selectedSec?.correo) return selectedSec.correo;
-    if (selectedSec?.nombre) {
-      const cleanName = selectedSec.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+    if (selectedSec) {
+      if (selectedSec.correo) return selectedSec.correo;
+      if (selectedSec.nombre) {
+        const cleanName = selectedSec.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+        return `${cleanName}@cruzverdesv.org`;
+      }
+    }
+    if (userSeccionalNombre) {
+      const cleanName = userSeccionalNombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
       return `${cleanName}@cruzverdesv.org`;
     }
     return defaultEmail || 'control_combustible@cruzverdesv.org';
   };
 
-  const [actividad, setActividad] = useState('Emergencias cotidianas');
+  const [actividad, setActividad] = useState('');
   const [entregoLiquidacion, setEntregoLiquidacion] = useState<'Si' | 'No'>('Si');
   const [motivoNoLiquidacion, setMotivoNoLiquidacion] = useState('');
   const [nombreSolicitante, setNombreSolicitante] = useState(defaultSolicitante || '');
@@ -65,7 +81,18 @@ export default function CombustibleForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!seccionalId && seccionales.length > 0) {
+    let finalSec = selectedSec;
+    if (!finalSec && seccionalId) {
+      finalSec = seccionales.find(s => 
+        String(s.id) === String(seccionalId) || 
+        s.nombre.toLowerCase().trim() === seccionalId.toLowerCase().trim()
+      ) || null;
+    }
+    if (!finalSec && userSeccionalNombre) {
+      finalSec = seccionales.find(s => s.nombre.toLowerCase().trim() === userSeccionalNombre.toLowerCase().trim()) || null;
+    }
+
+    if (!finalSec && !seccionalId && !userSeccionalNombre && seccionales.length > 0) {
       alert('Por favor seleccione una seccional.');
       return;
     }
@@ -82,9 +109,12 @@ export default function CombustibleForm({
       return;
     }
 
+    const resolvedNombre = finalSec ? finalSec.nombre : (userSeccionalNombre || 'Seccional');
+    const resolvedId = finalSec ? finalSec.id : undefined;
+
     const payload = {
-      seccional_id: selectedSec ? selectedSec.id : undefined,
-      seccional_nombre: selectedSec ? selectedSec.nombre : (userSeccionalNombre || 'Seccional'),
+      seccional_id: resolvedId,
+      seccional_nombre: resolvedNombre,
       director_nombre: getDirectorDisplay(),
       correo_electronico: getCorreoSeccional(),
       actividad: actividad.trim(),
@@ -151,8 +181,9 @@ export default function CombustibleForm({
                 value={seccionalId}
                 onChange={(e) => setSeccionalId(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none"
+                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none cursor-pointer"
               >
+                <option value="">-- Seleccione una Seccional --</option>
                 {seccionales.map((sec) => (
                   <option key={sec.id} value={sec.id}>
                     {sec.nombre}
@@ -201,6 +232,7 @@ export default function CombustibleForm({
               type="text"
               readOnly
               value={getDirectorDisplay()}
+              placeholder="Seleccione una seccional para cargar automáticamente el Director..."
               className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium cursor-not-allowed outline-none select-none"
             />
             <p className="text-2xs text-gray-500 mt-1">Asignado de forma automática según la seccional seleccionada.</p>
@@ -241,6 +273,7 @@ export default function CombustibleForm({
               type="email"
               readOnly
               value={getCorreoSeccional()}
+              placeholder="Seleccione una seccional para cargar automáticamente el correo..."
               className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium cursor-not-allowed outline-none select-none"
             />
             <p className="text-2xs text-gray-500 mt-1">Dirección oficial de la seccional configurada para recibir acuse y copia.</p>
@@ -256,7 +289,7 @@ export default function CombustibleForm({
               required
               value={actividad}
               onChange={(e) => setActividad(e.target.value)}
-              placeholder="Emergencias cotidianas"
+              placeholder="Ej: Cobertura de emergencias en turno, traslados médicos..."
               className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none"
             />
           </div>
@@ -304,7 +337,7 @@ export default function CombustibleForm({
               required={entregoLiquidacion === 'No'}
               value={motivoNoLiquidacion}
               onChange={(e) => setMotivoNoLiquidacion(e.target.value)}
-              placeholder={entregoLiquidacion === 'No' ? 'Especifique el motivo detallado...' : 'No aplica (ya fue entregada)'}
+              placeholder={entregoLiquidacion === 'No' ? 'Ej: Factura o comprobante pendiente de entrega por la gasolinera...' : 'No aplica (ya fue entregada)'}
               className={`w-full px-4 py-2.5 rounded-lg text-sm transition shadow-2xs outline-none ${
                 entregoLiquidacion === 'No'
                   ? 'bg-amber-50/50 border border-amber-300 focus:ring-2 focus:ring-amber-500 text-gray-900'
@@ -329,7 +362,7 @@ export default function CombustibleForm({
               required
               value={nombreSolicitante}
               onChange={(e) => setNombreSolicitante(e.target.value)}
-              placeholder="Nombre y Apellidos completos"
+              placeholder="Nombre y apellido del socorrista o motorista"
               className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none"
             />
           </div>
@@ -344,7 +377,7 @@ export default function CombustibleForm({
               required
               value={telefonoSolicitante}
               onChange={(e) => setTelefonoSolicitante(e.target.value)}
-              placeholder="7742-8734"
+              placeholder="Ej. 7000-0000"
               className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none"
             />
           </div>
@@ -358,7 +391,7 @@ export default function CombustibleForm({
               rows={2}
               value={observaciones}
               onChange={(e) => setObservaciones(e.target.value)}
-              placeholder="Notas para el Área Administrativa..."
+              placeholder="Detalles u observaciones adicionales de la solicitud (opcional)..."
               className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition shadow-2xs outline-none"
             />
           </div>

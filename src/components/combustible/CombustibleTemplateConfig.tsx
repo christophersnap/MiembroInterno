@@ -26,6 +26,18 @@ export default function CombustibleTemplateConfig({
       ? initialConfig.pdfBloquesOrden 
       : DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden
   }));
+
+  React.useEffect(() => {
+    if (initialConfig) {
+      setCurrentConfig(prev => ({
+        ...prev,
+        ...initialConfig,
+        pdfBloquesOrden: initialConfig.pdfBloquesOrden?.length
+          ? initialConfig.pdfBloquesOrden
+          : prev.pdfBloquesOrden
+      }));
+    }
+  }, [initialConfig]);
   const [activeSubTab, setActiveSubTab] = useState<'disenador' | 'imagenes' | 'pdf' | 'textos' | 'correo'>('disenador');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
