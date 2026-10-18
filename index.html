@@ -45,13 +45,45 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Remove loader once React mounts
-      window.addEventListener('load', () => {
-        setTimeout(() => {
-          const loader = document.getElementById('initial-loader');
-          if (loader) loader.style.display = 'none';
-        }, 500);
+      // Detección de fallos en arranque para evitar pantalla en blanco en Hostinger
+      window.addEventListener('error', function(e) {
+        var root = document.getElementById('root');
+        if (!root || root.children.length === 0) {
+          var loader = document.getElementById('initial-loader');
+          if (loader) {
+            loader.innerHTML = `
+              <div style="max-width: 480px; margin: 20px; padding: 24px; background: white; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #fee2e2; text-align: center; font-family: system-ui, sans-serif;">
+                <div style="width: 48px; height: 48px; background: #fee2e2; color: #dc2626; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto; font-size: 24px; font-weight: bold;">!</div>
+                <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #111827; font-weight: 700;">Error al iniciar el sistema en Hostinger</h3>
+                <p style="margin: 0 0 16px 0; font-size: 13px; color: #6b7280; line-height: 1.5;">Ocurrió un error en el script de la aplicación. Esto suele ocurrir si faltan variables de entorno (.env) antes de compilar o si las rutas no se reescriben correctamente.</p>
+                <div style="background: #f9fafb; padding: 10px 12px; border-radius: 8px; font-family: monospace; font-size: 11px; color: #b91c1c; text-align: left; margin-bottom: 16px; overflow-x: auto; word-break: break-all;">
+                  ${e.message || 'Error de inicialización de JavaScript'}
+                </div>
+                <div style="display: flex; gap: 8px; justify-content: center;">
+                  <button onclick="window.location.reload()" style="padding: 8px 16px; background: #001A70; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">Reintentar</button>
+                  <button onclick="window.location.href='/login'" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">Ir a Login</button>
+                </div>
+              </div>
+            `;
+          }
+        }
       });
+
+      // Timeout de seguridad: Si tras 6 segundos el sistema sigue cargando y #root está vacío
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        var loader = document.getElementById('initial-loader');
+        if (loader && (!root || root.children.length === 0)) {
+          loader.innerHTML = `
+            <div style="max-width: 460px; margin: 20px; padding: 24px; background: white; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; text-align: center; font-family: system-ui, sans-serif;">
+              <div class="spinner" style="margin: 0 auto 16px auto;"></div>
+              <h3 style="margin: 0 0 8px 0; font-size: 15px; color: #111827; font-weight: 700;">El sistema está demorando en cargar</h3>
+              <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280; line-height: 1.5;">Si acabas de desplegar en Hostinger, asegúrate de haber subido la carpeta <code>dist/</code> compilada con su archivo <code>.htaccess</code> y la conexión a internet activa.</p>
+              <button onclick="window.location.reload()" style="padding: 8px 18px; background: #001A70; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">Recargar Página</button>
+            </div>
+          `;
+        }
+      }, 6000);
     </script>
   </body>
 </html>

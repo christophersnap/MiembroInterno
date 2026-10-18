@@ -1,6 +1,7 @@
 node_modules/
 build/
-dist/
+# dist/ se incluye para despliegue automático en Hostinger con GitHub
+# dist/
 coverage/
 .DS_Store
 *.log

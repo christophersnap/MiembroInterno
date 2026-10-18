@@ -1,0 +1,43 @@
+name: Compilar y Desplegar en Hostinger
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Compilar proyecto con Vite
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://jdulcedfnxfwjhfdxxsk.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Fs7d9kXq1w2e3r4t5y6u7i8o9p0' }}
+
+      - name: Commit automático de la carpeta dist compilada (Opcional)
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add -f dist/
+          if git diff --staged --quiet; then
+            echo "No hay cambios en la compilación dist/"
+          else
+            git commit -m "Auto-build: Actualizar compilación dist para Hostinger [skip ci]"
+            git push
+          fi
+        continue-on-error: true

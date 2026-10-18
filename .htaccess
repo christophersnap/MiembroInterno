@@ -1,0 +1,46 @@
+# ==============================================================================
+# CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO RAÍZ PARA HOSTINGER + GITHUB
+# ==============================================================================
+# Este archivo permite que al desplegar automáticamente con GitHub en Hostinger,
+# el sitio sirva inmediatamente la aplicación compilada en dist/ sin necesidad
+# de mover archivos manualmente ni cambiar la configuración del servidor.
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Peticiones de recursos estáticos compilados (JavaScript, CSS, SVGs)
+  RewriteRule ^assets/(.*)$ dist/assets/$1 [L,QSA]
+  RewriteRule ^vite\.svg$ dist/vite.svg [L,QSA]
+  RewriteRule ^favicon\.(.*)$ dist/favicon.$1 [L,QSA]
+
+  # 2. Si se solicita un archivo existente dentro de dist/
+  RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
+  RewriteRule ^(.*)$ dist/$1 [L]
+
+  # 3. Si se solicita un archivo real en la raíz (ej: robots.txt, sitemap.xml)
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteCond %{REQUEST_URI} !^/(index\.html)?$
+  RewriteRule ^ - [L]
+
+  # 4. Enrutamiento SPA: Servir dist/index.html para cualquier ruta del sistema
+  # (/, /login, /personal, /inventario, /cursos, /formularios, /social, etc.)
+  RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
+  RewriteRule ^.*$ dist/index.html [L]
+
+  # 5. Regla de respaldo para servidores compartidos donde DOCUMENT_ROOT difiere
+  RewriteRule ^.*$ dist/index.html [L]
+</IfModule>
+
+# Tipos MIME para módulos modernos de JavaScript y fuentes
+<IfModule mod_mime.c>
+  AddType application/javascript .js .mjs
+  AddType text/css .css
+  AddType image/svg+xml .svg
+  AddType font/woff2 .woff2
+</IfModule>
+
+# Compresión GZIP / Brotli
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css application/javascript application/json image/svg+xml
+</IfModule>
