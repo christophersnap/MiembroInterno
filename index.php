@@ -2,22 +2,84 @@
 /**
  * Cruz Verde Salvadoreña - Enrutador PHP para Hostinger
  * 
- * Este archivo permite servir la versión compilada (dist/index.html)
- * de forma nativa e inmediata cuando se utiliza la integración automática
- * de GitHub en Hostinger.
+ * Permite servir la aplicación compilada (dist/) de forma nativa
+ * en Hostinger cuando se utiliza la integración automática con GitHub.
  */
 
-$distIndexPath = __DIR__ . '/dist/index.html';
+$distDir = __DIR__ . '/dist';
+$distIndex = $distDir . '/index.html';
 
-// 1. Si existe la compilación en dist/index.html, servirla directamente
-if (file_exists($distIndexPath)) {
+// 1. Obtener la ruta limpia de la petición
+$requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$requestUri = urldecode($requestUri);
+
+// Evitar Directory Traversal
+$cleanUri = ltrim($requestUri, '/');
+if (strpos($cleanUri, '..') !== false) {
+    http_response_code(400);
+    exit('Petición no válida');
+}
+
+// 2. Si se solicita un archivo estático compilado en assets/ o dist/assets/
+$possiblePaths = [
+    $distDir . '/' . $cleanUri,
+    __DIR__ . '/' . $cleanUri,
+];
+
+// Si la URL empieza con dist/, también buscar directo
+if (strpos($cleanUri, 'dist/') === 0) {
+    $possiblePaths[] = __DIR__ . '/' . substr($cleanUri, 5);
+}
+
+foreach ($possiblePaths as $file) {
+    if (!empty($cleanUri) && file_exists($file) && !is_dir($file)) {
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+        $mimes = [
+            'js'    => 'application/javascript; charset=UTF-8',
+            'mjs'   => 'application/javascript; charset=UTF-8',
+            'css'   => 'text/css; charset=UTF-8',
+            'svg'   => 'image/svg+xml',
+            'png'   => 'image/png',
+            'jpg'   => 'image/jpeg',
+            'jpeg'  => 'image/jpeg',
+            'gif'   => 'image/gif',
+            'webp'  => 'image/webp',
+            'ico'   => 'image/x-icon',
+            'json'  => 'application/json; charset=UTF-8',
+            'woff'  => 'font/woff',
+            'woff2' => 'font/woff2',
+            'ttf'   => 'font/ttf',
+            'txt'   => 'text/plain; charset=UTF-8',
+        ];
+
+        if (isset($mimes[$ext])) {
+            header('Content-Type: ' . $mimes[$ext]);
+        }
+        
+        // Cache agresivo para assets compilados por Vite con hash en el nombre
+        if (strpos($file, '/assets/') !== false) {
+            header('Cache-Control: public, max-age=31536000, immutable');
+        } else {
+            header('Cache-Control: no-cache, must-revalidate');
+        }
+        
+        header('Content-Length: ' . filesize($file));
+        readfile($file);
+        exit;
+    }
+}
+
+// 3. Servir la aplicación React compilada (dist/index.html)
+if (file_exists($distIndex)) {
     header('Content-Type: text/html; charset=UTF-8');
-    header('X-App-Engine: CruzVerde-Hostinger-Production');
-    readfile($distIndexPath);
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    header('X-CruzVerde-Host: Hostinger-Production');
+    readfile($distIndex);
     exit;
 }
 
-// 2. Si no existe dist/ aún, mostrar guía paso a paso
+// 4. Si la carpeta dist/ aún no existe, mostrar pantalla instructiva
+http_response_code(503);
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!DOCTYPE html>
@@ -25,116 +87,73 @@ header('Content-Type: text/html; charset=UTF-8');
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cruz Verde Salvadoreña - Despliegue en Proceso</title>
+  <title>Cruz Verde Salvadoreña - Configuración Pendiente</title>
   <style>
     body {
-      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background-color: #f8fafc;
-      margin: 0;
-      padding: 24px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
       display: flex;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      color: #0f172a;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
     }
     .card {
       background: white;
-      max-width: 540px;
-      width: 100%;
-      padding: 36px 32px;
-      border-radius: 20px;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+      max-width: 520px;
+      padding: 32px;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
       border: 1px solid #e2e8f0;
       text-align: center;
     }
     .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: #eff6ff;
-      color: #1d4ed8;
-      padding: 6px 14px;
+      display: inline-block;
+      padding: 4px 12px;
+      background: #dcfce7;
+      color: #15803d;
       border-radius: 9999px;
       font-size: 13px;
       font-weight: 600;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
-    h1 {
-      font-size: 22px;
-      font-weight: 800;
-      color: #001A70;
-      margin: 0 0 12px 0;
-    }
-    p {
-      color: #475569;
-      font-size: 14px;
-      line-height: 1.6;
-      margin: 0 0 20px 0;
-    }
-    .step-box {
+    h1 { font-size: 20px; margin: 0 0 12px 0; color: #111827; }
+    p { font-size: 14px; color: #4b5563; line-height: 1.6; margin: 0 0 20px 0; }
+    .box {
       background: #f1f5f9;
-      border: 1px solid #cbd5e1;
-      border-radius: 12px;
-      padding: 16px;
-      text-align: left;
-      font-size: 13px;
-      margin-bottom: 24px;
-    }
-    .step-box ol {
-      margin: 0;
-      padding-left: 20px;
-      color: #334155;
-    }
-    .step-box li {
-      margin-bottom: 8px;
-    }
-    .step-box code {
-      background: #e2e8f0;
-      padding: 2px 6px;
-      border-radius: 4px;
+      border-radius: 8px;
+      padding: 14px;
       font-family: monospace;
-      font-weight: 600;
-      color: #001A70;
+      font-size: 13px;
+      text-align: left;
+      color: #334155;
+      margin-bottom: 20px;
     }
     .btn {
       display: inline-block;
-      background: #001A70;
+      background: #008f39;
       color: white;
-      padding: 12px 24px;
-      border-radius: 10px;
+      padding: 10px 20px;
+      border-radius: 8px;
       text-decoration: none;
-      font-weight: 700;
+      font-weight: 600;
       font-size: 14px;
-      transition: background 0.2s;
-    }
-    .btn:hover {
-      background: #001250;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="badge">
-      <span>⚙️</span> Configuración de GitHub en Hostinger
+    <span class="badge">Cruz Verde Salvadoreña</span>
+    <h1>Preparando Sistema en Hostinger</h1>
+    <p>El código fuente se ha descargado correctamente desde GitHub, pero falta subir o compilar la carpeta <strong>dist/</strong> que contiene la aplicación para producción.</p>
+    <div class="box">
+      <strong>Opción rápida:</strong><br>
+      Asegúrate de que la carpeta <code>dist/</code> esté commiteada en tu repositorio de GitHub para que Hostinger la descargue automáticamente.
     </div>
-    <h1>Despliegue recibido en Hostinger</h1>
-    <p>
-      Hostinger ha sincronizado tu repositorio de GitHub exitosamente. Sin embargo, para que el sistema funcione en línea, necesita incluir la carpeta compilada <strong>dist/</strong>.
-    </p>
-
-    <div class="step-box">
-      <strong>Pasos sencillos para activar el sistema:</strong>
-      <ol style="margin-top: 10px;">
-        <li>En tu computadora o terminal ejecuta: <code>npm run build</code></li>
-        <li>Haz commit y push a GitHub:
-          <br><code>git add . && git commit -m "Compilación para Hostinger" && git push</code>
-        </li>
-        <li>Hostinger sincronizará automáticamente la carpeta <strong>dist/</strong> y el sistema cargará al instante.</li>
-      </ol>
-    </div>
-
-    <a href="javascript:location.reload()" class="btn">Recargar y Verificar</a>
+    <a href="javascript:location.reload()" class="btn">Recargar página</a>
   </div>
 </body>
 </html>

@@ -27,7 +27,7 @@ jobs:
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://jdulcedfnxfwjhfdxxsk.supabase.co' }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Fs7d9kXq1w2e3r4t5y6u7i8o9p0' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Fsj872ZIHQ3AmAwwT3tD8g_1mORaBhD' }}
 
       - name: Commit automático de la carpeta dist compilada (Opcional)
         run: |
