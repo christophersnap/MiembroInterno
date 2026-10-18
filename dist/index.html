@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cruz Verde Salvadoreña - Admin</title>
+    <meta name="description" content="Sistema web para administrar el personal de Cruz Verde Salvadoreña, flota vehicular, solicitudes de combustible, solicitudes de compra y mantenimiento, cursos, certificaciones y seccionales." />
+    <meta property="og:title" content="Cruz Verde Salvadoreña - Admin" />
+    <meta property="og:description" content="Sistema web para administrar el personal de Cruz Verde Salvadoreña, flota vehicular, solicitudes de combustible, solicitudes de compra y mantenimiento, cursos, certificaciones y seccionales." />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f9fafb;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      .app-loader {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #f9fafb;
+      }
+      .app-spinner {
+        width: 44px;
+        height: 44px;
+        border: 4px solid #e5e7eb;
+        border-top-color: #008f39;
+        border-radius: 50%;
+        animation: cv-spin 0.8s linear infinite;
+        margin-bottom: 16px;
+      }
+      @keyframes cv-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-yFBXepBK.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B2IqBGF7.css">
+  </head>
+  <body>
+    <div id="root">
+      <div class="app-loader">
+        <div class="app-spinner"></div>
+        <div style="color: #374151; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;">Cargando Cruz Verde Salvadoreña...</div>
+      </div>
+    </div>
+    <script>
+      (function() {
+        var isDevServer = window.location.port === '3000' || 
+                          window.location.hostname === 'localhost' || 
+                          window.location.hostname === '127.0.0.1';
+        if (!isDevServer) {
+          setTimeout(function() {
+            var loader = document.querySelector('.app-loader');
+            if (loader) {
+              console.warn('[Cruz Verde] Detectado hosting estático sin Vite. Cargando bundle compilado...');
+              fetch('dist/index.html')
+                .then(function(res) { return res.text(); })
+                .then(function(html) {
+                  var jsMatch = html.match(/src="(\/assets\/[^"]+\.js)"/);
+                  var cssMatch = html.match(/href="(\/assets\/[^"]+\.css)"/);
+                  if (cssMatch && cssMatch[1]) {
+                    var link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = cssMatch[1];
+                    document.head.appendChild(link);
+                  }
+                  if (jsMatch && jsMatch[1]) {
+                    var script = document.createElement('script');
+                    script.type = 'module';
+                    script.crossOrigin = 'anonymous';
+                    script.src = jsMatch[1];
+                    document.body.appendChild(script);
+                  }
+                })
+                .catch(function(err) {
+                  console.error('Error cargando bundle:', err);
+                  // Redirigir directamente al enrutador PHP
+                  if (!window.location.pathname.endsWith('index.php')) {
+                    window.location.replace('index.php');
+                  }
+                });
+            }
+          }, 1500);
+        }
+      })();
+    </script>
+  </body>
+</html>
