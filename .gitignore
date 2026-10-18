@@ -1,9 +1,13 @@
 node_modules/
 build/
-# dist/ se incluye para despliegue automático en Hostinger con GitHub
-# dist/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Permitir y forzar inclusion de dist y assets para despliegue en Hostinger y sincronizacion con GitHub
+!dist/
+!dist/**
+!assets/
+!assets/**

@@ -2,42 +2,55 @@
 # CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO HOSTINGER + GITHUB
 # ==============================================================================
 
+# Prioridad de carga: index.php procesa dist/index.html o sirve dist/ directamente
+DirectoryIndex index.php dist/index.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. Redirigir assets de Vite hacia la carpeta dist/assets si se solicitan desde la raíz
-  RewriteCond %{REQUEST_URI} ^/assets/(.*)$
+  # 1. Si solicitan archivos estáticos de assets (/assets/... o /subcarpeta/assets/...)
+  # Si el archivo existe físicamente en assets/ o dist/assets/
+  RewriteCond %{DOCUMENT_ROOT}/assets/$1 -f [OR]
   RewriteCond %{DOCUMENT_ROOT}/dist/assets/$1 -f
-  RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
+  RewriteRule ^(?:.*/)?assets/(.*)$ assets/$1 [L,NC]
 
-  # 2. Si el archivo solicitado existe físicamente en dist/
+  # 2. Servir cualquier archivo físico que exista en la raíz (ej: favicon, assets, robots.txt)
+  # IMPORTANTE: Excluir index.html raíz para no servir el template Vite sin compilar
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteCond %{REQUEST_URI} !^/index\.html$ [NC]
+  RewriteRule ^ - [L]
+
+  # 3. Servir archivos físicos que existan dentro de dist/
   RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
   RewriteRule ^(.*)$ dist/$1 [L]
 
-  # 3. Si el archivo solicitado existe en la raíz física (ej: favicon, robots)
-  RewriteCond %{REQUEST_FILENAME} -f
-  RewriteRule ^ - [L]
+  # 4. PREVENCIÓN CRÍTICA: Si la petición termina en una extensión de archivo estático
+  # (.js, .css, .png, etc.) y NO se encontró, devolver 404 en lugar de devolver HTML (dist/index.html).
+  # Esto evita el error fatal: "Expected a JavaScript module script but received text/html"
+  RewriteCond %{REQUEST_URI} \.(js|mjs|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|json|webp|map)$ [NC]
+  RewriteRule ^ - [R=404,L]
 
-  # 4. Enrutamiento SPA: Servir dist/index.html para cualquier ruta (login, socorristas, etc.)
+  # 5. Enrutamiento SPA: Servir la aplicación React (dist/index.html) para la raíz y rutas internas
   RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
-  RewriteRule ^ dist/index.html [L]
+  RewriteRule ^.*$ dist/index.html [L]
 
-  # 5. En caso alternativo, delegar al enrutador index.php
+  # 6. Delegar al enrutador index.php como respaldo definitivo
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^ index.php [L]
+  RewriteRule ^.*$ index.php [L]
 </IfModule>
 
-# Tipos MIME para módulos de JavaScript y fuentes web
+# Tipos MIME para módulos de JavaScript modernos y fuentes
 <IfModule mod_mime.c>
   AddType application/javascript .js .mjs
   AddType text/css .css
   AddType image/svg+xml .svg
   AddType font/woff2 .woff2
+  AddType application/json .json
 </IfModule>
 
-# Compresión GZIP
+# Compresión GZIP para máxima velocidad
 <IfModule mod_deflate.c>
   AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css application/javascript application/json image/svg+xml
 </IfModule>

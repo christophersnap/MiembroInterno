@@ -6,8 +6,23 @@
  * en Hostinger cuando se utiliza la integración automática con GitHub.
  */
 
-$distDir = __DIR__ . '/dist';
-$distIndex = $distDir . '/index.html';
+// Posibles ubicaciones de la compilación dist
+$candidates = [
+    __DIR__ . '/dist',
+    __DIR__ . '/public_html/dist',
+    dirname(__DIR__) . '/dist',
+];
+
+$distDir = null;
+$distIndex = null;
+
+foreach ($candidates as $cand) {
+    if (file_exists($cand . '/index.html')) {
+        $distDir = $cand;
+        $distIndex = $cand . '/index.html';
+        break;
+    }
+}
 
 // 1. Obtener la ruta limpia de la petición
 $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -20,57 +35,64 @@ if (strpos($cleanUri, '..') !== false) {
     exit('Petición no válida');
 }
 
-// 2. Si se solicita un archivo estático compilado en assets/ o dist/assets/
-$possiblePaths = [
-    $distDir . '/' . $cleanUri,
-    __DIR__ . '/' . $cleanUri,
-];
+// 2. Si se localizó dist/ y se solicita un archivo estático
+if ($distDir && !empty($cleanUri)) {
+    $possiblePaths = [
+        $distDir . '/' . $cleanUri,
+        __DIR__ . '/' . $cleanUri,
+    ];
 
-// Si la URL empieza con dist/, también buscar directo
-if (strpos($cleanUri, 'dist/') === 0) {
-    $possiblePaths[] = __DIR__ . '/' . substr($cleanUri, 5);
-}
+    if (strpos($cleanUri, 'assets/') !== false) {
+        $assetSub = substr($cleanUri, strpos($cleanUri, 'assets/'));
+        $possiblePaths[] = $distDir . '/' . $assetSub;
+        $possiblePaths[] = __DIR__ . '/' . $assetSub;
+    }
 
-foreach ($possiblePaths as $file) {
-    if (!empty($cleanUri) && file_exists($file) && !is_dir($file)) {
-        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-        $mimes = [
-            'js'    => 'application/javascript; charset=UTF-8',
-            'mjs'   => 'application/javascript; charset=UTF-8',
-            'css'   => 'text/css; charset=UTF-8',
-            'svg'   => 'image/svg+xml',
-            'png'   => 'image/png',
-            'jpg'   => 'image/jpeg',
-            'jpeg'  => 'image/jpeg',
-            'gif'   => 'image/gif',
-            'webp'  => 'image/webp',
-            'ico'   => 'image/x-icon',
-            'json'  => 'application/json; charset=UTF-8',
-            'woff'  => 'font/woff',
-            'woff2' => 'font/woff2',
-            'ttf'   => 'font/ttf',
-            'txt'   => 'text/plain; charset=UTF-8',
-        ];
+    if (strpos($cleanUri, 'dist/') === 0) {
+        $possiblePaths[] = $distDir . '/' . substr($cleanUri, 5);
+        $possiblePaths[] = __DIR__ . '/' . substr($cleanUri, 5);
+    }
 
-        if (isset($mimes[$ext])) {
-            header('Content-Type: ' . $mimes[$ext]);
+    foreach ($possiblePaths as $file) {
+        if (file_exists($file) && !is_dir($file)) {
+            $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+            $mimes = [
+                'js'    => 'application/javascript; charset=UTF-8',
+                'mjs'   => 'application/javascript; charset=UTF-8',
+                'css'   => 'text/css; charset=UTF-8',
+                'svg'   => 'image/svg+xml',
+                'png'   => 'image/png',
+                'jpg'   => 'image/jpeg',
+                'jpeg'  => 'image/jpeg',
+                'gif'   => 'image/gif',
+                'webp'  => 'image/webp',
+                'ico'   => 'image/x-icon',
+                'json'  => 'application/json; charset=UTF-8',
+                'woff'  => 'font/woff',
+                'woff2' => 'font/woff2',
+                'ttf'   => 'font/ttf',
+                'txt'   => 'text/plain; charset=UTF-8',
+            ];
+
+            if (isset($mimes[$ext])) {
+                header('Content-Type: ' . $mimes[$ext]);
+            }
+            
+            if (strpos($file, '/assets/') !== false) {
+                header('Cache-Control: public, max-age=31536000, immutable');
+            } else {
+                header('Cache-Control: no-cache, must-revalidate');
+            }
+            
+            header('Content-Length: ' . filesize($file));
+            readfile($file);
+            exit;
         }
-        
-        // Cache agresivo para assets compilados por Vite con hash en el nombre
-        if (strpos($file, '/assets/') !== false) {
-            header('Cache-Control: public, max-age=31536000, immutable');
-        } else {
-            header('Cache-Control: no-cache, must-revalidate');
-        }
-        
-        header('Content-Length: ' . filesize($file));
-        readfile($file);
-        exit;
     }
 }
 
 // 3. Servir la aplicación React compilada (dist/index.html)
-if (file_exists($distIndex)) {
+if ($distIndex && file_exists($distIndex)) {
     header('Content-Type: text/html; charset=UTF-8');
     header('Cache-Control: no-cache, no-store, must-revalidate');
     header('X-CruzVerde-Host: Hostinger-Production');
@@ -78,82 +100,180 @@ if (file_exists($distIndex)) {
     exit;
 }
 
-// 4. Si la carpeta dist/ aún no existe, mostrar pantalla instructiva
+// 4. Si la carpeta dist/ aún no existe en el servidor, mostrar pantalla instructiva clara
 http_response_code(503);
 header('Content-Type: text/html; charset=UTF-8');
+
+$dirContents = @scandir(__DIR__) ?: [];
+$foldersOnly = array_filter($dirContents, function($item) {
+    return $item !== '.' && $item !== '..' && is_dir(__DIR__ . '/' . $item);
+});
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cruz Verde Salvadoreña - Configuración Pendiente</title>
+  <title>Cruz Verde Salvadoreña - Despliegue en Hostinger</title>
   <style>
     body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f1f5f9;
       color: #0f172a;
       display: flex;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
       margin: 0;
-      padding: 20px;
+      padding: 24px;
       box-sizing: border-box;
     }
     .card {
-      background: white;
-      max-width: 520px;
-      padding: 32px;
-      border-radius: 16px;
-      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+      background: #ffffff;
+      max-width: 600px;
+      width: 100%;
+      padding: 36px 32px;
+      border-radius: 20px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
       border: 1px solid #e2e8f0;
+    }
+    .header {
       text-align: center;
+      margin-bottom: 24px;
     }
     .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      background: #dcfce7;
-      color: #15803d;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
       border-radius: 9999px;
       font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }
-    h1 { font-size: 20px; margin: 0 0 12px 0; color: #111827; }
-    p { font-size: 14px; color: #4b5563; line-height: 1.6; margin: 0 0 20px 0; }
-    .box {
-      background: #f1f5f9;
-      border-radius: 8px;
-      padding: 14px;
-      font-family: monospace;
-      font-size: 13px;
-      text-align: left;
-      color: #334155;
+    h1 {
+      font-size: 22px;
+      margin: 16px 0 8px 0;
+      color: #111827;
+      font-weight: 800;
+    }
+    p.subtitle {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.5;
+      margin: 0;
+    }
+    .solution-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 18px;
       margin-bottom: 20px;
+      text-align: left;
+    }
+    .solution-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #008f39;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .steps {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 13px;
+      color: #334155;
+      line-height: 1.7;
+    }
+    .steps code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      color: #0f172a;
+    }
+    .diagnostics {
+      background: #0f172a;
+      color: #94a3b8;
+      border-radius: 10px;
+      padding: 14px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      margin-bottom: 24px;
+      text-align: left;
+      overflow-x: auto;
+    }
+    .diagnostics strong {
+      color: #f8fafc;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
     }
     .btn {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       background: #008f39;
-      color: white;
-      padding: 10px 20px;
-      border-radius: 8px;
+      color: #ffffff;
+      padding: 12px 24px;
+      border-radius: 10px;
       text-decoration: none;
       font-weight: 600;
       font-size: 14px;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 6px -1px rgba(0, 143, 57, 0.2);
+    }
+    .btn:hover {
+      background: #007a31;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <span class="badge">Cruz Verde Salvadoreña</span>
-    <h1>Preparando Sistema en Hostinger</h1>
-    <p>El código fuente se ha descargado correctamente desde GitHub, pero falta subir o compilar la carpeta <strong>dist/</strong> que contiene la aplicación para producción.</p>
-    <div class="box">
-      <strong>Opción rápida:</strong><br>
-      Asegúrate de que la carpeta <code>dist/</code> esté commiteada en tu repositorio de GitHub para que Hostinger la descargue automáticamente.
+    <div class="header">
+      <div class="badge">
+        <span>🚑</span> Cruz Verde Salvadoreña
+      </div>
+      <h1>Despliegue en Hostinger</h1>
+      <p class="subtitle">
+        El repositorio se ha sincronizado correctamente en Hostinger, pero la carpeta compilada <strong>dist/</strong> aún no ha sido descargada.
+      </p>
     </div>
-    <a href="javascript:location.reload()" class="btn">Recargar página</a>
+
+    <div class="solution-box">
+      <div class="solution-title">
+        <span>🔑</span> Paso necesario en GitHub (Permiso de Escritura para GitHub Actions):
+      </div>
+      <ol class="steps">
+        <li>Abre tu repositorio en <strong>GitHub</strong>.</li>
+        <li>Entra a <strong>Settings</strong> (pestaña superior derecha de la rueda dentada).</li>
+        <li>En la barra lateral izquierda, haz clic en <strong>Actions</strong> &gt; <strong>General</strong>.</li>
+        <li>Baja hasta la sección <strong>Workflow permissions</strong>.</li>
+        <li>Marca la opción: <strong>"Read and write permissions"</strong>.</li>
+        <li>Haz clic en el botón verde <strong>Save</strong>.</li>
+        <li>Vuelve a la pestaña <strong>Actions</strong> de tu repositorio, entra al último workflow y haz clic en <strong>Re-run all jobs</strong>.</li>
+      </ol>
+    </div>
+
+    <div class="diagnostics">
+      <div><strong>Ubicación actual:</strong> <?php echo htmlspecialchars(__DIR__); ?></div>
+      <div><strong>Carpetas encontradas:</strong> <?php echo htmlspecialchars(implode(', ', $foldersOnly) ?: 'Ninguna'); ?></div>
+      <div><strong>Buscando:</strong> <?php echo htmlspecialchars(__DIR__ . '/dist/index.html'); ?> (No encontrado aún)</div>
+    </div>
+
+    <div class="actions">
+      <button onclick="location.reload()" class="btn">🔄 Recargar Página</button>
+    </div>
   </div>
 </body>
 </html>

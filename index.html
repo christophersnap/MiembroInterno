@@ -44,5 +44,46 @@
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function() {
+        var isDevServer = window.location.port === '3000' || 
+                          window.location.hostname === 'localhost' || 
+                          window.location.hostname === '127.0.0.1';
+        if (!isDevServer) {
+          setTimeout(function() {
+            var loader = document.querySelector('.app-loader');
+            if (loader) {
+              console.warn('[Cruz Verde] Detectado hosting estático sin Vite. Cargando bundle compilado...');
+              fetch('dist/index.html')
+                .then(function(res) { return res.text(); })
+                .then(function(html) {
+                  var jsMatch = html.match(/src="(\/assets\/[^"]+\.js)"/);
+                  var cssMatch = html.match(/href="(\/assets\/[^"]+\.css)"/);
+                  if (cssMatch && cssMatch[1]) {
+                    var link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = cssMatch[1];
+                    document.head.appendChild(link);
+                  }
+                  if (jsMatch && jsMatch[1]) {
+                    var script = document.createElement('script');
+                    script.type = 'module';
+                    script.crossOrigin = 'anonymous';
+                    script.src = jsMatch[1];
+                    document.body.appendChild(script);
+                  }
+                })
+                .catch(function(err) {
+                  console.error('Error cargando bundle:', err);
+                  // Redirigir directamente al enrutador PHP
+                  if (!window.location.pathname.endsWith('index.php')) {
+                    window.location.replace('index.php');
+                  }
+                });
+            }
+          }, 1500);
+        }
+      })();
+    </script>
   </body>
 </html>
