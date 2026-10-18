@@ -53,6 +53,27 @@ if ($distDir && !empty($cleanUri)) {
         $possiblePaths[] = __DIR__ . '/' . substr($cleanUri, 5);
     }
 
+    // Respaldo Inteligente: Si el navegador solicita un bundle principal (ej: index-*.js o index-*.css)
+    // que fue reemplazado por un nuevo hash o proviene de una caché anterior, localizar el bundle actual disponible
+    if (preg_match('/assets\/index-[a-zA-Z0-9_-]+\.js$/', $cleanUri)) {
+        $jsFiles = array_merge(
+            glob($distDir . '/assets/index-*.js') ?: [],
+            glob(__DIR__ . '/assets/index-*.js') ?: []
+        );
+        if (!empty($jsFiles)) {
+            $possiblePaths[] = end($jsFiles);
+        }
+    }
+    if (preg_match('/assets\/index-[a-zA-Z0-9_-]+\.css$/', $cleanUri)) {
+        $cssFiles = array_merge(
+            glob($distDir . '/assets/index-*.css') ?: [],
+            glob(__DIR__ . '/assets/index-*.css') ?: []
+        );
+        if (!empty($cssFiles)) {
+            $possiblePaths[] = end($cssFiles);
+        }
+    }
+
     foreach ($possiblePaths as $file) {
         if (file_exists($file) && !is_dir($file)) {
             $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
@@ -78,6 +99,8 @@ if ($distDir && !empty($cleanUri)) {
                 header('Content-Type: ' . $mimes[$ext]);
             }
             
+            header('Access-Control-Allow-Origin: *');
+
             if (strpos($file, '/assets/') !== false) {
                 header('Cache-Control: public, max-age=31536000, immutable');
             } else {
@@ -89,9 +112,20 @@ if ($distDir && !empty($cleanUri)) {
             exit;
         }
     }
+
+    // 2.5. Si se solicitó un archivo estático específico (.js, .css, etc.) y NO se encontró
+    // devolver 404 en texto plano para que el navegador sepa el estado y no intente parsear HTML
+    $ext = strtolower(pathinfo($cleanUri, PATHINFO_EXTENSION));
+    $staticExts = ['js', 'mjs', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'woff', 'woff2', 'ttf', 'json', 'map'];
+    if (in_array($ext, $staticExts)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        header('Access-Control-Allow-Origin: *');
+        exit("Archivo estático no encontrado en el servidor: {$cleanUri}");
+    }
 }
 
-// 3. Servir la aplicación React compilada (dist/index.html)
+// 3. Servir la aplicación React compilada (dist/index.html) para rutas SPA
 if ($distIndex && file_exists($distIndex)) {
     header('Content-Type: text/html; charset=UTF-8');
     header('Cache-Control: no-cache, no-store, must-revalidate');

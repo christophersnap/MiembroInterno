@@ -2,40 +2,32 @@
 # CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO HOSTINGER + GITHUB
 # ==============================================================================
 
-DirectoryIndex dist/index.html index.php index.html
+DirectoryIndex index.php dist/index.html index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. Servir archivos físicos que existan directamente (assets, imágenes, etc.)
-  # IMPORTANTE: Excluir index.html de la raíz para no servir el template sin compilar
+  # 1. Servir archivos físicos existentes en la raíz (assets, favicon, robots.txt, etc.)
+  # Excluir index.html de la raíz para no servir el template de desarrollo
   RewriteCond %{REQUEST_FILENAME} -f
   RewriteCond %{REQUEST_URI} !^/index\.html$ [NC]
   RewriteRule ^ - [L]
 
-  # 2. Si el archivo físico existe dentro de dist/ (ej: dist/assets/archivo.js o dist/favicon.ico)
+  # 2. Si el archivo físico solicitado existe dentro de dist/
+  RewriteCond dist%{REQUEST_URI} -f [OR]
   RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
   RewriteRule ^(.*)$ dist/$1 [L]
 
-  # 3. Si se solicita la raíz (/) o /index.html explícitamente, servir dist/index.html
-  RewriteRule ^$ dist/index.html [L]
-  RewriteRule ^index\.html$ dist/index.html [L]
+  # 3. Si se solicita la raíz (/) o /index.html explícitamente, delegar al router index.php
+  RewriteRule ^$ index.php [L]
+  RewriteRule ^index\.html$ index.php [L]
 
-  # 4. Evitar devolver HTML si un recurso estático (.js, .css, etc.) no existe físicamente
-  RewriteCond %{REQUEST_URI} \.(js|mjs|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|json|webp|map)$ [NC]
-  RewriteRule ^ - [R=404,L]
-
-  # 5. Enrutamiento SPA: Cualquier otra ruta no física (/login, /socorristas, /vehiculos, etc.)
-  # se envía a dist/index.html
+  # 4. Cualquier otra petición (rutas SPA /login, /socorristas y resolución inteligente de assets)
+  # se delega a index.php, que se encarga de servir dist/index.html o el archivo correspondiente
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^.*$ dist/index.html [L]
-
-  # 6. Fallback final a index.php si dist/index.html no estuviese presente
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^.*$ index.php [L]
+  RewriteRule ^(.*)$ index.php [L]
 </IfModule>
 
 # Tipos MIME para módulos de JavaScript modernos y fuentes
