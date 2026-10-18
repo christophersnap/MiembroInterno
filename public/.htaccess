@@ -6,7 +6,6 @@ DirectoryIndex index.html index.php
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /
 
   # Servir archivos físicos existentes directamente
   RewriteCond %{REQUEST_FILENAME} -f

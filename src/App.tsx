@@ -63,6 +63,16 @@ const ProtectedRoute = ({ children, requiredPermission, anyPermission }: { child
   return <>{children}</>;
 };
 
+const getRouterBasename = () => {
+  if (typeof window !== 'undefined') {
+    const pathname = window.location.pathname;
+    if (pathname.startsWith('/miembros')) {
+      return '/miembros';
+    }
+  }
+  return '';
+};
+
 export default function App() {
   React.useEffect(() => {
     const loader = document.getElementById('initial-loader');
@@ -75,7 +85,7 @@ export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <Router>
+        <Router basename={getRouterBasename()}>
           <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="text-xl text-gray-500">Cargando aplicación...</div></div>}>
           <Routes>
             {/* Public Routes */}

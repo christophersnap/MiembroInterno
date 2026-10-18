@@ -57,15 +57,22 @@
 
         if (!isDevServer) {
           // Variables sincronizadas automáticamente durante el build
-          var CURRENT_JS_BUNDLE = '/assets/index-DwOccFMz.js';
-          var CURRENT_CSS_BUNDLE = '/assets/index-B2IqBGF7.css';
+          var CURRENT_JS_BUNDLE = './assets/index-BU6ZrGWt.js';
+          var CURRENT_CSS_BUNDLE = './assets/index-B2IqBGF7.css';
+
+          // Resolver ruta base para subcarpetas (ej: /miembros/)
+          var subPath = (window.location.pathname.indexOf('/miembros') !== -1) ? '/miembros/assets/' : './assets/';
+          var jsFilename = CURRENT_JS_BUNDLE.split('/').pop();
+          var cssFilename = CURRENT_CSS_BUNDLE.split('/').pop();
+          var resolvedJs = subPath + jsFilename;
+          var resolvedCss = subPath + cssFilename;
 
           // Cargar CSS compilado de inmediato
           if (CURRENT_CSS_BUNDLE && !document.querySelector('link[href*="index-"]')) {
             var link = document.createElement('link');
             link.rel = 'stylesheet';
             link.crossOrigin = 'anonymous';
-            link.href = CURRENT_CSS_BUNDLE;
+            link.href = resolvedCss;
             document.head.appendChild(link);
           }
 
@@ -74,7 +81,7 @@
             var script = document.createElement('script');
             script.type = 'module';
             script.crossOrigin = 'anonymous';
-            script.src = CURRENT_JS_BUNDLE;
+            script.src = resolvedJs;
             script.onerror = function() {
               caughtErrors.push('No se pudo descargar el archivo principal: ' + CURRENT_JS_BUNDLE);
             };

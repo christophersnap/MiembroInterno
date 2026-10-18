@@ -35,6 +35,16 @@ if (strpos($cleanUri, '..') !== false) {
     exit('Petición no válida');
 }
 
+// Soporte para subcarpetas (ej: /miembros/)
+$scriptDir = trim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if (!empty($scriptDir) && strpos($cleanUri, $scriptDir . '/') === 0) {
+    $cleanUri = substr($cleanUri, strlen($scriptDir) + 1);
+} elseif (strpos($cleanUri, 'miembros/') === 0) {
+    $cleanUri = substr($cleanUri, 9);
+} elseif ($cleanUri === 'miembros') {
+    $cleanUri = '';
+}
+
 // 2. Si se localizó dist/ y se solicita un archivo estático
 if ($distDir && !empty($cleanUri)) {
     $possiblePaths = [

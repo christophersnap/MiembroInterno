@@ -12,9 +12,9 @@ try {
   const distHtml = fs.readFileSync(distHtmlPath, 'utf-8');
   let rootHtml = fs.readFileSync(rootHtmlPath, 'utf-8');
 
-  // Extraer el hash actual del script principal y css
-  const jsMatch = distHtml.match(/src="(\/assets\/index-[^"]+\.js)"/);
-  const cssMatch = distHtml.match(/href="(\/assets\/index-[^"]+\.css)"/);
+  // Extraer el hash actual del script principal y css (relativo o absoluto)
+  const jsMatch = distHtml.match(/src="([^"]*assets\/index-[^"]+\.js)"/);
+  const cssMatch = distHtml.match(/href="([^"]*assets\/index-[^"]+\.css)"/);
 
   if (jsMatch && cssMatch) {
     const jsPath = jsMatch[1];

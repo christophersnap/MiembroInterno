@@ -6,7 +6,6 @@ DirectoryIndex index.php dist/index.html index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /
 
   # 1. Servir archivos físicos existentes en la raíz (assets, favicon, robots.txt, etc.)
   # Excluir index.html de la raíz para no servir el template de desarrollo
