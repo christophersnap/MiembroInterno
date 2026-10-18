@@ -56,16 +56,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Temporizador de seguridad: si la conexión a Supabase se retrasa o cuelga, desbloquear la interfaz
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 4500);
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchUserRoleAndPermissions(session.user.id);
       } else {
+        clearTimeout(safetyTimer);
         setLoading(false);
       }
     }).catch(err => {
       console.error('Error getting session:', err);
+      clearTimeout(safetyTimer);
       setLoading(false);
     });
 
@@ -83,7 +90,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchUserRoleAndPermissions = async (userId: string) => {

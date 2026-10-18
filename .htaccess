@@ -2,42 +2,37 @@
 # CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO HOSTINGER + GITHUB
 # ==============================================================================
 
-# Prioridad de carga: servir la app compilada en dist/ o procesar por index.php
-DirectoryIndex dist/index.html index.php
+DirectoryIndex dist/index.html index.php index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. Reescribir la raíz (/) o /index.html directamente a dist/index.html compilado
-  RewriteRule ^$ dist/index.html [L]
-  RewriteRule ^index\.html$ dist/index.html [L]
-
-  # 2. Servir archivos estáticos de assets (/assets/... o /cualquier-ruta/assets/...)
-  RewriteRule ^(?:.*/)?assets/(.*)$ assets/$1 [L,NC]
-
-  # 3. Servir cualquier archivo físico que exista en la raíz (ej: favicon, assets, robots.txt)
-  # Excluir index.html para evitar servir el template fuente no transpilado
+  # 1. Servir archivos físicos que existan directamente (assets, imágenes, etc.)
+  # IMPORTANTE: Excluir index.html de la raíz para no servir el template sin compilar
   RewriteCond %{REQUEST_FILENAME} -f
   RewriteCond %{REQUEST_URI} !^/index\.html$ [NC]
   RewriteRule ^ - [L]
 
-  # 4. Servir archivos físicos que existan dentro de dist/
+  # 2. Si el archivo físico existe dentro de dist/ (ej: dist/assets/archivo.js o dist/favicon.ico)
   RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
   RewriteRule ^(.*)$ dist/$1 [L]
 
-  # 5. PREVENCIÓN CRÍTICA: Si la petición termina en una extensión de archivo estático
-  # (.js, .css, .png, etc.) y NO se encontró, devolver 404 en lugar de devolver HTML.
-  # Esto evita el error fatal: "Expected a JavaScript module script but received text/html"
+  # 3. Si se solicita la raíz (/) o /index.html explícitamente, servir dist/index.html
+  RewriteRule ^$ dist/index.html [L]
+  RewriteRule ^index\.html$ dist/index.html [L]
+
+  # 4. Evitar devolver HTML si un recurso estático (.js, .css, etc.) no existe físicamente
   RewriteCond %{REQUEST_URI} \.(js|mjs|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|json|webp|map)$ [NC]
   RewriteRule ^ - [R=404,L]
 
-  # 6. Enrutamiento SPA: Servir dist/index.html para cualquier ruta de la app (/login, /socorristas, etc.)
+  # 5. Enrutamiento SPA: Cualquier otra ruta no física (/login, /socorristas, /vehiculos, etc.)
+  # se envía a dist/index.html
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^.*$ dist/index.html [L]
 
-  # 7. Respaldo definitivo al enrutador PHP si dist/ no existiera
+  # 6. Fallback final a index.php si dist/index.html no estuviese presente
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^.*$ index.php [L]

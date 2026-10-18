@@ -49,9 +49,15 @@
         var isDevServer = window.location.port === '3000' || 
                           window.location.hostname === 'localhost' || 
                           window.location.hostname === '127.0.0.1';
+        
+        var caughtErrors = [];
+        window.addEventListener('error', function(e) {
+          caughtErrors.push(e.message || (e.target && e.target.src ? 'Error cargando ' + e.target.src : 'Error desconocido'));
+        }, true);
+
         if (!isDevServer) {
           // Variables sincronizadas automáticamente durante el build
-          var CURRENT_JS_BUNDLE = '/assets/index-Din-3XUG.js';
+          var CURRENT_JS_BUNDLE = '/assets/index-DwOccFMz.js';
           var CURRENT_CSS_BUNDLE = '/assets/index-B2IqBGF7.css';
 
           // Cargar CSS compilado de inmediato
@@ -69,8 +75,45 @@
             script.type = 'module';
             script.crossOrigin = 'anonymous';
             script.src = CURRENT_JS_BUNDLE;
+            script.onerror = function() {
+              caughtErrors.push('No se pudo descargar el archivo principal: ' + CURRENT_JS_BUNDLE);
+            };
             document.body.appendChild(script);
           }
+
+          // Diagnóstico de contingencia: Si después de 4.5s la app aún no ha montado
+          setTimeout(function() {
+            var loader = document.querySelector('.app-loader');
+            if (loader && !document.getElementById('cv-diag-box')) {
+              var box = document.createElement('div');
+              box.id = 'cv-diag-box';
+              box.style.marginTop = '24px';
+              box.style.padding = '16px 20px';
+              box.style.backgroundColor = '#ffffff';
+              box.style.border = '1px solid #e2e8f0';
+              box.style.borderRadius = '12px';
+              box.style.boxShadow = '0 4px 12px rgba(0,0,0,0.06)';
+              box.style.maxWidth = '380px';
+              box.style.textAlign = 'center';
+              box.style.fontSize = '13px';
+              box.style.color = '#4b5563';
+
+              var title = '<p style="margin:0 0 8px 0; font-weight:600; color:#1f2937;">¿El sistema está tardando en cargar?</p>';
+              var errorDetails = '';
+              if (caughtErrors.length > 0) {
+                errorDetails = '<div style="margin:8px 0; padding:8px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; color:#b91c1c; font-size:11px; text-align:left; word-break:break-all;">' +
+                  '<strong>Detalle detectado:</strong> ' + caughtErrors[0] + '</div>';
+              }
+
+              var actions = '<div style="display:flex; gap:8px; justify-content:center; margin-top:12px;">' +
+                '<button onclick="window.location.href=\'/login\'" style="padding:6px 14px; background:#008f39; color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:12px;">Ir al Acceso / Login</button>' +
+                '<button onclick="if(window.caches){caches.keys().then(function(k){k.forEach(function(n){caches.delete(n);});});} window.location.reload(true);" style="padding:6px 14px; background:#f3f4f6; color:#374151; border:1px solid #d1d5db; border-radius:8px; font-weight:600; cursor:pointer; font-size:12px;">Limpiar Caché y Recargar</button>' +
+                '</div>';
+
+              box.innerHTML = title + errorDetails + actions;
+              loader.appendChild(box);
+            }
+          }, 4500);
         }
       })();
     </script>
