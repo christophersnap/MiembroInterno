@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { Shield, Mail, Lock, UserPlus, KeyRound, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { generarHtmlCorreoPasswordTemporal } from '../lib/emailNotification';
+import { sendEmailNotification } from '../lib/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -158,16 +159,12 @@ export default function Login() {
 
         // Despachar vía endpoint de correo
         try {
-          await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              remitente: `${remitenteNombre} <${remitenteCorreo}>`,
-              destinatario: forgotEmail,
-              asunto: 'Restablecimiento de Contraseña Temporal - Cruz Verde Salvadoreña',
-              cuerpoHtml: emailHtml,
-              tipo: 'password_reset'
-            })
+          await sendEmailNotification({
+            remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+            destinatario: forgotEmail,
+            asunto: 'Restablecimiento de Contraseña Temporal - Cruz Verde Salvadoreña',
+            cuerpoHtml: emailHtml,
+            tipo: 'password_reset'
           });
         } catch (apiErr) {
           console.warn('Endpoint de correo en segundo plano:', apiErr);

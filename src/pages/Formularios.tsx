@@ -8,6 +8,8 @@ import { Formulario } from '../types/formulario';
 import FormBuilderModal from '../components/formularios/FormBuilderModal';
 import FormResponsesModal from '../components/formularios/FormResponsesModal';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { getApiUrl } from '../lib/api';
 
 export default function Formularios() {
   const { user, userName, role, permissions } = useAuth();
@@ -33,10 +35,33 @@ export default function Formularios() {
     loadSeccionales();
   }, []);
 
+  const getOfficialShareUrl = (slug: string) => {
+    return `https://cruzverdesv.org/miembros/f/${slug}`;
+  };
+
   const loadFormularios = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/formularios');
+      // 1. Cargar desde base de datos Supabase en la nube
+      const { data: supaForms, error: supaErr } = await supabase
+        .from('formularios')
+        .select(`
+          *,
+          formulario_respuestas (id)
+        `)
+        .order('id', { ascending: false });
+
+      if (!supaErr && supaForms && supaForms.length > 0) {
+        const formatted = supaForms.map((f: any) => ({
+          ...f,
+          respuestas_count: Array.isArray(f.formulario_respuestas) ? f.formulario_respuestas.length : 0
+        }));
+        setFormularios(formatted);
+        return;
+      }
+
+      // 2. Fallback a endpoint local SQLite
+      const res = await fetch(getApiUrl('/api/formularios'));
       if (res.ok) {
         const data = await res.json();
         setFormularios(data);
@@ -50,7 +75,12 @@ export default function Formularios() {
 
   const loadSeccionales = async () => {
     try {
-      const res = await fetch('/api/seccionales');
+      const { data: supaSeccs } = await supabase.from('seccionales').select('nombre');
+      if (supaSeccs && supaSeccs.length > 0) {
+        setSeccionalesList(supaSeccs.map((s: any) => s.nombre).filter(Boolean));
+        return;
+      }
+      const res = await fetch(getApiUrl('/api/seccionales'));
       if (res.ok) {
         const data = await res.json();
         setSeccionalesList(data.map((s: any) => s.nombre).filter(Boolean));
@@ -61,8 +91,7 @@ export default function Formularios() {
   };
 
   const handleCopyLink = (slug: string) => {
-    const origin = window.location.origin;
-    const shareUrl = `${origin}/f/${slug}`;
+    const shareUrl = getOfficialShareUrl(slug);
     navigator.clipboard.writeText(shareUrl).then(() => {
       setCopiedSlug(slug);
       setTimeout(() => setCopiedSlug(null), 2500);
@@ -72,17 +101,22 @@ export default function Formularios() {
   const handleToggleActivo = async (form: Formulario) => {
     try {
       const updatedActivo = !form.activo;
-      const res = await fetch(`/api/formularios/${form.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          activo: updatedActivo
-        })
-      });
-      if (res.ok) {
-        setFormularios(prev => prev.map(f => f.id === form.id ? { ...f, activo: updatedActivo } : f));
-      }
+      // 1. Actualizar en Supabase
+      await supabase
+        .from('formularios')
+        .update({ activo: updatedActivo, updated_at: new Date().toISOString() })
+        .eq('id', form.id);
+
+      // 2. Notificar API local si aplica
+      try {
+        await fetch(getApiUrl(`/api/formularios/${form.id}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...form, activo: updatedActivo })
+        });
+      } catch (e) {}
+
+      setFormularios(prev => prev.map(f => f.id === form.id ? { ...f, activo: updatedActivo } : f));
     } catch (err) {
       console.error('Error al cambiar estado:', err);
     }
@@ -94,40 +128,75 @@ export default function Formularios() {
     }
 
     try {
-      const res = await fetch(`/api/formularios/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setFormularios(prev => prev.filter(f => f.id !== id));
-      } else {
-        alert('Error al eliminar el formulario.');
+      // 1. Eliminar respuestas y formulario en Supabase
+      await supabase.from('formulario_respuestas').delete().eq('formulario_id', id);
+      const { error: delErr } = await supabase.from('formularios').delete().eq('id', id);
+
+      if (delErr) {
+        console.warn('Aviso Supabase delete:', delErr);
       }
+
+      // 2. Notificar API local
+      try {
+        await fetch(getApiUrl(`/api/formularios/${id}`), { method: 'DELETE' });
+      } catch (e) {}
+
+      setFormularios(prev => prev.filter(f => f.id !== id));
     } catch (err: any) {
       alert('Error de red: ' + err.message);
     }
   };
 
   const handleSaveForm = async (formData: Partial<Formulario>) => {
-    if (editingForm) {
-      // Update existing form
-      const res = await fetch(`/api/formularios/${editingForm.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-      if (!res.ok) throw new Error('No se pudo actualizar el formulario');
-    } else {
-      // Create new form
-      const res = await fetch('/api/formularios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    try {
+      if (editingForm) {
+        // Actualizar en Supabase
+        const { error: upErr } = await supabase
+          .from('formularios')
+          .update({
+            ...formData,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingForm.id);
+
+        if (upErr) throw upErr;
+
+        try {
+          await fetch(getApiUrl(`/api/formularios/${editingForm.id}`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+          });
+        } catch (e) {}
+      } else {
+        // Crear en Supabase
+        const payload = {
           ...formData,
           creado_por: user?.id || null,
-          creado_por_nombre: userName || 'Administración Cruz Verde'
-        })
-      });
-      if (!res.ok) throw new Error('No se pudo crear el formulario');
+          creado_por_nombre: userName || 'Administración Cruz Verde',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: insErr } = await supabase
+          .from('formularios')
+          .insert([payload]);
+
+        if (insErr) throw insErr;
+
+        try {
+          await fetch(getApiUrl('/api/formularios'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } catch (e) {}
+      }
+      await loadFormularios();
+    } catch (err: any) {
+      console.error('Error guardando formulario:', err);
+      throw new Error(err.message || 'Error guardando formulario');
     }
-    await loadFormularios();
   };
 
   // Filtered list
@@ -336,7 +405,7 @@ export default function Formularios() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filteredFormularios.map((form) => {
-            const shareUrl = `${window.location.origin}/f/${form.slug}`;
+            const shareUrl = getOfficialShareUrl(form.slug);
             const isCopied = copiedSlug === form.slug;
 
             return (

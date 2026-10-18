@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
   Save, Settings, Info, Palette, Image as ImageIcon, Mail, FileText, Truck, 
-  Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check
+  Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check, QrCode
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -68,17 +68,26 @@ export default function Configuracion() {
     // Verificación
     verificacion_titulo: '',
     verificacion_mensaje: '',
+    qr_base_url: 'https://cruzverdesv.org/miembros',
+    qr_link_format: 'short',
     verificacion_fields: {
-      dui: true,
-      seccional: true,
+      foto: true,
+      carnetId: true,
+      nombre: true,
       cargoInstitucional: true,
       cargoAdministrativo: true,
-      fechaIngreso: true,
-      fechaNacimiento: true,
+      seccional: true,
+      estado: true,
+      dui: true,
       telefono: true,
-      cursos: true,
+      email: true,
+      fechaNacimiento: true,
+      fechaIngreso: true,
       tipoSangre: true,
-      email: true
+      motoristaAutorizado: true,
+      licencias: true,
+      cursos: true,
+      carnetImagen: true
     },
     // Logos
     logos: {
@@ -140,8 +149,10 @@ export default function Configuracion() {
           data.forEach(row => {
             if (row.clave === 'verificacion_titulo') newConfig.verificacion_titulo = row.valor;
             if (row.clave === 'verificacion_mensaje') newConfig.verificacion_mensaje = row.valor;
+            if (row.clave === 'qr_base_url') newConfig.qr_base_url = row.valor;
+            if (row.clave === 'qr_link_format') newConfig.qr_link_format = row.valor;
             if (row.clave === 'verificacion_fields' && row.verificacion_fields) {
-              newConfig.verificacion_fields = row.verificacion_fields;
+              newConfig.verificacion_fields = { ...newConfig.verificacion_fields, ...row.verificacion_fields };
             } else if (row.clave === 'verificacion_fields' && row.valor) {
               try { newConfig.verificacion_fields = { ...newConfig.verificacion_fields, ...JSON.parse(row.valor) }; } catch (e) {}
             }
@@ -344,7 +355,9 @@ export default function Configuracion() {
       const pairs = [
         { clave: 'verificacion_titulo', valor: config.verificacion_titulo },
         { clave: 'verificacion_mensaje', valor: config.verificacion_mensaje },
-        { clave: 'verificacion_fields', valor: JSON.stringify(config.verificacion_fields) }
+        { clave: 'verificacion_fields', valor: JSON.stringify(config.verificacion_fields) },
+        { clave: 'qr_base_url', valor: config.qr_base_url || 'https://cruzverdesv.org/miembros' },
+        { clave: 'qr_link_format', valor: config.qr_link_format || 'short' }
       ];
 
       await saveConfigPairs(pairs);
@@ -355,6 +368,8 @@ export default function Configuracion() {
           verificacion_titulo: config.verificacion_titulo,
           verificacion_mensaje: config.verificacion_mensaje,
           verificacion_fields: config.verificacion_fields,
+          qr_base_url: config.qr_base_url || 'https://cruzverdesv.org/miembros',
+          qr_link_format: config.qr_link_format || 'short',
           logos: config.logos,
           colores: config.colores
         };
@@ -1082,86 +1097,250 @@ export default function Configuracion() {
       )}
 
       {/* ========================================================================= */}
-      {/* 4. MÓDULO: VERIFICACIÓN DE CARNET                                         */}
+      {/* 4. MÓDULO: VERIFICACIÓN DE CARNET Y CÓDIGOS QR                             */}
       {/* ========================================================================= */}
       {activeCategory === 'verificacion' && (
-        <div className="max-w-3xl space-y-4 animate-in fade-in">
+        <div className="max-w-4xl space-y-5 animate-in fade-in">
+          {/* Tarjeta 1: Parámetros Generales y Enlace QR */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex items-center space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
-                <Info className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-gray-900">
-                  Verificación Pública de Carnet (Código QR)
-                </h2>
-                <p className="text-xs text-gray-500">
-                  Información visible al escanear el carnet oficial
-                </p>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">
+                    Verificación Pública de Carnet y Configuración QR
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    Controla los enlaces oficiales y la información visible al consultar un carnet
+                  </p>
+                </div>
               </div>
             </div>
 
             <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Título de la Página
-                </label>
-                <input
-                  type="text"
-                  value={config.verificacion_titulo || ''}
-                  onChange={(e) => setConfig({ ...config, verificacion_titulo: e.target.value })}
-                  className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                  placeholder="Cruz Verde Salvadoreña - Verificación Oficial"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Título de la Pantalla de Verificación
+                  </label>
+                  <input
+                    type="text"
+                    value={config.verificacion_titulo || ''}
+                    onChange={(e) => setConfig({ ...config, verificacion_titulo: e.target.value })}
+                    className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="Cruz Verde Salvadoreña - Verificación Oficial"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Dominio Oficial para Códigos QR
+                  </label>
+                  <input
+                    type="text"
+                    value={config.qr_base_url || 'https://cruzverdesv.org/miembros'}
+                    onChange={(e) => setConfig({ ...config, qr_base_url: e.target.value })}
+                    className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-mono font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="https://cruzverdesv.org/miembros"
+                  />
+                  <p className="text-3xs text-gray-500 mt-1">
+                    Evita enlaces largos y autenticación de Google al escanear desde cualquier teléfono celular.
+                  </p>
+                </div>
               </div>
 
               <div>
                 <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                  Mensaje de Autenticidad
+                  Mensaje Institucional de Autenticidad
                 </label>
                 <textarea
                   rows={2}
                   value={config.verificacion_mensaje || ''}
                   onChange={(e) => setConfig({ ...config, verificacion_mensaje: e.target.value })}
-                  className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-gray-800 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                  placeholder="Este documento certifica que el titular es miembro activo..."
+                  className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="Este carnet es auténtico y pertenece a un elemento activo de la institución..."
                 />
               </div>
 
+              {/* Vista previa del enlace generado */}
+              <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                  <span className="text-xs text-emerald-900 font-medium">Enlace Oficial de Escaneo:</span>
+                  <code className="text-xs font-mono bg-white px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 font-bold">
+                    {(config.qr_base_url || 'https://cruzverdesv.org/miembros').replace(/\/$/, '')}/v/CV-1024
+                  </code>
+                </div>
+                <span className="text-3xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                  Acceso Público Sin Login
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tarjeta 2: Selección Detallada de Campos del Perfil */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                  Campos Visibles en el Escaneo QR
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200/60">
-                  {Object.entries(config.verificacion_fields || {}).map(([key, value]) => (
-                    <label key={key} className="flex items-center space-x-2 text-xs text-gray-700 cursor-pointer p-1 rounded-md hover:bg-white transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(value)}
-                        onChange={() => setConfig((prev: any) => ({
-                          ...prev,
-                          verificacion_fields: { ...prev.verificacion_fields, [key]: !value }
-                        }))}
-                        className="w-3.5 h-3.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
-                      />
-                      <span className="capitalize text-2xs font-medium">
-                        {key === 'dui' ? 'DUI' : key === 'seccional' ? 'Seccional' : key === 'cargoInstitucional' ? 'Cargo Institucional' : key === 'cargoAdministrativo' ? 'Cargo Admin' : key === 'fechaIngreso' ? 'Ingreso' : key === 'fechaNacimiento' ? 'Nacimiento' : key === 'telefono' ? 'Teléfono' : key === 'cursos' ? 'Cursos' : key === 'tipoSangre' ? 'Tipo Sangre' : key === 'email' ? 'Email' : key}
-                      </span>
-                    </label>
-                  ))}
+                <h3 className="text-sm font-bold text-gray-900">
+                  Campos y Datos Visibles al Consultar el Perfil
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Selecciona de forma individual cada elemento que se mostrará al escanear el carnet
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allTrue: Record<string, boolean> = {};
+                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allTrue[k] = true; });
+                    setConfig({ ...config, verificacion_fields: allTrue });
+                  }}
+                  className="px-2.5 py-1 text-2xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  Marcar Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allFalse: Record<string, boolean> = {};
+                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allFalse[k] = false; });
+                    setConfig({ ...config, verificacion_fields: allFalse });
+                  }}
+                  className="px-2.5 py-1 text-2xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  Desmarcar Todos
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-6">
+              {/* Sección 1: Identificación Oficial */}
+              <div>
+                <h4 className="text-2xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center space-x-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  <span>1. Identificación y Estado Institucional</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'foto', label: 'Fotografía Oficial', desc: 'Foto de perfil del socorrista' },
+                    { id: 'nombre', label: 'Nombre Completo', desc: 'Nombres y apellidos del titular' },
+                    { id: 'carnetId', label: 'Número de Carnet', desc: 'Código oficial (ej: CV-1024)' },
+                    { id: 'cargoInstitucional', label: 'Rango / Cargo', desc: 'Socorrista, TEM, Rescatista' },
+                    { id: 'cargoAdministrativo', label: 'Cargo Administrativo', desc: 'Jefatura, coordinador, etc.' },
+                    { id: 'seccional', label: 'Seccional o Filial', desc: 'Base o filial asignada' },
+                    { id: 'estado', label: 'Estado de Membresía', desc: 'Insignia Activo o Inactivo' },
+                  ].map(f => {
+                    const isChecked = config.verificacion_fields?.[f.id] !== false;
+                    return (
+                      <label key={f.id} className={`flex items-start space-x-3 p-3 rounded-xl border transition-all cursor-pointer ${isChecked ? 'bg-emerald-50/40 border-emerald-200' : 'bg-slate-50/50 border-slate-200 opacity-60'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => setConfig((prev: any) => ({
+                            ...prev,
+                            verificacion_fields: { ...prev.verificacion_fields, [f.id]: !isChecked }
+                          }))}
+                          className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500"
+                        />
+                        <div className="flex-1">
+                          <span className="block text-xs font-bold text-gray-900">{f.label}</span>
+                          <span className="text-3xs text-gray-500 leading-tight block mt-0.5">{f.desc}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Sección 2: Datos Personales y de Contacto */}
+              <div>
+                <h4 className="text-2xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center space-x-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                  <span>2. Datos Personales y de Contacto</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'dui', label: 'Documento DUI', desc: 'Número de documento de identidad' },
+                    { id: 'telefono', label: 'Teléfono Móvil', desc: 'Contacto telefónico oficial' },
+                    { id: 'email', label: 'Correo Electrónico', desc: 'Dirección de email registrada' },
+                    { id: 'fechaNacimiento', label: 'Fecha de Nacimiento', desc: 'Día de nacimiento / cumpleaños' },
+                    { id: 'fechaIngreso', label: 'Fecha de Ingreso', desc: 'Antigüedad en la institución' },
+                    { id: 'tipoSangre', label: 'Tipo de Sangre', desc: 'Grupo sanguíneo y factor RH' },
+                  ].map(f => {
+                    const isChecked = config.verificacion_fields?.[f.id] !== false;
+                    return (
+                      <label key={f.id} className={`flex items-start space-x-3 p-3 rounded-xl border transition-all cursor-pointer ${isChecked ? 'bg-blue-50/40 border-blue-200' : 'bg-slate-50/50 border-slate-200 opacity-60'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => setConfig((prev: any) => ({
+                            ...prev,
+                            verificacion_fields: { ...prev.verificacion_fields, [f.id]: !isChecked }
+                          }))}
+                          className="mt-0.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <span className="block text-xs font-bold text-gray-900">{f.label}</span>
+                          <span className="text-3xs text-gray-500 leading-tight block mt-0.5">{f.desc}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Sección 3: Conducción, Cursos y Credencial Digital */}
+              <div>
+                <h4 className="text-2xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center space-x-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                  <span>3. Conducción, Capacitación y Credencial Digital</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'motoristaAutorizado', label: 'Autorización de Manejo', desc: 'Conductor autorizado de ambulancias' },
+                    { id: 'licencias', label: 'Licencias de Conducir', desc: 'Clase y números de licencia' },
+                    { id: 'cursos', label: 'Cursos Realizados', desc: 'Lista de certificaciones y cursos' },
+                    { id: 'carnetImagen', label: 'Copia Digital del Carnet', desc: 'Imagen protegida con marca de agua' },
+                  ].map(f => {
+                    const isChecked = config.verificacion_fields?.[f.id] !== false;
+                    return (
+                      <label key={f.id} className={`flex items-start space-x-3 p-3 rounded-xl border transition-all cursor-pointer ${isChecked ? 'bg-purple-50/40 border-purple-200' : 'bg-slate-50/50 border-slate-200 opacity-60'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => setConfig((prev: any) => ({
+                            ...prev,
+                            verificacion_fields: { ...prev.verificacion_fields, [f.id]: !isChecked }
+                          }))}
+                          className="mt-0.5 w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+                        />
+                        <div className="flex-1">
+                          <span className="block text-xs font-bold text-gray-900">{f.label}</span>
+                          <span className="text-3xs text-gray-500 leading-tight block mt-0.5">{f.desc}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            <div className="px-5 py-3.5 bg-slate-50/80 border-t border-slate-100 flex justify-end">
+            <div className="px-5 py-4 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                Los cambios se reflejarán de inmediato en todos los carnets físicos y digitales al ser escaneados.
+              </span>
               <button
                 type="button"
                 onClick={handleSaveVerificacion}
                 disabled={savingSection === 'verificacion'}
-                className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 cursor-pointer"
               >
-                <Save className="w-3.5 h-3.5 mr-1.5" />
-                {savingSection === 'verificacion' ? 'Guardando...' : 'Guardar Verificación'}
+                <Save className="w-4 h-4 mr-2" />
+                {savingSection === 'verificacion' ? 'Guardando Ajustes...' : 'Guardar Ajustes de Verificación y QR'}
               </button>
             </div>
           </div>

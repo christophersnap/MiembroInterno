@@ -15,6 +15,7 @@ import {
   generarHtmlCorreoCompra, 
   generarHtmlCorreoCombustible 
 } from '../../lib/emailNotification';
+import { getApiUrl, sendEmailNotification } from '../../lib/api';
 
 interface ModalDisenadorCorreosProps {
   isOpen: boolean;
@@ -103,7 +104,7 @@ export default function ModalDisenadorCorreos({
       try {
         // Cargar desde base de datos del backend (/api/configuracion)
         try {
-          const apiRes = await fetch('/api/configuracion');
+          const apiRes = await fetch(getApiUrl('/api/configuracion'));
           if (apiRes.ok) {
             const cfg = await apiRes.json();
             if (cfg.email_remitente_global) setRemitenteGlobal(cfg.email_remitente_global);
@@ -131,7 +132,7 @@ export default function ModalDisenadorCorreos({
 
         // Consultar estado de conexión SMTP con el servidor
         try {
-          const statusRes = await fetch('/api/smtp-config-status');
+          const statusRes = await fetch(getApiUrl('/api/smtp-config-status'));
           if (statusRes.ok) {
             const statusJson = await statusRes.json();
             setSmtpStatus(statusJson);
@@ -271,7 +272,7 @@ export default function ModalDisenadorCorreos({
 
       // Guardar en Backend SQLite
       try {
-        await fetch('/api/configuracion', {
+        await fetch(getApiUrl('/api/configuracion'), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configDict)
@@ -319,7 +320,7 @@ export default function ModalDisenadorCorreos({
 
       // Actualizar estado SMTP en tiempo real
       try {
-        const statusRes = await fetch('/api/smtp-config-status');
+        const statusRes = await fetch(getApiUrl('/api/smtp-config-status'));
         if (statusRes.ok) {
           const statusJson = await statusRes.json();
           setSmtpStatus(statusJson);
@@ -372,7 +373,7 @@ export default function ModalDisenadorCorreos({
 
       // 1. Guardar en Backend SQLite
       try {
-        await fetch('/api/configuracion', {
+        await fetch(getApiUrl('/api/configuracion'), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configDict)
@@ -403,7 +404,7 @@ export default function ModalDisenadorCorreos({
 
       // 3. Consultar estado actualizado de conexión SMTP desde el servidor
       try {
-        const statusRes = await fetch('/api/smtp-config-status');
+        const statusRes = await fetch(getApiUrl('/api/smtp-config-status'));
         if (statusRes.ok) {
           const statusJson = await statusRes.json();
           setSmtpStatus(statusJson);
@@ -470,7 +471,7 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
     setTestingConnection(true);
     setTestConnResult(null);
     try {
-      const res = await fetch('/api/smtp-test-connection', {
+      const res = await fetch(getApiUrl('/api/smtp-test-connection'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -514,24 +515,18 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
     setTestError(null);
     try {
       const asuntoTest = `[PRUEBA] Diseño de Correo - ${previewTab === 'compra' ? 'Solicitud de Compra' : (previewTab === 'combustible' ? 'Solicitud de Combustible' : 'Notificación de Acceso')}`;
-      const res = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          remitente: `${remitenteNombreGlobal} <${remitenteGlobal}>`,
-          destinatario: testEmailDestino,
-          asunto: asuntoTest,
-          cuerpoHtml: previewHtml(),
-          tipo: `test_${previewTab}`
-        })
+      
+      const resData = await sendEmailNotification({
+        remitente: `${remitenteNombreGlobal} <${remitenteGlobal}>`,
+        destinatario: testEmailDestino,
+        asunto: asuntoTest,
+        cuerpoHtml: previewHtml(),
+        tipo: `test_${previewTab}`
       });
 
-      const resData = await res.json().catch(() => ({}));
-      if (res.ok && resData.success && resData.isRealSent) {
+      if (resData.success) {
         setTestSuccess(`Correo enviado con éxito a ${testEmailDestino}. Revisa tu bandeja.`);
         setTimeout(() => setTestSuccess(null), 8000);
-      } else if (!res.ok || !resData.success) {
-        setTestError(resData.error || 'El servidor de correo respondió con error al intentar enviar.');
       } else {
         setTestError('Aviso: El correo no se envió en modo real porque falta la contraseña SMTP. Configúrala en la pestaña de Servidor SMTP.');
       }

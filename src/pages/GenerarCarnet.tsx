@@ -4,6 +4,7 @@ import * as QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
+import { generateSecureQrToken } from '../utils/qrSecurity';
 
 import WatermarkImage from '../components/WatermarkImage';
 
@@ -91,6 +92,8 @@ export default function GenerarCarnet() {
   const [posQrX, setPosQrX] = useState<number>(80);
   const [posQrY, setPosQrY] = useState<number>(80);
   const [qrSize, setQrSize] = useState<number>(15);
+  const [qrBaseUrl, setQrBaseUrl] = useState<string>('https://cruzverdesv.org/miembros');
+  const [qrLinkFormat, setQrLinkFormat] = useState<string>('short');
 
   // Verification fields state
   const [verificationFields, setVerificationFields] = useState({
@@ -214,10 +217,19 @@ export default function GenerarCarnet() {
     } catch (e) { console.warn(e); }
 
     try {
-      const { data: configData, error: configError } = await supabase.from('configuracion').select('*').eq('clave', 'verificacion_fields').single();
-      if (configError) console.warn('Error loading config:', configError);
-      else if (configData && configData.valor) {
-        setVerificationFields(JSON.parse(configData.valor));
+      const { data: configRows } = await supabase.from('configuracion').select('clave, valor').in('clave', ['verificacion_fields', 'qr_base_url', 'qr_link_format']);
+      if (configRows) {
+        configRows.forEach(row => {
+          if (row.clave === 'verificacion_fields' && row.valor) {
+            try { setVerificationFields(JSON.parse(row.valor)); } catch (e) {}
+          }
+          if (row.clave === 'qr_base_url' && row.valor) {
+            setQrBaseUrl(row.valor);
+          }
+          if (row.clave === 'qr_link_format' && row.valor) {
+            setQrLinkFormat(row.valor);
+          }
+        });
       }
     } catch (e) { console.warn(e); }
   };
@@ -723,7 +735,15 @@ export default function GenerarCarnet() {
     // Draw QR Code
     if (showQR) {
       try {
-        const qrUrl = `${window.location.origin}/verificar/${selectedSocorrista.carnet}`;
+        // Enlace oficial y limpio para escaneo público sin login
+        const baseOrigin = (qrBaseUrl && qrBaseUrl.trim() !== '') 
+          ? qrBaseUrl.trim().replace(/\/$/, '') 
+          : (window.location.origin.includes('run.app') ? 'https://cruzverdesv.org/miembros' : window.location.origin);
+        
+        const pathPrefix = (qrLinkFormat === 'long') ? '/verificar' : '/v';
+        // Generar token criptográfico único y no secuencial (evita adivinar otros carnets)
+        const qrSecureToken = generateSecureQrToken(selectedSocorrista.carnet, selectedSocorrista.id);
+        const qrUrl = `${baseOrigin}${pathPrefix}/${qrSecureToken}`;
         const toDataURL = QRCode.toDataURL || (QRCode as any).default?.toDataURL;
         if (!toDataURL) throw new Error("QRCode.toDataURL is not available");
         

@@ -21,6 +21,15 @@
         align-items: center;
         justify-content: center;
         background-color: #f9fafb;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        transition: opacity 0.3s ease, visibility 0.3s ease;
+      }
+      #root:not(:empty) + .app-loader {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
       }
       .app-spinner {
         width: 44px;
@@ -37,11 +46,10 @@
     </style>
   </head>
   <body>
-    <div id="root">
-      <div class="app-loader">
-        <div class="app-spinner"></div>
-        <div style="color: #374151; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;">Cargando Cruz Verde Salvadoreña...</div>
-      </div>
+    <div id="root"></div>
+    <div class="app-loader">
+      <div class="app-spinner"></div>
+      <div style="color: #374151; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;">Cargando Cruz Verde Salvadoreña...</div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
@@ -57,8 +65,8 @@
 
         if (!isDevServer) {
           // Variables sincronizadas automáticamente durante el build
-          var CURRENT_JS_BUNDLE = './assets/index-BU6ZrGWt.js';
-          var CURRENT_CSS_BUNDLE = './assets/index-B2IqBGF7.css';
+          var CURRENT_JS_BUNDLE = './assets/index-CgsfH5Wb.js';
+          var CURRENT_CSS_BUNDLE = './assets/index-D6Zwskc-.css';
 
           // Resolver ruta base para subcarpetas (ej: /miembros/)
           var subPath = (window.location.pathname.indexOf('/miembros') !== -1) ? '/miembros/assets/' : './assets/';

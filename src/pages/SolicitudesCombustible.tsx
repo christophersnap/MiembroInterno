@@ -18,6 +18,8 @@ import CombustibleForm from '../components/combustible/CombustibleForm';
 import CombustibleEmailModal from '../components/combustible/CombustibleEmailModal';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
+import { sendEmailNotification } from '../lib/api';
+import { generarHtmlCorreoCombustible } from '../lib/emailNotification';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
@@ -332,6 +334,42 @@ NOTIFY pgrst, 'reload schema';`;
         solicitante: formData.nombre_solicitante,
         actividad: formData.actividad
       });
+
+      // Enviar notificación automática por correo SMTP (Hostinger / Servidor)
+      try {
+        const asuntoGenerado = (config.asuntoPlantilla || 'Solicitud de Combustible: {folio} - {seccional}')
+          .replace('{folio}', folioGenerado)
+          .replace('{seccional}', formData.seccional_nombre);
+
+        const htmlEmail = generarHtmlCorreoCombustible({
+          folio: folioGenerado,
+          seccional: formData.seccional_nombre,
+          solicitante: formData.nombre_solicitante,
+          cargoSolicitante: formData.cargo_solicitante,
+          vehiculoPlaca: formData.vehiculo_placa,
+          vehiculoMarca: formData.vehiculo_marca,
+          vehiculoModelo: formData.vehiculo_modelo,
+          tipoCombustible: formData.tipo_combustible,
+          galones: formData.galones_solicitados,
+          correoSolicitante: formData.correo_electronico,
+          actividad: formData.actividad,
+          entregoLiquidacionAnterior: !!formData.entrego_liquidacion_anterior,
+          motivoNoLiquidacion: formData.motivo_no_liquidacion,
+          fechaEnvio: fechaCompletaStr,
+          nombreArchivoPdf: `${folioGenerado}.pdf`
+        });
+
+        await sendEmailNotification({
+          destinatario: correosArr.join(', '),
+          asunto: asuntoGenerado,
+          cuerpoHtml: htmlEmail,
+          tipo: 'solicitud_combustible',
+          remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'
+        });
+        console.log('[COMBUSTIBLE] Notificación por correo enviada a:', correosArr.join(', '));
+      } catch (mailErr) {
+        console.warn('[COMBUSTIBLE] Aviso al despachar correo automático:', mailErr);
+      }
 
       // Mostrar modal de confirmación con el acuse de recibo
       setLastSubmittedSolicitud(newRecord);

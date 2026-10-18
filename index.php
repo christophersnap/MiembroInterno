@@ -45,6 +45,17 @@ if (!empty($scriptDir) && strpos($cleanUri, $scriptDir . '/') === 0) {
     $cleanUri = '';
 }
 
+// 1.5. Soporte nativo para Endpoints de API en Hostinger (Envío de correos SMTP, verificación)
+if (strpos($cleanUri, 'api/') === 0) {
+    $apiPath = substr($cleanUri, 4);
+    $apiPathClean = preg_replace('/[^a-zA-Z0-9_-]/', '', $apiPath);
+    $apiScript = __DIR__ . '/api/' . $apiPathClean . '.php';
+    if (file_exists($apiScript)) {
+        require $apiScript;
+        exit;
+    }
+}
+
 // 2. Si se localizó dist/ y se solicita un archivo estático
 if ($distDir && !empty($cleanUri)) {
     $possiblePaths = [

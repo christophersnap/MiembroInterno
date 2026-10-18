@@ -6,6 +6,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { generarHtmlCorreoAprobacion } from '../../lib/emailNotification';
+import { sendEmailNotification } from '../../lib/api';
 
 interface Solicitud {
   id: string;
@@ -149,16 +150,12 @@ export default function SolicitudesRegistroTab({
         });
 
         try {
-          await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              remitente: `${remitenteNombre} <${remitenteCorreo}>`,
-              destinatario: selectedSolicitud.email,
-              asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
-              cuerpoHtml: emailHtml,
-              tipo: 'aprobacion_cuenta'
-            })
+          await sendEmailNotification({
+            remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+            destinatario: selectedSolicitud.email,
+            asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
+            cuerpoHtml: emailHtml,
+            tipo: 'aprobacion_cuenta'
           });
         } catch (mailErr) {
           console.error('Error al despachar el correo de aprobación:', mailErr);

@@ -4,6 +4,8 @@ import {
   Mail, Phone, FileSpreadsheet, AlertCircle, RefreshCw 
 } from 'lucide-react';
 import { Formulario, FormularioRespuesta } from '../../types/formulario';
+import { supabase } from '../../lib/supabase';
+import { getApiUrl } from '../../lib/api';
 
 interface FormResponsesModalProps {
   form: Formulario | null;
@@ -35,7 +37,20 @@ export default function FormResponsesModal({
   const loadRespuestas = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/formularios/${form.id}/respuestas`);
+      // 1. Cargar desde Supabase en la nube
+      const { data: supaResp, error: supaErr } = await supabase
+        .from('formulario_respuestas')
+        .select('*')
+        .eq('formulario_id', form.id)
+        .order('id', { ascending: false });
+
+      if (!supaErr && supaResp) {
+        setRespuestas(supaResp);
+        return;
+      }
+
+      // 2. Fallback a endpoint local SQLite
+      const res = await fetch(getApiUrl(`/api/formularios/${form.id}/respuestas`));
       if (res.ok) {
         const data = await res.json();
         setRespuestas(data);
@@ -51,15 +66,18 @@ export default function FormResponsesModal({
     if (!confirm('¿Está seguro de eliminar esta respuesta registrada?')) return;
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/formulario_respuestas/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setRespuestas(prev => prev.filter(r => r.id !== id));
-        if (selectedRespuesta?.id === id) setSelectedRespuesta(null);
-      } else {
-        alert('Error al eliminar respuesta');
-      }
+      // 1. Eliminar en Supabase
+      await supabase.from('formulario_respuestas').delete().eq('id', id);
+
+      // 2. Notificar API local si aplica
+      try {
+        await fetch(getApiUrl(`/api/formulario_respuestas/${id}`), { method: 'DELETE' });
+      } catch (e) {}
+
+      setRespuestas(prev => prev.filter(r => r.id !== id));
+      if (selectedRespuesta?.id === id) setSelectedRespuesta(null);
     } catch (err: any) {
-      alert('Error de conexión: ' + err.message);
+      alert('Error al eliminar respuesta: ' + err.message);
     } finally {
       setDeletingId(null);
     }

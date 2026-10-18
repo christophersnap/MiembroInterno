@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Mail, CheckCircle2, Copy, Send, RefreshCw, Check, FileText, ShieldAlert } from 'lucide-react';
 import { SolicitudCombustible, CombustibleConfig } from '../../types/combustible';
 import { generarHtmlCorreoCombustible } from '../../lib/emailNotification';
+import { sendEmailNotification } from '../../lib/api';
 
 interface CombustibleEmailModalProps {
   solicitud: SolicitudCombustible;
@@ -89,18 +90,14 @@ ${config.correoFooterTexto}`;
         await onSendEmail(destinatario, cc, asunto, htmlEmail);
       }
 
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          remitente: 'Cruz Verde Salvadoreña (No Responder) <no-reply@cruzverdesv.org>',
-          destinatario,
-          cc,
-          asunto,
-          cuerpoHtml: htmlEmail,
-          tipo: 'solicitud_combustible',
-          nombreArchivoPdf: pdfFileName
-        })
+      await sendEmailNotification({
+        remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>',
+        destinatario,
+        cc,
+        asunto,
+        cuerpoHtml: htmlEmail,
+        tipo: 'solicitud_combustible',
+        nombreArchivoPdf: pdfFileName
       });
 
       setSentSuccess(true);

@@ -9,6 +9,8 @@ import { useSettings } from '../contexts/SettingsContext';
 import { Formulario, FormField } from '../types/formulario';
 import PhoneInputWithCountry from '../components/formularios/PhoneInputWithCountry';
 import { applyDuiMask } from '../utils/phoneMasks';
+import { supabase } from '../lib/supabase';
+import { getApiUrl } from '../lib/api';
 
 export default function PublicFormulario() {
   const { slug } = useParams<{ slug: string }>();
@@ -40,14 +42,27 @@ export default function PublicFormulario() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/formularios/${slug}`);
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error('Formulario no encontrado o enlace incorrecto.');
+      // 1. Cargar desde Supabase
+      const { data: supaForm, error: supaErr } = await supabase
+        .from('formularios')
+        .select('*')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      let data: Formulario | null = supaForm;
+
+      // 2. Si no se halló en Supabase, consultar endpoint local
+      if (!data) {
+        const res = await fetch(getApiUrl(`/api/formularios/${slug}`));
+        if (res.ok) {
+          data = await res.json();
         }
-        throw new Error('Error al cargar el formulario.');
       }
-      const data: Formulario = await res.json();
+
+      if (!data) {
+        throw new Error('Formulario no encontrado o enlace incorrecto.');
+      }
+
       setForm(data);
 
       // Initialize default values
@@ -67,7 +82,12 @@ export default function PublicFormulario() {
 
   const loadSeccionales = async () => {
     try {
-      const res = await fetch('/api/seccionales');
+      const { data: supaSeccs } = await supabase.from('seccionales').select('nombre');
+      if (supaSeccs && supaSeccs.length > 0) {
+        setSeccionales(supaSeccs.map((s: any) => s.nombre).filter(Boolean));
+        return;
+      }
+      const res = await fetch(getApiUrl('/api/seccionales'));
       if (res.ok) {
         const data = await res.json();
         setSeccionales(data.map((s: any) => s.nombre).filter(Boolean));
@@ -154,25 +174,35 @@ export default function PublicFormulario() {
     setSubmitting(true);
     try {
       const payload = {
+        formulario_id: form.id,
         usuario_id: user?.id || null,
         usuario_nombre: userName || values['nombre'] || values['nombres'] || 'Público / Externo',
         usuario_email: user?.email || values['email'] || values['correo'] || null,
-        respuestas: values
+        respuestas: values,
+        created_at: new Date().toISOString()
       };
 
-      const res = await fetch(`/api/formularios/${form.id}/respuestas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      // 1. Guardar en Supabase en la nube
+      const { data: supaResp, error: supaErr } = await supabase
+        .from('formulario_respuestas')
+        .insert([payload])
+        .select()
+        .single();
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Error al enviar la respuesta');
+      if (supaErr) {
+        console.warn('Aviso guardando en Supabase:', supaErr);
       }
 
-      const resData = await res.json();
-      setSubmissionId(resData.id);
+      // 2. Notificar API local si está disponible
+      try {
+        await fetch(getApiUrl(`/api/formularios/${form.id}/respuestas`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) {}
+
+      setSubmissionId(supaResp?.id || Date.now());
       setSubmitted(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {

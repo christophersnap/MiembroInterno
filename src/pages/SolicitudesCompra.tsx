@@ -16,6 +16,7 @@ import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import CompraForm, { ArchivoCotizacion } from '../components/compra/CompraForm';
 import { generarHtmlCorreoCompra } from '../lib/emailNotification';
+import { sendEmailNotification } from '../lib/api';
 
 export interface SolicitudCompra {
   id: number;
@@ -779,6 +780,42 @@ NOTIFY pgrst, 'reload schema';`;
         vehiculo: formData.vehiculo_placa
       });
 
+      // Enviar notificación automática por correo SMTP si hay destinatarios configurados
+      if (correosArr.length > 0) {
+        try {
+          const htmlEmail = generarHtmlCorreoCompra({
+            folio: folioGenerado,
+            seccional: formData.seccional_nombre || 'Seccional Central',
+            solicitante: formData.solicitado_por,
+            cargoSolicitante: formData.cargo,
+            tipo: formData.tipo_solicitud,
+            esParaVehiculo: formData.es_para_vehiculo,
+            vehiculoPlaca: formData.vehiculo_placa,
+            vehiculoDescripcion: formData.vehiculo_descripcion,
+            justificacion: formData.descripcion,
+            proveedorSugerido: formData.proveedor_sugerido,
+            items: [{
+              descripcion: formData.descripcion,
+              cantidad: 1,
+              precioEstimado: formData.monto_estimado ? parseFloat(formData.monto_estimado) : undefined,
+              subtotal: formData.monto_estimado ? parseFloat(formData.monto_estimado) : undefined
+            }],
+            totalEstimado: formData.monto_estimado ? parseFloat(formData.monto_estimado) : 0,
+            nombreArchivoPdf: `${folioGenerado}.pdf`
+          });
+
+          await sendEmailNotification({
+            destinatario: correosArr.join(', '),
+            asunto: `Solicitud de Compra: ${folioGenerado} - ${formData.seccional_nombre || 'Cruz Verde'}`,
+            cuerpoHtml: htmlEmail,
+            tipo: 'solicitud_compra',
+            remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'
+          });
+        } catch (mailErr) {
+          console.warn('[COMPRA] Aviso al enviar correo automático:', mailErr);
+        }
+      }
+
       // Limpiar formulario y pasar a lista
       setFormData(prev => ({
         ...prev,
@@ -904,6 +941,43 @@ NOTIFY pgrst, 'reload schema';`;
         vehiculo: payloadData.vehiculo_placa
       });
 
+      // Enviar notificación automática por correo SMTP si hay destinatarios configurados
+      if (correosArr.length > 0) {
+        try {
+          const htmlEmail = generarHtmlCorreoCompra({
+            folio: folioGenerado,
+            seccional: payloadData.seccional_nombre || 'Seccional Central',
+            solicitante: payloadData.solicitado_por,
+            cargoSolicitante: payloadData.cargo,
+            tipo: payloadData.tipo_solicitud,
+            esParaVehiculo: payloadData.es_para_vehiculo,
+            vehiculoPlaca: payloadData.vehiculo_placa,
+            vehiculoDescripcion: payloadData.vehiculo_descripcion,
+            justificacion: payloadData.descripcion,
+            proveedorSugerido: payloadData.proveedor_sugerido,
+            items: (payloadData.items || []).map((it: any) => ({
+              descripcion: it.descripcion,
+              cantidad: Number(it.cantidad) || 1,
+              unidad: it.unidad,
+              precioEstimado: Number(it.precio_estimado) || undefined,
+              subtotal: Number(it.subtotal) || undefined
+            })),
+            totalEstimado: payloadData.monto_estimado || 0,
+            nombreArchivoPdf: `${folioGenerado}.pdf`
+          });
+
+          await sendEmailNotification({
+            destinatario: correosArr.join(', '),
+            asunto: `Solicitud de Compra: ${folioGenerado} - ${payloadData.seccional_nombre || 'Cruz Verde'}`,
+            cuerpoHtml: htmlEmail,
+            tipo: 'solicitud_compra',
+            remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'
+          });
+        } catch (mailErr) {
+          console.warn('[COMPRA] Aviso al enviar correo automático:', mailErr);
+        }
+      }
+
       alert(`¡Solicitud ${folioGenerado} registrada con éxito! Ha sido enviada al Área Administrativa.`);
 
       setActiveTab('lista');
@@ -1005,23 +1079,19 @@ Cruz Verde Salvadoreña`;
         nombreArchivoPdf: pdfFileName
       });
 
-      // Despacho vía endpoint del servidor Express
+      // Despacho vía servicio SMTP (Hostinger / Servidor)
       try {
-        await fetch('/api/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            remitente: 'Cruz Verde Salvadoreña (No Responder) <no-reply@cruzverdesv.org>',
-            destinatario: emailForm.destinatario,
-            cc: emailForm.cc,
-            asunto: emailForm.asunto,
-            cuerpoHtml: htmlEmail,
-            tipo: 'solicitud_compra',
-            nombreArchivoPdf: pdfFileName
-          })
+        await sendEmailNotification({
+          remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>',
+          destinatario: emailForm.destinatario,
+          cc: emailForm.cc,
+          asunto: emailForm.asunto,
+          cuerpoHtml: htmlEmail,
+          tipo: 'solicitud_compra',
+          nombreArchivoPdf: pdfFileName
         });
       } catch (errApi) {
-        console.warn('API send-email aviso:', errApi);
+        console.warn('Aviso de envío por SMTP:', errApi);
       }
 
       // Delay visual de envío

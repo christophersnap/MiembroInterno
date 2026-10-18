@@ -74,14 +74,6 @@ const getRouterBasename = () => {
 };
 
 export default function App() {
-  React.useEffect(() => {
-    const loader = document.getElementById('initial-loader');
-    if (loader) {
-      loader.style.opacity = '0';
-      setTimeout(() => loader.remove(), 300);
-    }
-  }, []);
-
   return (
     <SettingsProvider>
       <AuthProvider>
@@ -94,6 +86,7 @@ export default function App() {
             <Route path="/register" element={<Registro />} />
             <Route path="/verificar" element={<VerificarCodigo />} />
             <Route path="/verificar/:carnetId" element={<VerificacionCarnet />} />
+            <Route path="/v/:carnetId" element={<VerificacionCarnet />} />
             <Route path="/solicitud-carnet" element={<SolicitudCarnet />} />
             <Route path="/f/:slug" element={<PublicFormulario />} />
             <Route path="/formularios/:slug/responder" element={<PublicFormulario />} />

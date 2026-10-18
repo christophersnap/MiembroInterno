@@ -3,6 +3,7 @@ import { KeyRound, X, Mail, CheckCircle2, Copy, AlertCircle, Lock } from 'lucide
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { generarHtmlCorreoPasswordTemporal } from '../../lib/emailNotification';
+import { sendEmailNotification } from '../../lib/api';
 
 interface ResetPasswordModalProps {
   user: any;
@@ -76,16 +77,12 @@ export default function ResetPasswordModal({
         });
 
         try {
-          await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              remitente: `${remitenteNombre} <${remitenteCorreo}>`,
-              destinatario: user.email,
-              asunto: 'Restablecimiento de Contraseña - Cruz Verde Salvadoreña',
-              cuerpoHtml: emailHtml,
-              tipo: 'password_reset'
-            })
+          await sendEmailNotification({
+            remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+            destinatario: user.email,
+            asunto: 'Restablecimiento de Contraseña - Cruz Verde Salvadoreña',
+            cuerpoHtml: emailHtml,
+            tipo: 'password_reset'
           });
           emailSent = true;
         } catch (mailErr) {

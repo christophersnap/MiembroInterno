@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Loader2, Clock, Lock, Timer } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { generateSecureQrToken } from '../utils/qrSecurity';
 
 export default function VerificacionCarnet() {
   const { carnetId } = useParams<{ carnetId: string }>();
@@ -10,19 +11,53 @@ export default function VerificacionCarnet() {
   const [error, setError] = useState('');
   const [config, setConfig] = useState<any>({});
   const [verificationFields, setVerificationFields] = useState<any>({
-    dui: true,
-    seccional: true,
+    foto: true,
+    carnetId: true,
+    nombre: true,
     cargoInstitucional: true,
     cargoAdministrativo: true,
-    fechaIngreso: true,
-    fechaNacimiento: true,
+    seccional: true,
+    estado: true,
+    dui: true,
     telefono: true,
-    cursos: true,
+    email: true,
+    fechaNacimiento: true,
+    fechaIngreso: true,
     tipoSangre: true,
-    email: true
+    motoristaAutorizado: true,
+    licencias: true,
+    cursos: true,
+    carnetImagen: true
   });
 
   const [watermarkedImage, setWatermarkedImage] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState(300); // 5 minutos = 300 segundos
+  const [isExpired, setIsExpired] = useState(false);
+
+  // Temporizador de 5 minutos para cerrar la consulta automáticamente por seguridad
+  useEffect(() => {
+    if (loading || error || !socorrista) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setIsExpired(true);
+          setSocorrista(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [loading, error, !socorrista]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -74,6 +109,33 @@ export default function VerificacionCarnet() {
     if (carnetId) {
       const fetchSocorrista = async () => {
         try {
+          const rawId = (carnetId || '').trim();
+          let targetCarnet = rawId;
+
+          // 1. Identificar si es un token no secuencial (16 caracteres hexadecimales)
+          const isToken = /^[0-9a-fA-F]{16}$/.test(rawId);
+          if (isToken) {
+            const { data: allSocs, error: socsErr } = await supabase
+              .from('socorristas')
+              .select('id, carnet');
+
+            if (!socsErr && allSocs) {
+              const matched = allSocs.find(s => generateSecureQrToken(s.carnet, s.id).toLowerCase() === rawId.toLowerCase());
+              if (matched) {
+                targetCarnet = matched.carnet;
+              } else {
+                throw new Error('Código QR de verificación no válido, expirado o inexistente.');
+              }
+            }
+          } else {
+            // Si alguien intentó escribir un número secuencial directamente (ej: CV-1025)
+            // Validar si el usuario está autenticado en el sistema
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (!sessionData?.session) {
+              throw new Error('Acceso secuencial restringido. Por motivos de seguridad y privacidad institucional, debe escanear el código QR físico del carnet oficial.');
+            }
+          }
+
           const { data: socData, error: socError } = await supabase
             .from('socorristas')
             .select(`
@@ -82,10 +144,10 @@ export default function VerificacionCarnet() {
                 nombre
               )
             `)
-            .eq('carnet', carnetId)
+            .eq('carnet', targetCarnet)
             .single();
 
-          if (socError) throw new Error('Carnet no encontrado o inválido');
+          if (socError || !socData) throw new Error('Carnet no encontrado o código no válido.');
 
           const { data: cursosData } = await supabase
             .from('socorrista_cursos')
@@ -105,9 +167,6 @@ export default function VerificacionCarnet() {
               nombre: (c.cursos as any)?.nombre || 'N/A'
             }))
           });
-
-          // Hide carnetId from URL immediately to prevent sharing the direct link
-          window.history.replaceState({}, document.title, '/verificar/carnet');
 
           // Generate watermarked image dynamically
           if (socData.carnet_generado_url) {
@@ -172,6 +231,31 @@ export default function VerificacionCarnet() {
     );
   }
 
+  if (isExpired) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full text-center border-t-4 border-amber-500 animate-in fade-in zoom-in-95">
+          <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
+            <Clock className="w-8 h-8" />
+          </div>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-bold bg-amber-100 text-amber-800 mb-2">
+            Sesión Temporal Finalizada (5 min)
+          </span>
+          <h1 className="text-xl font-black text-gray-950 mb-2">Verificación Temporal Expirada</h1>
+          <p className="text-xs text-gray-600 leading-relaxed mb-6">
+            Por estrictas políticas de seguridad y protección de datos institucionales de Cruz Verde Salvadoreña, la consulta temporal generada por el código QR ha expirado tras transcurrir 5 minutos.
+          </p>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-gray-700">
+            <p className="font-semibold text-gray-900 mb-1">¿Desea consultar nuevamente?</p>
+            <p className="text-2xs text-gray-500">
+              Por favor, vuelva a escanear el código QR físico impreso en el carnet oficial del elemento.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (error || !socorrista) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
@@ -187,7 +271,13 @@ export default function VerificacionCarnet() {
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto bg-white rounded-xl shadow-xl overflow-hidden">
-        <div className="bg-primary px-6 py-8 text-center">
+        <div className="bg-primary px-6 py-8 text-center relative">
+          {/* Badge de seguridad con temporizador de 5 minutos */}
+          <div className="mb-3 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-2xs font-bold bg-white/20 backdrop-blur-xs text-white border border-white/30 shadow-xs">
+            <Clock className="w-3.5 h-3.5 text-emerald-300 animate-pulse" />
+            <span>Consulta Temporal Segura: {formatTime(timeLeft)}</span>
+          </div>
+
           {config.logos?.verificacion ? (
             <img src={config.logos.verificacion} alt="Logo" className="h-20 w-auto mx-auto mb-4 object-contain rounded bg-white p-1" />
           ) : (
@@ -203,131 +293,165 @@ export default function VerificacionCarnet() {
 
         <div className="p-6">
           <div className="text-center mb-6">
-            <div className="relative inline-block">
-              {socorrista.foto_url ? (
-                <img 
-                  src={socorrista.foto_url} 
-                  alt="Foto del Socorrista" 
-                  className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg mx-auto"
-                />
-              ) : (
-                <div className="h-32 w-32 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-2xl border-4 border-white shadow-lg mx-auto">
-                  {(socorrista.primer_nombre?.[0] || '') + (socorrista.primer_apellido?.[0] || '')}
-                </div>
-              )}
-              {socorrista.estado === 'Activo' ? (
-                <span className="absolute bottom-0 right-0 block h-6 w-6 rounded-full bg-green-400 border-2 border-white" title="Activo"></span>
-              ) : (
-                <span className="absolute bottom-0 right-0 block h-6 w-6 rounded-full bg-red-400 border-2 border-white" title="Inactivo"></span>
-              )}
-            </div>
+            {verificationFields.foto !== false && (
+              <div className="relative inline-block">
+                {socorrista.foto_url ? (
+                  <img 
+                    src={socorrista.foto_url} 
+                    alt="Foto del Socorrista" 
+                    className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg mx-auto"
+                  />
+                ) : (
+                  <div className="h-32 w-32 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-2xl border-4 border-white shadow-lg mx-auto">
+                    {(socorrista.primer_nombre?.[0] || '') + (socorrista.primer_apellido?.[0] || '')}
+                  </div>
+                )}
+                {verificationFields.estado !== false && (
+                  socorrista.estado === 'Activo' ? (
+                    <span className="absolute bottom-0 right-0 block h-6 w-6 rounded-full bg-green-400 border-2 border-white" title="Activo"></span>
+                  ) : (
+                    <span className="absolute bottom-0 right-0 block h-6 w-6 rounded-full bg-red-400 border-2 border-white" title="Inactivo"></span>
+                  )
+                )}
+              </div>
+            )}
             
-            <h2 className="mt-4 text-xl font-bold text-gray-900">
-              {socorrista.primer_nombre} {socorrista.primer_apellido}
-            </h2>
-            <p className="text-sm font-medium text-primary mt-1">
-              {socorrista.cargo_institucional || 'SOCORRISTA'}
-            </p>
-            <p className="text-xs font-medium text-gray-500 mt-1">
-              {socorrista.cargo_administrativo || '-'}
-            </p>
+            {verificationFields.nombre !== false && (
+              <h2 className="mt-4 text-xl font-bold text-gray-900">
+                {socorrista.primer_nombre} {socorrista.primer_apellido}
+              </h2>
+            )}
+            {verificationFields.cargoInstitucional !== false && (
+              <p className="text-sm font-medium text-primary mt-1">
+                {socorrista.cargo_institucional || 'SOCORRISTA'}
+              </p>
+            )}
+            {verificationFields.cargoAdministrativo !== false && socorrista.cargo_administrativo && (
+              <p className="text-xs font-medium text-gray-500 mt-1">
+                {socorrista.cargo_administrativo}
+              </p>
+            )}
           </div>
 
           <div className="border-t border-gray-200 pt-4">
             <dl className="divide-y divide-gray-200">
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">ID Carnet</dt>
-                <dd className="text-sm font-bold text-gray-900">{socorrista.carnet}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">DUI</dt>
-                <dd className="text-sm text-gray-900">{socorrista.dui || '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Seccional</dt>
-                <dd className="text-sm text-gray-900">{socorrista.seccional_nombre || '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Fecha de Ingreso</dt>
-                <dd className="text-sm text-gray-900">{socorrista.fecha_ingreso ? new Date(socorrista.fecha_ingreso).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Cumpleaños / Fecha Nac.</dt>
-                <dd className="text-sm text-gray-900">{socorrista.fecha_nacimiento ? new Date(socorrista.fecha_nacimiento).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Teléfono</dt>
-                <dd className="text-sm text-gray-900">{socorrista.telefono || '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between items-center">
-                <dt className="text-sm font-medium text-gray-500">Autorización Vehicular</dt>
-                <dd className="text-sm text-gray-900 text-right">
-                  {socorrista.motorista_autorizado ? (
-                    <span className="text-green-600 font-medium">Conductor Autorizado</span>
-                  ) : (
-                    <span className="text-red-600 font-medium">Conductor No Autorizado</span>
-                  )}
-                </dd>
-              </div>
-              <div className="py-3 flex flex-col">
-                <dt className="text-sm font-medium text-gray-500 mb-1">Licencias</dt>
-                <dd className="text-sm text-gray-900">
-                  {socorrista.licencia_vehiculo_numero || socorrista.licencia_moto_numero ? (
-                    <div className="space-y-1">
-                      {socorrista.licencia_vehiculo_numero && (
-                        <div>
-                          <span className="font-medium text-xs text-gray-500">Vehículo:</span> {socorrista.licencia_vehiculo_numero} 
-                          {socorrista.licencia_vehiculo_clase ? ` (${socorrista.licencia_vehiculo_clase})` : ''}
-                        </div>
-                      )}
-                      {socorrista.licencia_moto_numero && (
-                        <div>
-                          <span className="font-medium text-xs text-gray-500">Motocicleta:</span> {socorrista.licencia_moto_numero}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    '-'
-                  )}
-                </dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Tipo de Sangre</dt>
-                <dd className="text-sm text-gray-900">{socorrista.tipo_sangre || '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Email</dt>
-                <dd className="text-sm text-gray-900">{socorrista.email || '-'}</dd>
-              </div>
-              <div className="py-3 flex justify-between">
-                <dt className="text-sm font-medium text-gray-500">Estado</dt>
-                <dd className="text-sm">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    socorrista.estado === 'Activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {socorrista.estado}
-                  </span>
-                </dd>
-              </div>
+              {verificationFields.carnetId !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">ID Carnet</dt>
+                  <dd className="text-sm font-bold text-gray-900">{socorrista.carnet}</dd>
+                </div>
+              )}
+              {verificationFields.dui !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">DUI</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.dui || '-'}</dd>
+                </div>
+              )}
+              {verificationFields.seccional !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Seccional</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.seccional_nombre || '-'}</dd>
+                </div>
+              )}
+              {verificationFields.fechaIngreso !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Fecha de Ingreso</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.fecha_ingreso ? new Date(socorrista.fecha_ingreso).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}</dd>
+                </div>
+              )}
+              {verificationFields.fechaNacimiento !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Cumpleaños / Fecha Nac.</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.fecha_nacimiento ? new Date(socorrista.fecha_nacimiento).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}</dd>
+                </div>
+              )}
+              {verificationFields.telefono !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Teléfono</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.telefono || '-'}</dd>
+                </div>
+              )}
+              {verificationFields.motoristaAutorizado !== false && (
+                <div className="py-3 flex justify-between items-center">
+                  <dt className="text-sm font-medium text-gray-500">Autorización Vehicular</dt>
+                  <dd className="text-sm text-gray-900 text-right">
+                    {socorrista.motorista_autorizado ? (
+                      <span className="text-green-600 font-medium">Conductor Autorizado</span>
+                    ) : (
+                      <span className="text-red-600 font-medium">Conductor No Autorizado</span>
+                    )}
+                  </dd>
+                </div>
+              )}
+              {verificationFields.licencias !== false && (
+                <div className="py-3 flex flex-col">
+                  <dt className="text-sm font-medium text-gray-500 mb-1">Licencias</dt>
+                  <dd className="text-sm text-gray-900">
+                    {socorrista.licencia_vehiculo_numero || socorrista.licencia_moto_numero ? (
+                      <div className="space-y-1">
+                        {socorrista.licencia_vehiculo_numero && (
+                          <div>
+                            <span className="font-medium text-xs text-gray-500">Vehículo:</span> {socorrista.licencia_vehiculo_numero} 
+                            {socorrista.licencia_vehiculo_clase ? ` (${socorrista.licencia_vehiculo_clase})` : ''}
+                          </div>
+                        )}
+                        {socorrista.licencia_moto_numero && (
+                          <div>
+                            <span className="font-medium text-xs text-gray-500">Motocicleta:</span> {socorrista.licencia_moto_numero}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      '-'
+                    )}
+                  </dd>
+                </div>
+              )}
+              {verificationFields.tipoSangre !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Tipo de Sangre</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.tipo_sangre || '-'}</dd>
+                </div>
+              )}
+              {verificationFields.email !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Email</dt>
+                  <dd className="text-sm text-gray-900">{socorrista.email || '-'}</dd>
+                </div>
+              )}
+              {verificationFields.estado !== false && (
+                <div className="py-3 flex justify-between">
+                  <dt className="text-sm font-medium text-gray-500">Estado</dt>
+                  <dd className="text-sm">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      socorrista.estado === 'Activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {socorrista.estado}
+                    </span>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 
-          <div className="mt-6 border-t border-gray-200 pt-4">
-            <h3 className="text-sm font-medium text-gray-900 mb-2">Cursos Realizados</h3>
-            {socorrista.cursos && socorrista.cursos.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {socorrista.cursos.map((curso: any, idx: number) => (
-                  <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] rounded-md border border-blue-100">
-                    {curso.nombre}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">-</p>
-            )}
-          </div>
+          {verificationFields.cursos !== false && (
+            <div className="mt-6 border-t border-gray-200 pt-4">
+              <h3 className="text-sm font-medium text-gray-900 mb-2">Cursos Realizados</h3>
+              {socorrista.cursos && socorrista.cursos.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {socorrista.cursos.map((curso: any, idx: number) => (
+                    <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] rounded-md border border-blue-100">
+                      {curso.nombre}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">-</p>
+              )}
+            </div>
+          )}
 
-          {(socorrista.carnet_generado_url || watermarkedImage) && (
+          {verificationFields.carnetImagen !== false && (socorrista.carnet_generado_url || watermarkedImage) && (
             <div className="mt-8 border-t border-gray-200 pt-6">
               <h3 className="text-sm font-medium text-gray-900 mb-4 text-center">Imagen del Carnet</h3>
               <div className="relative rounded-lg overflow-hidden shadow-md max-w-[200px] mx-auto min-h-[150px] flex items-center justify-center bg-gray-100">

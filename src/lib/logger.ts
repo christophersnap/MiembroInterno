@@ -10,6 +10,26 @@ export const logActivity = async (
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Obtener nombre del usuario si está disponible en metadatos o perfil de socorrista
+    let userNombre = user.user_metadata?.full_name || user.user_metadata?.nombre || null;
+    if (!userNombre && user.email) {
+      try {
+        const { data: soc } = await supabase
+          .from('socorristas')
+          .select('primer_nombre, primer_apellido')
+          .eq('email', user.email)
+          .maybeSingle();
+        if (soc) {
+          userNombre = `${soc.primer_nombre} ${soc.primer_apellido}`.trim();
+        }
+      } catch (e) {}
+    }
+
+    const enrichedDetails = {
+      ...(details || {}),
+      user_nombre: userNombre || user.email?.split('@')[0] || 'Usuario'
+    };
+
     // Fetch max ID to avoid sequence out of sync errors if id is integer
     const { data: maxIdData } = await supabase
       .from('activity_logs')
@@ -29,7 +49,7 @@ export const logActivity = async (
       action,
       entity_type: entityType,
       entity_id: entityId ? String(entityId) : null,
-      details
+      details: enrichedDetails
     }]);
 
     // If it fails, try without user_email
@@ -41,7 +61,7 @@ export const logActivity = async (
         action,
         entity_type: entityType,
         entity_id: entityId ? String(entityId) : null,
-        details
+        details: enrichedDetails
       }]);
       if (fallbackError) {
         console.error('Fallback activity log failed:', fallbackError);
