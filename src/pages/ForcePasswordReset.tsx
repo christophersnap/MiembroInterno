@@ -52,7 +52,8 @@ export default function ForcePasswordReset() {
       
       // Reload page after a short delay to update context
       setTimeout(() => {
-        window.location.href = '/';
+        const isMiembros = window.location.pathname.startsWith('/miembros');
+        window.location.href = isMiembros ? '/miembros/' : '/';
       }, 2000);
 
     } catch (err: any) {

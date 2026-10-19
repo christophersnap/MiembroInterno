@@ -735,10 +735,10 @@ export default function GenerarCarnet() {
     // Draw QR Code
     if (showQR) {
       try {
-        // Enlace oficial y limpio para escaneo público sin login
+        // Enlace oficial y limpio para escaneo público sin login en el subdominio/subcarpeta institucional
         const baseOrigin = (qrBaseUrl && qrBaseUrl.trim() !== '') 
           ? qrBaseUrl.trim().replace(/\/$/, '') 
-          : (window.location.origin.includes('run.app') ? 'https://cruzverdesv.org/miembros' : window.location.origin);
+          : 'https://cruzverdesv.org/miembros';
         
         const pathPrefix = (qrLinkFormat === 'long') ? '/verificar' : '/v';
         // Generar token criptográfico único y no secuencial (evita adivinar otros carnets)

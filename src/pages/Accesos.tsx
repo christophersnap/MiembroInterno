@@ -13,6 +13,7 @@ import SolicitudesRegistroTab from '../components/accesos/SolicitudesRegistroTab
 import ResetPasswordModal from '../components/accesos/ResetPasswordModal';
 import PermisosIndividualesModal from '../components/accesos/PermisosIndividualesModal';
 import { generarHtmlCorreoAprobacion } from '../lib/emailNotification';
+import { getOfficialLoginUrl } from '../utils/appUrl';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -1581,7 +1582,7 @@ END $$;`;
                           asunto: asuntoAprobacion,
                           seccionalNombre: 'Seccional Santa Ana',
                           rolAsignado: 'socorrista',
-                          loginUrl: `${window.location.origin}/login`
+                          loginUrl: getOfficialLoginUrl()
                         })
                       }}
                     />

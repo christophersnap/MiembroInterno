@@ -5,6 +5,7 @@ import { Shield, Mail, Lock, UserPlus, KeyRound, X, CheckCircle2, AlertCircle } 
 import { useSettings } from '../contexts/SettingsContext';
 import { generarHtmlCorreoPasswordTemporal } from '../lib/emailNotification';
 import { sendEmailNotification } from '../lib/api';
+import { getOfficialLoginUrl } from '../utils/appUrl';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -123,7 +124,7 @@ export default function Login() {
     try {
       if (forgotOption === 'link') {
         const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
-          redirectTo: `${window.location.origin}/reset-password`,
+          redirectTo: getOfficialLoginUrl(),
         });
         if (error) throw error;
         setForgotSuccess(`Se ha enviado un enlace de recuperación oficial al correo ${forgotEmail}. Sigue las instrucciones recibidas.`);
@@ -154,7 +155,7 @@ export default function Login() {
           destinatarioNombre: forgotEmail.split('@')[0],
           asunto: 'Restablecimiento de Contraseña Temporal - Cruz Verde Salvadoreña',
           temporalPassword: generatedTemp,
-          loginUrl: `${window.location.origin}/login`
+          loginUrl: getOfficialLoginUrl()
         });
 
         // Despachar vía endpoint de correo

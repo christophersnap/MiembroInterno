@@ -182,15 +182,20 @@ export default function PublicFormulario() {
         created_at: new Date().toISOString()
       };
 
-      // 1. Guardar en Supabase en la nube
-      const { data: supaResp, error: supaErr } = await supabase
-        .from('formulario_respuestas')
-        .insert([payload])
-        .select()
-        .single();
+      // 1. Guardar en Supabase en la nube (sin select para permitir inserciones públicas anónimas)
+      let savedInCloud = false;
+      try {
+        const { error: supaErr } = await supabase
+          .from('formulario_respuestas')
+          .insert([payload]);
 
-      if (supaErr) {
-        console.warn('Aviso guardando en Supabase:', supaErr);
+        if (!supaErr) {
+          savedInCloud = true;
+        } else {
+          console.warn('Aviso guardando en Supabase:', supaErr);
+        }
+      } catch (errCloud) {
+        console.warn('Error de red con Supabase:', errCloud);
       }
 
       // 2. Notificar API local si está disponible
@@ -202,7 +207,7 @@ export default function PublicFormulario() {
         });
       } catch (e) {}
 
-      setSubmissionId(supaResp?.id || Date.now());
+      setSubmissionId(Date.now());
       setSubmitted(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {

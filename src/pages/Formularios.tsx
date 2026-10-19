@@ -11,6 +11,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
 import { generateSlug } from '../utils/slugify';
+import { getOfficialFormUrl } from '../utils/appUrl';
+import { logActivity } from '../lib/logger';
 
 export default function Formularios() {
   const { user, userName, role, permissions } = useAuth();
@@ -37,7 +39,7 @@ export default function Formularios() {
   }, []);
 
   const getOfficialShareUrl = (slug: string) => {
-    return `https://cruzverdesv.org/miembros/f/${slug}`;
+    return getOfficialFormUrl(slug);
   };
 
   const loadFormularios = async () => {

@@ -122,7 +122,8 @@ export default function CombustibleForm({
       motivo_no_liquidacion: entregoLiquidacion === 'No' ? motivoNoLiquidacion.trim() : '',
       nombre_solicitante: nombreSolicitante.trim(),
       telefono_solicitante: telefonoSolicitante.trim(),
-      observaciones: observaciones.trim()
+      observaciones: observaciones.trim(),
+      fecha_solicitud: new Date().toISOString().split('T')[0]
     };
 
     await onSubmit(payload);

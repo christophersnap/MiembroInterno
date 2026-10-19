@@ -42,6 +42,11 @@ if (!empty($scriptDir) && strpos($cleanUri, $scriptDir . '/') === 0) {
 } elseif (strpos($cleanUri, 'miembros/') === 0) {
     $cleanUri = substr($cleanUri, 9);
 } elseif ($cleanUri === 'miembros') {
+    // Redirección canónica con trailing slash si se accede sin la barra final
+    if (substr($requestUri, -1) !== '/' && strpos($requestUri, '?') === false) {
+        header('Location: /miembros/', true, 301);
+        exit;
+    }
     $cleanUri = '';
 }
 
@@ -151,7 +156,13 @@ if ($distIndex && file_exists($distIndex)) {
     header('Content-Type: text/html; charset=UTF-8');
     header('Cache-Control: no-cache, no-store, must-revalidate');
     header('X-CruzVerde-Host: Hostinger-Production');
-    readfile($distIndex);
+    
+    $html = file_get_contents($distIndex);
+    // Asegurar que la etiqueta <base href="/miembros/"> esté presente para la correcta resolución de rutas relativas
+    if (strpos($html, '<base ') === false) {
+        $html = str_replace('<head>', "<head>\n    <base href=\"/miembros/\">", $html);
+    }
+    echo $html;
     exit;
 }
 

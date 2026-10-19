@@ -2,6 +2,7 @@
  * Helper de plantillas, estilos y notificaciones por correo para Cruz Verde Salvadoreña
  * Soporta personalización de colores de header, footer, fuentes, logos y remitente No-Reply.
  */
+import { getOfficialLoginUrl } from '../utils/appUrl';
 
 export interface EmailDesignConfig {
   headerColor?: string;
@@ -123,7 +124,7 @@ export function getStoredDesignConfig(): Partial<EmailDesignConfig> {
  */
 export function generarHtmlCorreoAprobacion(params: EmailTemplateParams, design?: EmailDesignConfig): string {
   const cfg = { ...DEFAULT_EMAIL_DESIGN, ...getStoredDesignConfig(), ...design };
-  const loginUrl = params.loginUrl || `${typeof window !== 'undefined' ? window.location.origin : 'https://cruzverde.org.sv'}/login`;
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
   const displayRol = params.rolAsignado || params.rolNombre || 'Socorrista';
 
   return `<!DOCTYPE html>
@@ -222,7 +223,7 @@ export function generarHtmlCorreoAprobacion(params: EmailTemplateParams, design?
  */
 export function generarHtmlCorreoPasswordTemporal(params: EmailTemplateParams, design?: EmailDesignConfig): string {
   const cfg = { ...DEFAULT_EMAIL_DESIGN, ...getStoredDesignConfig(), ...design };
-  const loginUrl = params.loginUrl || `${typeof window !== 'undefined' ? window.location.origin : 'https://cruzverde.org.sv'}/login`;
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -299,21 +300,52 @@ export function generarHtmlCorreoPasswordTemporal(params: EmailTemplateParams, d
  * Incluye el FORMULARIO COMPLETO LLENO y el PDF OFICIAL ADJUNTO generado.
  */
 export function generarHtmlCorreoCompra(
-  params: EmailTemplateParams, 
-  datos: DatosSolicitudCompra, 
+  paramsOrUnified: any, 
+  datosArg?: DatosSolicitudCompra, 
   design?: EmailDesignConfig
 ): string {
   const cfg = { ...DEFAULT_EMAIL_DESIGN, ...getStoredDesignConfig(), ...design };
-  const pdfName = datos.nombreArchivoPdf || `Solicitud_Compra_${datos.numeroSolicitud}.pdf`;
+  
+  let p: any;
+  let d: any;
 
-  const itemsRows = datos.items.map((it, idx) => `
+  if (datosArg) {
+    p = paramsOrUnified || {};
+    d = datosArg;
+  } else {
+    d = paramsOrUnified || {};
+    p = {
+      remitenteNombre: 'Cruz Verde Salvadoreña (No Responder)',
+      remitenteCorreo: 'notificaciones@cruzverdesv.org',
+      asunto: d.asunto || `Solicitud de Compra: ${d.folio || d.numeroSolicitud || 'SC-CVS'} - ${d.seccional || ''}`
+    };
+  }
+
+  const codigo = d.numeroSolicitud || d.folio || 'SC-CVS';
+  const pdfName = d.nombreArchivoPdf || `Solicitud_Compra_${codigo}.pdf`;
+  const items = Array.isArray(d.items) && d.items.length > 0 
+    ? d.items 
+    : [{ descripcion: d.justificacion || d.descripcion || 'Bienes o servicios solicitados', cantidad: 1, unidad: 'Serv/Lote', precioEstimado: d.totalEstimado || 0, subtotal: d.totalEstimado || 0 }];
+
+  const itemsRows = items.map((it: any, idx: number) => `
     <tr style="border-bottom: 1px solid #f1f5f9; ${idx % 2 === 1 ? 'background-color: #fafbfc;' : ''}">
       <td style="padding: 10px 12px; font-size: 13px; color: #1e293b; font-weight: 500;">${it.descripcion}</td>
-      <td style="padding: 10px 12px; font-size: 13px; color: #475569; text-align: center;">${it.cantidad} ${it.unidad || 'und'}</td>
+      <td style="padding: 10px 12px; font-size: 13px; color: #475569; text-align: center;">${it.cantidad || 1} ${it.unidad || 'und'}</td>
       <td style="padding: 10px 12px; font-size: 13px; color: #475569; text-align: right;">$${Number(it.precioEstimado || 0).toFixed(2)}</td>
       <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-weight: 700; text-align: right;">$${Number(it.subtotal || ((it.cantidad || 1) * (it.precioEstimado || 0))).toFixed(2)}</td>
     </tr>
   `).join('');
+
+  const params = p;
+  const datos = {
+    ...d,
+    numeroSolicitud: codigo,
+    seccionalNombre: d.seccionalNombre || d.seccional || 'Cruz Verde',
+    solicitante: d.solicitante || d.solicitado_por || 'Director',
+    cargo: d.cargo || d.cargoSolicitante || 'Director',
+    tipo: d.tipo || d.tipoSolicitud || 'General',
+    totalEstimado: d.totalEstimado !== undefined ? d.totalEstimado : (d.montoEstimado || 0)
+  };
 
   return `<!DOCTYPE html>
 <html lang="es">

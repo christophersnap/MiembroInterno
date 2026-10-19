@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { generarHtmlCorreoPasswordTemporal } from '../../lib/emailNotification';
 import { sendEmailNotification } from '../../lib/api';
+import { getOfficialLoginUrl } from '../../utils/appUrl';
 
 interface ResetPasswordModalProps {
   user: any;
@@ -23,7 +24,7 @@ export default function ResetPasswordModal({
   const [method, setMethod] = useState<'temporal' | 'manual'>('temporal');
   const [manualPassword, setManualPassword] = useState('');
   const [requireResetOnLogin, setRequireResetOnLogin] = useState(true);
-  const [sendEmailNotification, setSendEmailNotification] = useState(true);
+  const [sendNotification, setSendNotification] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successData, setSuccessData] = useState<{ passwordGenerada: string; emailEnviado: boolean } | null>(null);
@@ -65,7 +66,7 @@ export default function ResetPasswordModal({
 
       // 2. Enviar correo con la clave si está marcado
       let emailSent = false;
-      if (sendEmailNotification && user.email) {
+      if (sendNotification && user.email) {
         const emailHtml = generarHtmlCorreoPasswordTemporal({
           remitenteNombre,
           remitenteCorreo,
@@ -73,7 +74,7 @@ export default function ResetPasswordModal({
           destinatarioNombre: user.socorristas ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}` : user.email.split('@')[0],
           asunto: 'Restablecimiento de Contraseña - Cruz Verde Salvadoreña',
           temporalPassword: targetPassword,
-          loginUrl: `${window.location.origin}/login`
+          loginUrl: getOfficialLoginUrl()
         });
 
         try {
@@ -291,8 +292,8 @@ export default function ResetPasswordModal({
               <label className="flex items-center space-x-2.5 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={sendEmailNotification}
-                  onChange={(e) => setSendEmailNotification(e.target.checked)}
+                  checked={sendNotification}
+                  onChange={(e) => setSendNotification(e.target.checked)}
                   className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
                 />
                 <span className="text-2xs text-gray-700 font-medium leading-tight">

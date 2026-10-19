@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { generarHtmlCorreoAprobacion } from '../../lib/emailNotification';
 import { sendEmailNotification } from '../../lib/api';
+import { getOfficialLoginUrl } from '../../utils/appUrl';
 
 interface Solicitud {
   id: string;
@@ -146,7 +147,7 @@ export default function SolicitudesRegistroTab({
           asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
           seccionalNombre,
           rolAsignado: assignedRole,
-          loginUrl: `${window.location.origin}/login`,
+          loginUrl: getOfficialLoginUrl(),
         });
 
         try {
@@ -607,7 +608,7 @@ export default function SolicitudesRegistroTab({
                     asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
                     seccionalNombre: seccionales.find(s => s.id === Number(assignedSeccionalId))?.nombre || 'Cruz Verde Salvadoreña',
                     rolAsignado: assignedRole,
-                    loginUrl: `${window.location.origin}/login`
+                    loginUrl: getOfficialLoginUrl()
                   })
                 }}
               />

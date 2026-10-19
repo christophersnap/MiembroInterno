@@ -16,6 +16,7 @@ import {
   generarHtmlCorreoCombustible 
 } from '../../lib/emailNotification';
 import { getApiUrl, sendEmailNotification } from '../../lib/api';
+import { getOfficialLoginUrl } from '../../utils/appUrl';
 
 interface ModalDisenadorCorreosProps {
   isOpen: boolean;
@@ -180,7 +181,7 @@ export default function ModalDisenadorCorreos({
         asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
         seccionalNombre: 'Seccional Santa Anita',
         rolAsignado: 'socorrista',
-        loginUrl: `${window.location.origin}/login`
+        loginUrl: getOfficialLoginUrl()
       }, currentDesign);
     }
 

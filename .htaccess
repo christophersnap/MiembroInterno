@@ -1,5 +1,5 @@
 # ==============================================================================
-# CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO HOSTINGER + GITHUB
+# CRUZ VERDE SALVADOREÑA - ENRUTAMIENTO HOSTINGER + GITHUB (/miembros)
 # ==============================================================================
 
 DirectoryIndex index.php dist/index.html index.html
@@ -7,23 +7,34 @@ DirectoryIndex index.php dist/index.html index.html
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
-  # 1. Servir archivos físicos existentes en la raíz (assets, favicon, robots.txt, etc.)
-  # Excluir index.html de la raíz para no servir el template de desarrollo
+  # 1. Asegurar redirección canónica de /miembros a /miembros/ si entra sin barra final
+  RewriteRule ^miembros$ /miembros/ [R=301,L]
+
+  # 2. Servir archivos físicos existentes en la raíz o subdirectorio
   RewriteCond %{REQUEST_FILENAME} -f
-  RewriteCond %{REQUEST_URI} !^/index\.html$ [NC]
+  RewriteCond %{REQUEST_URI} !^.*index\.html$ [NC]
   RewriteRule ^ - [L]
 
-  # 2. Si el archivo físico solicitado existe dentro de dist/
+  # 3. Servir assets directamente si existen dentro de dist/assets/
+  RewriteCond %{DOCUMENT_ROOT}/miembros/dist/assets/$1 -f
+  RewriteRule ^(?:miembros/)?assets/(.+)$ dist/assets/$1 [L]
+
+  RewriteCond %{DOCUMENT_ROOT}/dist/assets/$1 -f
+  RewriteRule ^(?:miembros/)?assets/(.+)$ dist/assets/$1 [L]
+
+  RewriteCond %{DOCUMENT_ROOT}/miembros/assets/$1 -f
+  RewriteRule ^(?:miembros/)?assets/(.+)$ assets/$1 [L]
+
+  RewriteCond %{DOCUMENT_ROOT}/assets/$1 -f
+  RewriteRule ^(?:miembros/)?assets/(.+)$ assets/$1 [L]
+
+  # 4. Si el archivo solicitado existe dentro de dist/
   RewriteCond dist%{REQUEST_URI} -f [OR]
-  RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
+  RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f [OR]
+  RewriteCond %{DOCUMENT_ROOT}/miembros/dist%{REQUEST_URI} -f
   RewriteRule ^(.*)$ dist/$1 [L]
 
-  # 3. Si se solicita la raíz (/) o /index.html explícitamente, delegar al router index.php
-  RewriteRule ^$ index.php [L]
-  RewriteRule ^index\.html$ index.php [L]
-
-  # 4. Cualquier otra petición (rutas SPA /login, /socorristas y resolución inteligente de assets)
-  # se delega a index.php, que se encarga de servir dist/index.html o el archivo correspondiente
+  # 5. Delegar todas las demás rutas SPA a index.php
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^(.*)$ index.php [L]

@@ -955,7 +955,7 @@ NOTIFY pgrst, 'reload schema';`;
             vehiculoDescripcion: payloadData.vehiculo_descripcion,
             justificacion: payloadData.descripcion,
             proveedorSugerido: payloadData.proveedor_sugerido,
-            items: (payloadData.items || []).map((it: any) => ({
+            items: ((payloadData as any).items || []).map((it: any) => ({
               descripcion: it.descripcion,
               cantidad: Number(it.cantidad) || 1,
               unidad: it.unidad,
