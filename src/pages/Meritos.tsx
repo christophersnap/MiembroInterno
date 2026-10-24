@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Award, Plus, Search, Filter, Calendar, Users, Building2, 
-  Trash2, Edit3, CheckCircle2, AlertCircle, X, Shield, Medal, Star, Eye
+  Trash2, Edit3, CheckCircle2, AlertCircle, X, Shield, Medal, Star, Eye,
+  Link as LinkIcon, ExternalLink, Globe, UserCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Merito, SocorristaAsignadoMerito, CATEGORIAS_MERITO } from '../types/merito';
+import { Merito, SocorristaAsignadoMerito, MeritoEnlace, CATEGORIAS_MERITO } from '../types/merito';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 
@@ -32,12 +33,18 @@ export default function Meritos() {
   const [descripcion, setDescripcion] = useState('');
   const [socorristasAsignados, setSocorristasAsignados] = useState<SocorristaAsignadoMerito[]>([]);
 
-  // Búsqueda de Socorristas para agregar
+  // Enlaces anexos (notas de medios, reportajes, fotos)
+  const [enlaces, setEnlaces] = useState<MeritoEnlace[]>([]);
+  const [enlaceTitulo, setEnlaceTitulo] = useState('');
+  const [enlaceUrl, setEnlaceUrl] = useState('');
+
+  // Búsqueda interactiva de Socorristas para condecorar
   const [allSocorristas, setAllSocorristas] = useState<any[]>([]);
   const [socorristaSearch, setSocorristaSearch] = useState('');
-  const [selectedSocorristaId, setSelectedSocorristaId] = useState<string>('');
+  const [selectedSocorrista, setSelectedSocorrista] = useState<any | null>(null);
   const [fechaAsignacionIndividual, setFechaAsignacionIndividual] = useState(new Date().toISOString().split('T')[0]);
   const [notaIndividual, setNotaIndividual] = useState('');
+  const [showSocorristaDropdown, setShowSocorristaDropdown] = useState(false);
 
   useEffect(() => {
     loadMeritos();
@@ -59,7 +66,8 @@ export default function Meritos() {
         if (!error && data) {
           list = data.map((m: any) => ({
             ...m,
-            socorristas_asignados: Array.isArray(m.socorristas_asignados) ? m.socorristas_asignados : []
+            socorristas_asignados: Array.isArray(m.socorristas_asignados) ? m.socorristas_asignados : [],
+            enlaces: Array.isArray(m.enlaces) ? m.enlaces : []
           }));
         }
       } catch (err) {
@@ -103,7 +111,7 @@ export default function Meritos() {
       if (!error && data) {
         const formatted = data.map(s => ({
           id: s.id,
-          carnet: s.carnet,
+          carnet: s.carnet || 'S/C',
           nombreCompleto: `${s.primer_nombre} ${s.primer_apellido}`,
           seccional_nombre: Array.isArray(s.seccionales) ? s.seccionales[0]?.nombre : (s.seccionales as any)?.nombre || 'N/A'
         }));
@@ -122,7 +130,13 @@ export default function Meritos() {
     setFechaMerito(new Date().toISOString().split('T')[0]);
     setDescripcion('');
     setSocorristasAsignados([]);
-    setSelectedSocorristaId('');
+    setEnlaces([]);
+    setEnlaceTitulo('');
+    setEnlaceUrl('');
+    setSelectedSocorrista(null);
+    setSocorristaSearch('');
+    setNotaIndividual('');
+    setShowSocorristaDropdown(false);
     setModalOpen(true);
     setErrorMsg(null);
   };
@@ -135,38 +149,75 @@ export default function Meritos() {
     setFechaMerito(merito.fecha_merito || new Date().toISOString().split('T')[0]);
     setDescripcion(merito.descripcion || '');
     setSocorristasAsignados(merito.socorristas_asignados || []);
-    setSelectedSocorristaId('');
+    setEnlaces(merito.enlaces || []);
+    setEnlaceTitulo('');
+    setEnlaceUrl('');
+    setSelectedSocorrista(null);
+    setSocorristaSearch('');
+    setNotaIndividual('');
+    setShowSocorristaDropdown(false);
     setModalOpen(true);
     setErrorMsg(null);
   };
 
-  const handleAddSocorristaToMerito = () => {
-    if (!selectedSocorristaId) return;
-    const soc = allSocorristas.find(s => s.id.toString() === selectedSocorristaId);
-    if (!soc) return;
+  const handleAddEnlace = () => {
+    if (!enlaceUrl.trim()) return;
+    let url = enlaceUrl.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    const nuevo: MeritoEnlace = {
+      id: `enl-${Date.now()}`,
+      titulo: enlaceTitulo.trim() || 'Nota de Prensa / Cobertura',
+      url
+    };
+    setEnlaces([...enlaces, nuevo]);
+    setEnlaceTitulo('');
+    setEnlaceUrl('');
+  };
 
-    if (socorristasAsignados.some(s => s.socorrista_id === soc.id)) {
+  const handleRemoveEnlace = (index: number) => {
+    setEnlaces(enlaces.filter((_, i) => i !== index));
+  };
+
+  const handleAddSocorristaToMerito = () => {
+    if (!selectedSocorrista) return;
+
+    if (socorristasAsignados.some(s => s.socorrista_id === selectedSocorrista.id)) {
       alert('Este socorrista ya está agregado al reconocimiento.');
       return;
     }
 
     const newItem: SocorristaAsignadoMerito = {
-      socorrista_id: soc.id,
-      socorrista_nombre: soc.nombreCompleto,
-      socorrista_carnet: soc.carnet,
-      seccional_nombre: soc.seccional_nombre,
+      socorrista_id: selectedSocorrista.id,
+      socorrista_nombre: selectedSocorrista.nombreCompleto,
+      socorrista_carnet: selectedSocorrista.carnet,
+      seccional_nombre: selectedSocorrista.seccional_nombre,
       fecha_asignacion: fechaAsignacionIndividual || fechaMerito,
       nota_distincion: notaIndividual.trim() || undefined
     };
 
     setSocorristasAsignados([...socorristasAsignados, newItem]);
-    setSelectedSocorristaId('');
+    setSelectedSocorrista(null);
+    setSocorristaSearch('');
     setNotaIndividual('');
+    setShowSocorristaDropdown(false);
   };
 
   const handleRemoveSocorrista = (socorristaId: number) => {
     setSocorristasAsignados(socorristasAsignados.filter(s => s.socorrista_id !== socorristaId));
   };
+
+  // Filtrado de socorristas en tiempo real por texto o código de carnet
+  const filteredSocorristasParaAgregar = allSocorristas.filter(s => {
+    if (!socorristaSearch.trim()) return true;
+    const term = socorristaSearch.toLowerCase().trim();
+    return (
+      s.nombreCompleto?.toLowerCase().includes(term) ||
+      s.carnet?.toLowerCase().includes(term) ||
+      s.seccional_nombre?.toLowerCase().includes(term)
+    );
+  }).slice(0, 20);
 
   const handleSaveMerito = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,6 +236,7 @@ export default function Meritos() {
       fecha_merito: fechaMerito,
       descripcion: descripcion.trim(),
       socorristas_asignados: socorristasAsignados,
+      enlaces,
       updated_at: new Date().toISOString()
     };
 
@@ -499,6 +551,30 @@ export default function Meritos() {
                 </div>
               )}
 
+              {/* Enlaces y Cobertura de Medios */}
+              {merito.enlaces && merito.enlaces.length > 0 && (
+                <div>
+                  <h5 className="text-3xs font-extrabold uppercase tracking-wider text-gray-500 mb-1.5 flex items-center">
+                    <LinkIcon className="w-3.5 h-3.5 mr-1 text-blue-500" />
+                    Notas de Medios y Enlaces Anexos ({merito.enlaces.length}):
+                  </h5>
+                  <div className="flex flex-wrap gap-2">
+                    {merito.enlaces.map((enl, idx) => (
+                      <a
+                        key={idx}
+                        href={enl.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-2.5 py-1 bg-blue-50/80 hover:bg-blue-100 text-blue-800 rounded-lg border border-blue-200 text-3xs font-semibold shadow-2xs transition-all group"
+                      >
+                        <ExternalLink className="w-3 h-3 mr-1 text-blue-600 group-hover:scale-110 transition-transform" />
+                        <span className="truncate max-w-[280px]">{enl.titulo || enl.url}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Socorristas Galardonados con este Mérito */}
               <div>
                 <h5 className="text-3xs font-extrabold uppercase tracking-wider text-gray-500 mb-2 flex items-center">
@@ -626,6 +702,75 @@ export default function Meritos() {
                 </div>
               </div>
 
+              {/* SECCIÓN: ENLACES ANEXOS Y NOTAS DE MEDIOS */}
+              <div className="pt-4 border-t border-gray-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center">
+                    <LinkIcon className="w-4 h-4 mr-1.5 text-blue-600" />
+                    Notas de Medios, Enlaces y Evidencia Digital ({enlaces.length})
+                  </h4>
+                  <span className="text-3xs text-gray-400">
+                    Opcional: noticias de periódicos, videos o artículos
+                  </span>
+                </div>
+
+                <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-200/80 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                    <div className="sm:col-span-5">
+                      <input
+                        type="text"
+                        value={enlaceTitulo}
+                        onChange={(e) => setEnlaceTitulo(e.target.value)}
+                        placeholder="Título del medio (ej. Reportaje Diario El Mundo)"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none text-xs bg-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-5">
+                      <input
+                        type="url"
+                        value={enlaceUrl}
+                        onChange={(e) => setEnlaceUrl(e.target.value)}
+                        placeholder="URL completa (ej. https://...)"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none text-xs bg-white font-mono"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <button
+                        type="button"
+                        onClick={handleAddEnlace}
+                        disabled={!enlaceUrl.trim()}
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition disabled:opacity-40 cursor-pointer shadow-2xs"
+                      >
+                        + Anexar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista de enlaces anexados */}
+                  {enlaces.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1.5">
+                      {enlaces.map((enl, idx) => (
+                        <div
+                          key={idx}
+                          className="inline-flex items-center px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-3xs font-semibold text-blue-900 shadow-2xs"
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1 text-blue-600" />
+                          <span className="truncate max-w-[200px]">{enl.titulo}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEnlace(idx)}
+                            className="ml-1.5 text-gray-400 hover:text-red-600 transition"
+                            title="Eliminar enlace"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* SECCIÓN: SOCORRISTAS QUE POSEEN ESTE MÉRITO */}
               <div className="pt-4 border-t border-gray-200 space-y-3">
                 <div className="flex items-center justify-between">
@@ -634,49 +779,138 @@ export default function Meritos() {
                     Socorristas Condecorados ({socorristasAsignados.length})
                   </h4>
                   <span className="text-3xs text-gray-400">
-                    Aparecerá directamente en el perfil de cada socorrista
+                    Buscador rápido por texto o código de carnet
                   </span>
                 </div>
 
-                {/* Buscador y selector de socorrista */}
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                    <div className="sm:col-span-6">
-                      <select
-                        value={selectedSocorristaId}
-                        onChange={(e) => setSelectedSocorristaId(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none bg-white text-xs"
-                      >
-                        <option value="">-- Seleccionar Socorrista a Agregar --</option>
-                        {allSocorristas.map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.nombreCompleto} ({s.carnet}) - {s.seccional_nombre}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="sm:col-span-4">
-                      <input
-                        type="text"
-                        value={notaIndividual}
-                        onChange={(e) => setNotaIndividual(e.target.value)}
-                        placeholder="Nota/Rango (ej. Mención Honorífica)"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none text-xs bg-white"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
+                {/* Buscador inteligente en tiempo real de socorristas */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={socorristaSearch}
+                      onChange={(e) => {
+                        setSocorristaSearch(e.target.value);
+                        setShowSocorristaDropdown(true);
+                      }}
+                      onFocus={() => setShowSocorristaDropdown(true)}
+                      placeholder="Escribe nombre o carnet (ej. CVS-1024, Juan, Santa Ana)..."
+                      className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-xl outline-none text-xs bg-white focus:ring-2 focus:ring-emerald-500 font-medium"
+                    />
+                    {socorristaSearch && (
                       <button
                         type="button"
-                        onClick={handleAddSocorristaToMerito}
-                        disabled={!selectedSocorristaId}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition disabled:opacity-40 cursor-pointer"
+                        onClick={() => {
+                          setSocorristaSearch('');
+                          setShowSocorristaDropdown(false);
+                        }}
+                        className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600"
                       >
-                        + Agregar
+                        <X className="w-3.5 h-3.5" />
                       </button>
-                    </div>
+                    )}
                   </div>
+
+                  {/* Resultados desplegables interactivos */}
+                  {showSocorristaDropdown && socorristaSearch.trim().length > 0 && (
+                    <div className="max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg p-1 space-y-1">
+                      {filteredSocorristasParaAgregar.length === 0 ? (
+                        <div className="p-3 text-center text-3xs text-gray-500">
+                          No se encontraron socorristas activos con "{socorristaSearch}"
+                        </div>
+                      ) : (
+                        filteredSocorristasParaAgregar.map(s => {
+                          const isAlreadyAdded = socorristasAsignados.some(a => a.socorrista_id === s.id);
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              disabled={isAlreadyAdded}
+                              onClick={() => {
+                                setSelectedSocorrista(s);
+                                setShowSocorristaDropdown(false);
+                              }}
+                              className={`w-full text-left p-2 rounded-lg flex items-center justify-between text-xs transition cursor-pointer ${
+                                isAlreadyAdded
+                                  ? 'opacity-40 bg-gray-50 cursor-not-allowed'
+                                  : selectedSocorrista?.id === s.id
+                                  ? 'bg-emerald-50 border border-emerald-300 text-emerald-950 font-bold'
+                                  : 'hover:bg-slate-100 text-gray-800'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2 truncate">
+                                <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-3xs shrink-0">
+                                  {s.nombreCompleto.substring(0, 2).toUpperCase()}
+                                </span>
+                                <div className="truncate">
+                                  <span className="font-semibold block truncate">{s.nombreCompleto}</span>
+                                  <span className="text-3xs text-gray-500">{s.seccional_nombre}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-1 shrink-0 ml-2">
+                                <span className="font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded text-3xs font-bold border border-emerald-200">
+                                  {s.carnet}
+                                </span>
+                                {isAlreadyAdded && (
+                                  <span className="text-4xs uppercase bg-gray-200 text-gray-600 px-1 py-0.5 rounded font-bold">
+                                    Agregado
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* Fila de acción con socorrista seleccionado */}
+                  {selectedSocorrista ? (
+                    <div className="p-2.5 bg-emerald-50/80 rounded-xl border border-emerald-200/90 flex flex-col sm:flex-row items-center justify-between gap-2 animate-in fade-in">
+                      <div className="flex items-center space-x-2 truncate w-full sm:w-auto">
+                        <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <div className="truncate">
+                          <span className="font-bold text-emerald-950 block truncate">
+                            {selectedSocorrista.nombreCompleto}
+                          </span>
+                          <span className="text-3xs text-emerald-700 font-mono">
+                            Carnet: {selectedSocorrista.carnet} • {selectedSocorrista.seccional_nombre}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                        <input
+                          type="text"
+                          value={notaIndividual}
+                          onChange={(e) => setNotaIndividual(e.target.value)}
+                          placeholder="Nota / Rango (ej. Mención al Valor)"
+                          className="px-2.5 py-1.5 border border-emerald-300 rounded-lg text-xs bg-white flex-1 sm:w-56 outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddSocorristaToMerito}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs transition cursor-pointer shadow-xs shrink-0"
+                        >
+                          + Vincular
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSocorrista(null)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 transition"
+                          title="Cancelar selección"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-3xs text-gray-500 italic flex items-center">
+                      <AlertCircle className="w-3.5 h-3.5 mr-1 text-gray-400" />
+                      Escribe el nombre o número de carnet del socorrista para seleccionarlo rápidamente.
+                    </div>
+                  )}
                 </div>
 
                 {/* Lista de socorristas asignados */}

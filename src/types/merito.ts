@@ -7,6 +7,12 @@ export interface SocorristaAsignadoMerito {
   nota_distincion?: string;
 }
 
+export interface MeritoEnlace {
+  id?: string;
+  titulo: string;
+  url: string;
+}
+
 export interface Merito {
   id?: number | string;
   titulo: string;
@@ -15,6 +21,7 @@ export interface Merito {
   institucion_otorgante: string;
   fecha_merito: string;
   socorristas_asignados: SocorristaAsignadoMerito[];
+  enlaces?: MeritoEnlace[];
   created_at?: string;
   updated_at?: string;
 }

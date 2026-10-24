@@ -14,6 +14,7 @@ import ResetPasswordModal from '../components/accesos/ResetPasswordModal';
 import PermisosIndividualesModal from '../components/accesos/PermisosIndividualesModal';
 import { generarHtmlCorreoAprobacion } from '../lib/emailNotification';
 import { getOfficialLoginUrl } from '../utils/appUrl';
+import { getApiUrl } from '../lib/api';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -218,45 +219,126 @@ export default function Accesos() {
         setOriginalAjustes(newAjustes);
       }
 
-      // 5. Fetch solicitudes de registro
+      // 5. Fetch solicitudes de registro (Multi-fuente garantizada)
+      let combinedSolicitudes: any[] = [];
+      const seenEmails = new Set<string>();
+
+      // A. Desde tabla solicitudes_registro en Supabase
       try {
         const { data: solData, error: solError } = await supabase
           .from('solicitudes_registro')
-          .select(`
-            *,
-            seccionales (id, nombre)
-          `)
+          .select(`*, seccionales (id, nombre)`)
           .order('fecha_solicitud', { ascending: false });
 
-        if (!solError && solData) {
-          setSolicitudes(solData);
-        } else {
-          // Fallback: Si la tabla no existe aún, detectar usuarios pendientes en user_roles
-          const pendingUsers = (mergedUsers || [])
-            .filter((u: any) => u.role === 'pendiente' || u.estado === 'pendiente')
-            .map((u: any) => ({
-              id: u.id,
-              auth_user_id: u.id,
-              nombre_completo: u.socorristas ? `${u.socorristas.primer_nombre} ${u.socorristas.primer_apellido}` : (u.email?.split('@')[0] || 'Nuevo Solicitante'),
-              email: u.email || 'Email no disponible',
-              carnet: u.socorristas?.carnet,
-              seccional_id: u.socorristas?.seccional_id,
-              seccionales: u.socorristas?.seccionales,
-              tipo_usuario: 'socorrista',
-              estado: 'pendiente' as const,
-              fecha_solicitud: new Date().toISOString(),
-            }));
-          setSolicitudes(pendingUsers);
+        if (!solError && solData && solData.length > 0) {
+          solData.forEach(s => {
+            combinedSolicitudes.push(s);
+            if (s.email) seenEmails.add(s.email.toLowerCase());
+          });
         }
       } catch (errSol) {
-        console.warn('Error leyendo solicitudes_registro:', errSol);
+        console.warn('Aviso leyendo tabla solicitudes_registro de Supabase:', errSol);
       }
+
+      // B. Desde API backend /api/solicitudes-registro (SQLite/Servidor)
+      try {
+        const apiRes = await fetch(getApiUrl('/api/solicitudes-registro'));
+        if (apiRes.ok) {
+          const apiRows = await apiRes.json();
+          if (Array.isArray(apiRows)) {
+            apiRows.forEach(s => {
+              if (s.email && !seenEmails.has(s.email.toLowerCase())) {
+                const sec = secData?.find(x => x.id === s.seccional_id);
+                combinedSolicitudes.push({
+                  ...s,
+                  seccionales: sec || (s.seccional_nombre ? { id: s.seccional_id, nombre: s.seccional_nombre } : undefined)
+                });
+                seenEmails.add(s.email.toLowerCase());
+              }
+            });
+          }
+        }
+      } catch (errApi) {
+        console.warn('Aviso leyendo /api/solicitudes-registro:', errApi);
+      }
+
+      // C. Desde respaldo en configuracion (clave solicitudes_registro_store)
+      if (configData) {
+        const storeRow = configData.find(r => r.clave === 'solicitudes_registro_store');
+        if (storeRow?.valor) {
+          try {
+            const parsedStore = JSON.parse(storeRow.valor);
+            if (Array.isArray(parsedStore)) {
+              parsedStore.forEach(s => {
+                if (s.email && !seenEmails.has(s.email.toLowerCase())) {
+                  combinedSolicitudes.push(s);
+                  seenEmails.add(s.email.toLowerCase());
+                }
+              });
+            }
+          } catch (e) {}
+        }
+      }
+
+      // D. Fallback adicional: usuarios pendientes en user_roles
+      const pendingUsers = (mergedUsers || [])
+        .filter((u: any) => u.role === 'pendiente' || u.estado === 'pendiente')
+        .map((u: any) => ({
+          id: u.id,
+          auth_user_id: u.id,
+          nombre_completo: u.socorristas ? `${u.socorristas.primer_nombre} ${u.socorristas.primer_apellido}` : (u.email?.split('@')[0] || 'Nuevo Solicitante'),
+          email: u.email || 'Email no disponible',
+          carnet: u.socorristas?.carnet,
+          seccional_id: u.socorristas?.seccional_id,
+          seccionales: u.socorristas?.seccionales,
+          tipo_usuario: 'socorrista',
+          estado: 'pendiente' as const,
+          fecha_solicitud: new Date().toISOString(),
+        }));
+
+      pendingUsers.forEach(pu => {
+        if (pu.email && !seenEmails.has(pu.email.toLowerCase())) {
+          combinedSolicitudes.push(pu);
+          seenEmails.add(pu.email.toLowerCase());
+        }
+      });
+
+      // Sincronizar estados: si el usuario ya tiene un rol activo o asignado en user_roles (no pendiente ni inactivo), marcar su solicitud como aprobada
+      const activeUserEmails = new Set(
+        (mergedUsers || [])
+          .filter((u: any) => u.email && u.role && u.role !== 'pendiente' && u.role !== 'inactivo' && u.estado !== 'pendiente' && u.estado !== 'inactivo')
+          .map((u: any) => u.email.toLowerCase())
+      );
+
+      combinedSolicitudes = combinedSolicitudes.map(s => {
+        if (s.email && activeUserEmails.has(s.email.toLowerCase()) && s.estado === 'pendiente') {
+          return { ...s, estado: 'aprobado' };
+        }
+        return s;
+      });
+
+      setSolicitudes(combinedSolicitudes);
 
     } catch (error) {
       console.error('Error fetching accesos data:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Callback para actualizar el estado de una solicitud inmediatamente en la interfaz
+  const handleSolicitudProcessed = (solId: string, email: string, nuevoEstado: 'aprobado' | 'rechazado' | 'eliminado') => {
+    setSolicitudes(prev => {
+      if (nuevoEstado === 'eliminado') {
+        return prev.filter(s => s.id !== solId && s.email?.toLowerCase() !== email?.toLowerCase());
+      }
+      return prev.map(s => {
+        if (s.id === solId || (s.email && email && s.email.toLowerCase() === email.toLowerCase())) {
+          return { ...s, estado: nuevoEstado, fecha_revision: new Date().toISOString() };
+        }
+        return s;
+      });
+    });
   };
 
   // Toggle Activo / Inactivo de usuario
@@ -1312,6 +1394,7 @@ END $$;`;
               roles={roles}
               seccionales={seccionales}
               onRefresh={fetchData}
+              onSolicitudProcessed={handleSolicitudProcessed}
               remitenteNombre={remitenteNombre}
               remitenteCorreo={remitenteCorreo}
             />

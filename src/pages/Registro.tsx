@@ -4,6 +4,7 @@ import { Shield, Mail, Lock, User, Phone, MapPin, Building2, CheckCircle2, Clock
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { useSettings } from '../contexts/SettingsContext';
+import { getApiUrl } from '../lib/api';
 
 interface SeccionalOption {
   id: number;
@@ -232,6 +233,17 @@ export default function Registro() {
         fecha_solicitud: new Date().toISOString()
       };
 
+      // 3. Registrar la solicitud en la API backend y en Supabase (Garantía absoluta)
+      try {
+        await fetch(getApiUrl('/api/solicitudes-registro'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(nuevaSolicitud)
+        });
+      } catch (apiErr) {
+        console.warn('Aviso guardando solicitud en backend:', apiErr);
+      }
+
       try {
         const { error: tableError } = await supabase
           .from('solicitudes_registro')
@@ -239,7 +251,6 @@ export default function Registro() {
 
         if (tableError) {
           console.warn('Tabla solicitudes_registro no disponible directamente, guardando en respaldo:', tableError);
-          // Fallback resiliente: Guardar en configuración global o almacenamiento sincronizado
           await guardarEnRespaldo(nuevaSolicitud);
         }
       } catch (dbErr) {

@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   UserCheck, UserX, Clock, CheckCircle2, XCircle, Search, Filter, Mail, 
-  Building2, Phone, Calendar, Shield, AlertCircle, Send, Check, Eye, X
+  Building2, Phone, Calendar, Shield, AlertCircle, Send, Check, Eye, X, Trash2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { generarHtmlCorreoAprobacion } from '../../lib/emailNotification';
-import { sendEmailNotification } from '../../lib/api';
+import { sendEmailNotification, getApiUrl } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
 
 interface Solicitud {
@@ -31,6 +31,7 @@ interface SolicitudesRegistroTabProps {
   roles: string[];
   seccionales: { id: number; nombre: string }[];
   onRefresh: () => void;
+  onSolicitudProcessed?: (id: string, email: string, nuevoEstado: 'aprobado' | 'rechazado' | 'eliminado') => void;
   remitenteNombre: string;
   remitenteCorreo: string;
 }
@@ -40,11 +41,19 @@ export default function SolicitudesRegistroTab({
   roles,
   seccionales,
   onRefresh,
+  onSolicitudProcessed,
   remitenteNombre,
   remitenteCorreo,
 }: SolicitudesRegistroTabProps) {
   const [filter, setFilter] = useState<'todas' | 'pendiente' | 'aprobado' | 'rechazado'>('pendiente');
   const [search, setSearch] = useState('');
+  
+  // Estado local para actualización optimista inmediata al aprobar o rechazar
+  const [localSolicitudes, setLocalSolicitudes] = useState<Solicitud[]>(solicitudes);
+
+  useEffect(() => {
+    setLocalSolicitudes(solicitudes);
+  }, [solicitudes]);
   
   // Modal de Aprobación
   const [selectedSolicitud, setSelectedSolicitud] = useState<Solicitud | null>(null);
@@ -56,7 +65,7 @@ export default function SolicitudesRegistroTab({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
-  const filteredSolicitudes = solicitudes.filter(sol => {
+  const filteredSolicitudes = localSolicitudes.filter(sol => {
     const matchesFilter = filter === 'todas' || sol.estado === filter;
     const term = search.toLowerCase();
     const matchesSearch = !search || 
@@ -67,9 +76,9 @@ export default function SolicitudesRegistroTab({
     return matchesFilter && matchesSearch;
   });
 
-  const countPendientes = solicitudes.filter(s => s.estado === 'pendiente').length;
-  const countAprobadas = solicitudes.filter(s => s.estado === 'aprobado').length;
-  const countRechazadas = solicitudes.filter(s => s.estado === 'rechazado').length;
+  const countPendientes = localSolicitudes.filter(s => s.estado === 'pendiente').length;
+  const countAprobadas = localSolicitudes.filter(s => s.estado === 'aprobado').length;
+  const countRechazadas = localSolicitudes.filter(s => s.estado === 'rechazado').length;
 
   const handleOpenApprove = (solicitud: Solicitud) => {
     setSelectedSolicitud(solicitud);
@@ -83,17 +92,46 @@ export default function SolicitudesRegistroTab({
     if (!selectedSolicitud) return;
     setProcessing(true);
 
-    try {
-      const seccionalObj = seccionales.find(s => s.id === Number(assignedSeccionalId));
-      const seccionalNombre = seccionalObj?.nombre || 'Cruz Verde Salvadoreña';
+    const solId = selectedSolicitud.id;
+    const solEmail = selectedSolicitud.email;
+    const solAuthUserId = selectedSolicitud.auth_user_id;
+    const solNombre = selectedSolicitud.nombre_completo;
+    const seccionalObj = seccionales.find(s => s.id === Number(assignedSeccionalId));
+    const seccionalNombre = seccionalObj?.nombre || 'Cruz Verde Salvadoreña';
 
-      // 1. Si existe auth_user_id, actualizar user_roles para activar al usuario
-      if (selectedSolicitud.auth_user_id) {
-        // Intentar actualizar activo, estado, rol y seccional
+    // 1. Actualización optimista inmediata: desaparece al instante de la lista de pendientes
+    setLocalSolicitudes(prev => prev.map(s => {
+      if (s.id === solId || (s.email && s.email.toLowerCase() === solEmail.toLowerCase())) {
+        return { ...s, estado: 'aprobado' as const, fecha_revision: new Date().toISOString() };
+      }
+      return s;
+    }));
+    if (onSolicitudProcessed) {
+      onSolicitudProcessed(solId, solEmail, 'aprobado');
+    }
+
+    try {
+      // 2. Buscar auth_user_id si no vino en la solicitud
+      let targetAuthId = solAuthUserId;
+      if (!targetAuthId && solEmail) {
+        try {
+          const { data: uView } = await supabase
+            .from('usuarios_view')
+            .select('id')
+            .ilike('email', solEmail.trim())
+            .maybeSingle();
+          if (uView?.id) targetAuthId = uView.id;
+        } catch (errFind) {
+          console.warn('Aviso buscando ID de auth por correo:', errFind);
+        }
+      }
+
+      // 3. Activar usuario y asignar rol en public.user_roles
+      if (targetAuthId) {
         const { error: roleUpdateError } = await supabase
           .from('user_roles')
           .upsert({
-            id: selectedSolicitud.auth_user_id,
+            id: targetAuthId,
             role: assignedRole,
             activo: true,
             estado: 'activo',
@@ -101,11 +139,11 @@ export default function SolicitudesRegistroTab({
           });
 
         if (roleUpdateError) {
-          console.warn('Fallo upsert en user_roles con columnas extendidas, reintentando con rol básico:', roleUpdateError);
+          console.warn('Fallo upsert en user_roles con columnas completas, reintentando básico:', roleUpdateError);
           await supabase
             .from('user_roles')
             .upsert({
-              id: selectedSolicitud.auth_user_id,
+              id: targetAuthId,
               role: assignedRole,
             });
         }
@@ -115,7 +153,7 @@ export default function SolicitudesRegistroTab({
           const { data: inactConfig } = await supabase.from('configuracion').select('valor').eq('clave', 'inactive_user_ids').maybeSingle();
           if (inactConfig?.valor) {
             let list: string[] = JSON.parse(inactConfig.valor);
-            list = list.filter(id => id !== selectedSolicitud.auth_user_id && id !== selectedSolicitud.email);
+            list = list.filter(id => id !== targetAuthId && id !== solEmail);
             await supabase.from('configuracion').update({ valor: JSON.stringify(list) }).eq('clave', 'inactive_user_ids');
           }
         } catch (e) {
@@ -123,27 +161,69 @@ export default function SolicitudesRegistroTab({
         }
       }
 
-      // 2. Actualizar estado en solicitudes_registro
-      const { error: solUpdateError } = await supabase
-        .from('solicitudes_registro')
-        .update({
-          estado: 'aprobado',
-          fecha_revision: new Date().toISOString(),
-          notas_admin: adminNotes || 'Aprobado por el Administrador',
-        })
-        .eq('id', selectedSolicitud.id);
-
-      if (solUpdateError) {
-        console.warn('Error actualizando solicitudes_registro:', solUpdateError);
+      // 4. Actualizar tabla public.solicitudes_registro en Supabase (por id y por correo)
+      try {
+        await supabase
+          .from('solicitudes_registro')
+          .update({
+            estado: 'aprobado',
+            fecha_revision: new Date().toISOString(),
+            notas_admin: adminNotes || 'Aprobado por el Administrador',
+            auth_user_id: targetAuthId || null,
+          })
+          .or(`id.eq.${solId},email.ilike.${solEmail}`);
+      } catch (solUpdateError) {
+        console.warn('Aviso actualizando solicitudes_registro en Supabase:', solUpdateError);
       }
 
-      // 3. Enviar correo al usuario si está seleccionado
+      // 5. Actualizar respaldo en tabla configuracion (solicitudes_registro_store)
+      try {
+        const { data: storeConfig } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', 'solicitudes_registro_store')
+          .maybeSingle();
+        if (storeConfig?.valor) {
+          let list: any[] = JSON.parse(storeConfig.valor);
+          if (Array.isArray(list)) {
+            list = list.map(item => {
+              if (item.id === solId || (item.email && item.email.toLowerCase() === solEmail.toLowerCase())) {
+                return { ...item, estado: 'aprobado', fecha_revision: new Date().toISOString(), notas_admin: adminNotes || 'Aprobado' };
+              }
+              return item;
+            });
+            await supabase
+              .from('configuracion')
+              .upsert({ clave: 'solicitudes_registro_store', valor: JSON.stringify(list) });
+          }
+        }
+      } catch (storeErr) {
+        console.warn('Aviso sincronizando solicitudes_registro_store:', storeErr);
+      }
+
+      // 6. Sincronizar también con backend SQLite
+      try {
+        await fetch(getApiUrl(`/api/solicitudes-registro/${solId}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            estado: 'aprobado', 
+            notas_admin: adminNotes || 'Aprobado por el Administrador',
+            email: solEmail,
+            auth_user_id: targetAuthId
+          })
+        });
+      } catch (beErr) {
+        console.warn('Aviso sincronizando aprobación con backend SQLite:', beErr);
+      }
+
+      // 7. Enviar correo al usuario si está seleccionado
       if (sendNotificationEmail) {
         const emailHtml = generarHtmlCorreoAprobacion({
           remitenteNombre,
           remitenteCorreo,
-          destinatarioCorreo: selectedSolicitud.email,
-          destinatarioNombre: selectedSolicitud.nombre_completo,
+          destinatarioCorreo: solEmail,
+          destinatarioNombre: solNombre,
           asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
           seccionalNombre,
           rolAsignado: assignedRole,
@@ -153,7 +233,7 @@ export default function SolicitudesRegistroTab({
         try {
           await sendEmailNotification({
             remitente: `${remitenteNombre} <${remitenteCorreo}>`,
-            destinatario: selectedSolicitud.email,
+            destinatario: solEmail,
             asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
             cuerpoHtml: emailHtml,
             tipo: 'aprobacion_cuenta'
@@ -163,15 +243,15 @@ export default function SolicitudesRegistroTab({
         }
       }
 
-      await logActivity('Aprobó solicitud de registro', 'Acceso', selectedSolicitud.id, {
-        usuario: selectedSolicitud.email,
-        nombre: selectedSolicitud.nombre_completo,
+      await logActivity('Aprobó solicitud de registro', 'Acceso', solId, {
+        usuario: solEmail,
+        nombre: solNombre,
         rol: assignedRole,
         seccional: seccionalNombre,
       });
 
-      setActionSuccessMessage(`La solicitud de ${selectedSolicitud.nombre_completo} ha sido aprobada con éxito. Ya puede iniciar sesión.`);
-      setTimeout(() => setActionSuccessMessage(null), 5000);
+      setActionSuccessMessage(`¡Solicitud aprobada! ${solNombre} ha sido activado y removido de la lista de pendientes.`);
+      setTimeout(() => setActionSuccessMessage(null), 6000);
       setSelectedSolicitud(null);
       onRefresh();
     } catch (err: any) {
@@ -186,18 +266,66 @@ export default function SolicitudesRegistroTab({
     const motivo = prompt(`Ingrese el motivo del rechazo para la solicitud de ${solicitud.nombre_completo}:`, 'No cumple con los requisitos institucionales');
     if (motivo === null) return;
 
-    try {
-      // Marcar solicitud como rechazada
-      await supabase
-        .from('solicitudes_registro')
-        .update({
-          estado: 'rechazado',
-          fecha_revision: new Date().toISOString(),
-          notas_admin: motivo,
-        })
-        .eq('id', solicitud.id);
+    const solId = solicitud.id;
+    const solEmail = solicitud.email;
 
-      // Si tiene auth_user_id, ponerlo como inactivo
+    // Actualización optimista inmediata
+    setLocalSolicitudes(prev => prev.map(s => {
+      if (s.id === solId || (s.email && s.email.toLowerCase() === solEmail.toLowerCase())) {
+        return { ...s, estado: 'rechazado' as const, fecha_revision: new Date().toISOString() };
+      }
+      return s;
+    }));
+    if (onSolicitudProcessed) {
+      onSolicitudProcessed(solId, solEmail, 'rechazado');
+    }
+
+    try {
+      // 1. Marcar solicitud como rechazada en Supabase
+      try {
+        await supabase
+          .from('solicitudes_registro')
+          .update({
+            estado: 'rechazado',
+            fecha_revision: new Date().toISOString(),
+            notas_admin: motivo,
+          })
+          .or(`id.eq.${solId},email.ilike.${solEmail}`);
+      } catch (solErr) {}
+
+      // 2. Actualizar respaldo en configuracion
+      try {
+        const { data: storeConfig } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', 'solicitudes_registro_store')
+          .maybeSingle();
+        if (storeConfig?.valor) {
+          let list: any[] = JSON.parse(storeConfig.valor);
+          if (Array.isArray(list)) {
+            list = list.map(item => {
+              if (item.id === solId || (item.email && item.email.toLowerCase() === solEmail.toLowerCase())) {
+                return { ...item, estado: 'rechazado', fecha_revision: new Date().toISOString(), notas_admin: motivo };
+              }
+              return item;
+            });
+            await supabase
+              .from('configuracion')
+              .upsert({ clave: 'solicitudes_registro_store', valor: JSON.stringify(list) });
+          }
+        }
+      } catch (storeErr) {}
+
+      // 3. Sincronizar con backend SQLite
+      try {
+        await fetch(getApiUrl(`/api/solicitudes-registro/${solId}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ estado: 'rechazado', notas_admin: motivo, email: solEmail })
+        });
+      } catch (beErr) {}
+
+      // 4. Si tiene auth_user_id, ponerlo como inactivo
       if (solicitud.auth_user_id) {
         await supabase
           .from('user_roles')
@@ -205,8 +333,8 @@ export default function SolicitudesRegistroTab({
           .eq('id', solicitud.auth_user_id);
       }
 
-      await logActivity('Rechazó solicitud de registro', 'Acceso', solicitud.id, {
-        usuario: solicitud.email,
+      await logActivity('Rechazó solicitud de registro', 'Acceso', solId, {
+        usuario: solEmail,
         motivo,
       });
 
@@ -216,6 +344,61 @@ export default function SolicitudesRegistroTab({
     } catch (err: any) {
       console.error('Error rechazando solicitud:', err);
       alert(`Error al rechazar: ${err.message}`);
+    }
+  };
+
+  const handleDeleteSolicitud = async (solicitud: Solicitud) => {
+    if (!window.confirm(`¿Estás seguro de eliminar permanentemente la solicitud de ${solicitud.nombre_completo}?`)) return;
+
+    const solId = solicitud.id;
+    const solEmail = solicitud.email;
+
+    // Actualización optimista inmediata
+    setLocalSolicitudes(prev => prev.filter(s => s.id !== solId && s.email?.toLowerCase() !== solEmail?.toLowerCase()));
+    if (onSolicitudProcessed) {
+      onSolicitudProcessed(solId, solEmail, 'eliminado');
+    }
+
+    try {
+      // 1. Eliminar de Supabase
+      try {
+        await supabase
+          .from('solicitudes_registro')
+          .delete()
+          .or(`id.eq.${solId},email.ilike.${solEmail}`);
+      } catch (e) {}
+
+      // 2. Eliminar de configuracion
+      try {
+        const { data: storeConfig } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', 'solicitudes_registro_store')
+          .maybeSingle();
+        if (storeConfig?.valor) {
+          let list: any[] = JSON.parse(storeConfig.valor);
+          if (Array.isArray(list)) {
+            list = list.filter(item => item.id !== solId && item.email?.toLowerCase() !== solEmail?.toLowerCase());
+            await supabase
+              .from('configuracion')
+              .upsert({ clave: 'solicitudes_registro_store', valor: JSON.stringify(list) });
+          }
+        }
+      } catch (e) {}
+
+      // 3. Eliminar de backend SQLite
+      try {
+        await fetch(getApiUrl(`/api/solicitudes-registro/${solId}`), {
+          method: 'DELETE'
+        });
+      } catch (e) {}
+
+      setActionSuccessMessage(`La solicitud de ${solicitud.nombre_completo} ha sido eliminada permanentemente.`);
+      setTimeout(() => setActionSuccessMessage(null), 4000);
+      onRefresh();
+    } catch (err: any) {
+      console.error('Error eliminando solicitud:', err);
+      alert(`Error al eliminar solicitud: ${err.message}`);
     }
   };
 
@@ -239,7 +422,7 @@ export default function SolicitudesRegistroTab({
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-2xs">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Total Recibidas</span>
-          <span className="text-2xl font-black text-gray-900 mt-1 block">{solicitudes.length}</span>
+          <span className="text-2xl font-black text-gray-900 mt-1 block">{localSolicitudes.length}</span>
         </div>
         <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 shadow-2xs">
           <div className="flex items-center justify-between">
@@ -269,7 +452,7 @@ export default function SolicitudesRegistroTab({
         <div className="flex items-center space-x-1 overflow-x-auto">
           <button
             onClick={() => setFilter('pendiente')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               filter === 'pendiente' ? 'bg-amber-500 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
@@ -277,7 +460,7 @@ export default function SolicitudesRegistroTab({
           </button>
           <button
             onClick={() => setFilter('aprobado')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               filter === 'aprobado' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
@@ -285,7 +468,7 @@ export default function SolicitudesRegistroTab({
           </button>
           <button
             onClick={() => setFilter('rechazado')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               filter === 'rechazado' ? 'bg-red-600 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
@@ -293,11 +476,11 @@ export default function SolicitudesRegistroTab({
           </button>
           <button
             onClick={() => setFilter('todas')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               filter === 'todas' ? 'bg-gray-800 text-white shadow-xs' : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
-            Todas ({solicitudes.length})
+            Todas ({localSolicitudes.length})
           </button>
         </div>
 
@@ -418,9 +601,18 @@ export default function SolicitudesRegistroTab({
                           </button>
                         </div>
                       ) : (
-                        <span className="text-2xs text-gray-400">
-                          Revisado {sol.fecha_revision ? new Date(sol.fecha_revision).toLocaleDateString() : ''}
-                        </span>
+                        <div className="flex items-center justify-end space-x-2">
+                          <span className="text-2xs text-gray-400">
+                            Revisado {sol.fecha_revision ? new Date(sol.fecha_revision).toLocaleDateString() : ''}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteSolicitud(sol)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            title="Eliminar del historial"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

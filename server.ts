@@ -33,7 +33,7 @@ export function getMailConfig() {
     ? (dbConfig['smtp_secure'] === 'true')
     : (process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465);
   const user = dbConfig['smtp_user'] || process.env.SMTP_USER || 'notificaciones@cruzverdesv.org';
-  const pass = dbConfig['smtp_pass'] || process.env.SMTP_PASS || 'Cvnoti17$';
+  const pass = dbConfig['smtp_pass'] || process.env.SMTP_PASS || '';
   const from = dbConfig['smtp_from'] || process.env.SMTP_FROM || `Cruz Verde Salvadoreña (No Responder) <${user}>`;
   const replyTo = dbConfig['smtp_reply_to'] || process.env.SMTP_REPLY_TO || 'noreply@cruzverdesv.org';
 
@@ -223,6 +223,23 @@ db.exec(`
     ip_origen TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (formulario_id) REFERENCES formularios(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS solicitudes_registro (
+    id TEXT PRIMARY KEY,
+    auth_user_id TEXT,
+    nombre_completo TEXT NOT NULL,
+    email TEXT NOT NULL,
+    telefono TEXT,
+    seccional_id INTEGER,
+    seccional_nombre TEXT,
+    carnet TEXT,
+    tipo_usuario TEXT DEFAULT 'socorrista',
+    motivo TEXT,
+    estado TEXT DEFAULT 'pendiente',
+    fecha_solicitud DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fecha_revision DATETIME,
+    notas_admin TEXT
   );
 `);
 
@@ -1126,11 +1143,17 @@ async function startServer() {
       const stmt = db.prepare('SELECT clave, valor FROM configuracion');
       const rows = stmt.all();
       const config = rows.reduce((acc: any, row: any) => {
-        acc[row.clave] = row.valor;
+        if (row.clave === 'smtp_pass') {
+          // Proteger credencial sensible: nunca exponer el texto plano por API
+          acc['smtp_pass'] = row.valor ? '••••••••' : '';
+          acc['smtp_has_password'] = !!row.valor;
+        } else {
+          acc[row.clave] = row.valor;
+        }
         return acc;
       }, {});
       res.json(config);
-    } catch (error) {
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
@@ -1142,13 +1165,90 @@ async function startServer() {
       
       const transaction = db.transaction((conf) => {
         for (const [clave, valor] of Object.entries(conf)) {
+          // Si el cliente envía la máscara '••••••••', no sobrescribir la contraseña real
+          if (clave === 'smtp_pass' && (valor === '••••••••' || !valor)) {
+            continue;
+          }
           stmt.run(clave, clave, String(valor));
         }
       });
       
       transaction(config);
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- API: Solicitudes de Registro (Garantiza captura sin fallar por RLS de Supabase) ---
+  app.get('/api/solicitudes-registro', (req, res) => {
+    try {
+      const rows = db.prepare('SELECT * FROM solicitudes_registro ORDER BY fecha_solicitud DESC').all();
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/solicitudes-registro', (req, res) => {
+    try {
+      const s = req.body;
+      if (!s.email) {
+        return res.status(400).json({ error: 'Email es requerido' });
+      }
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO solicitudes_registro (
+          id, auth_user_id, nombre_completo, email, telefono, seccional_id, seccional_nombre, carnet, tipo_usuario, motivo, estado, fecha_solicitud
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(
+        s.id || `sol-${Date.now()}`,
+        s.auth_user_id || null,
+        s.nombre_completo || 'Solicitante',
+        s.email.toLowerCase().trim(),
+        s.telefono || '',
+        s.seccional_id ? Number(s.seccional_id) : null,
+        s.seccional_nombre || '',
+        s.carnet || null,
+        s.tipo_usuario || 'socorrista',
+        s.motivo || 'Solicitud de acceso al sistema institucional',
+        s.estado || 'pendiente',
+        s.fecha_solicitud || new Date().toISOString()
+      );
+      res.json({ success: true, message: 'Solicitud guardada en servidor' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/solicitudes-registro/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const { estado, notas_admin, email, auth_user_id } = req.body;
+      const stmt = db.prepare(`
+        UPDATE solicitudes_registro 
+        SET estado = ?, notas_admin = ?, fecha_revision = CURRENT_TIMESTAMP 
+        WHERE id = ? 
+           OR (email = ? AND email IS NOT NULL) 
+           OR (auth_user_id = ? AND auth_user_id IS NOT NULL)
+      `);
+      stmt.run(estado || 'aprobado', notas_admin || null, id, email || id, auth_user_id || id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/solicitudes-registro/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const stmt = db.prepare(`
+        DELETE FROM solicitudes_registro 
+        WHERE id = ? OR email = ? OR auth_user_id = ?
+      `);
+      stmt.run(id, id, id);
+      res.json({ success: true });
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });

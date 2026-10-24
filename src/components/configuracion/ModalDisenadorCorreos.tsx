@@ -548,7 +548,7 @@ VALUES
   ('smtp_port', '${smtpPort}'),
   ('smtp_secure', '${String(smtpSecure)}'),
   ('smtp_user', '${smtpUser}'),
-  ('smtp_pass', '${smtpPass.replace(/'/g, "''")}'),
+  ('smtp_pass', 'TU_PASSWORD_AQUI'), -- Remplazar por la clave de aplicación o contraseña de correo
   ('smtp_from', '${remitenteNombreGlobal} <${remitenteGlobal}>'),
   ('smtp_reply_to', 'noreply@cruzverdesv.org'),
   ('email_remitente_global', '${remitenteGlobal}'),
