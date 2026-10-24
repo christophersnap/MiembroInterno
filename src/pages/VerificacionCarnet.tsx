@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, Loader2, Clock } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Loader2, Clock, Phone, PhoneCall } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { generateSecureQrToken } from '../utils/qrSecurity';
 
@@ -20,6 +20,7 @@ export default function VerificacionCarnet() {
     estado: true,
     dui: true,
     telefono: true,
+    contactoEmergencia: true,
     email: true,
     fechaNacimiento: true,
     fechaIngreso: true,
@@ -153,8 +154,34 @@ export default function VerificacionCarnet() {
           `)
           .eq('socorrista_id', data.id);
 
+        let contactoNombre = data.contacto_emergencia_nombre || '';
+        let contactoTelefono = data.contacto_emergencia_telefono || '';
+        let contactoNombre2 = data.contacto_emergencia_nombre_2 || '';
+        let contactoTelefono2 = data.contacto_emergencia_telefono_2 || '';
+
+        if (!contactoNombre && !contactoTelefono) {
+          try {
+            const { data: confRow } = await supabase
+              .from('configuracion')
+              .select('valor')
+              .eq('clave', `socorrista_emergencia_${data.id}`)
+              .maybeSingle();
+            if (confRow && confRow.valor) {
+              const parsed = JSON.parse(confRow.valor);
+              contactoNombre = parsed.contacto_emergencia_nombre || '';
+              contactoTelefono = parsed.contacto_emergencia_telefono || '';
+              contactoNombre2 = parsed.contacto_emergencia_nombre_2 || '';
+              contactoTelefono2 = parsed.contacto_emergencia_telefono_2 || '';
+            }
+          } catch (e) {}
+        }
+
         setSocorrista({
           ...data,
+          contacto_emergencia_nombre: contactoNombre,
+          contacto_emergencia_telefono: contactoTelefono,
+          contacto_emergencia_nombre_2: contactoNombre2,
+          contacto_emergencia_telefono_2: contactoTelefono2,
           seccional_nombre: Array.isArray(data.seccionales) ? data.seccionales[0]?.nombre || 'N/A' : data.seccionales?.nombre || 'N/A',
           cursos: (cursosData || []).map((c: any) => ({
             nombre: c.cursos?.nombre || 'N/A'
@@ -358,6 +385,50 @@ export default function VerificacionCarnet() {
                 <div className="py-3 flex justify-between">
                   <dt className="text-sm font-medium text-gray-500">Teléfono</dt>
                   <dd className="text-sm text-gray-900">{socorrista.telefono || '-'}</dd>
+                </div>
+              )}
+              {allowedFields.contactoEmergencia !== false && (socorrista.contacto_emergencia_telefono || socorrista.contacto_emergencia_telefono_2) && (
+                <div className="py-3.5 flex flex-col bg-red-50/70 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-red-200/80 my-1">
+                  <dt className="text-2xs font-bold text-red-800 uppercase tracking-wide flex items-center mb-2">
+                    <PhoneCall className="w-3.5 h-3.5 mr-1.5 text-red-600 shrink-0" />
+                    Contacto(s) de Emergencia (Avisos)
+                  </dt>
+                  <dd className="space-y-2">
+                    {socorrista.contacto_emergencia_telefono && (
+                      <div className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-red-200 shadow-2xs">
+                        <div className="min-w-0 pr-2">
+                          <span className="text-2xs font-bold text-red-700 block uppercase">Contacto 1</span>
+                          <span className="text-xs font-semibold text-gray-900 truncate block">
+                            {socorrista.contacto_emergencia_nombre || 'Familiar / Tutor'}
+                          </span>
+                        </div>
+                        <a
+                          href={`tel:${socorrista.contacto_emergencia_telefono}`}
+                          className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all shadow-xs shrink-0"
+                        >
+                          <Phone className="w-3.5 h-3.5 mr-1.5" />
+                          <span>Llamar: {socorrista.contacto_emergencia_telefono}</span>
+                        </a>
+                      </div>
+                    )}
+                    {socorrista.contacto_emergencia_telefono_2 && (
+                      <div className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-red-200 shadow-2xs">
+                        <div className="min-w-0 pr-2">
+                          <span className="text-2xs font-bold text-red-700 block uppercase">Contacto 2</span>
+                          <span className="text-xs font-semibold text-gray-900 truncate block">
+                            {socorrista.contacto_emergencia_nombre_2 || 'Contacto Secundario'}
+                          </span>
+                        </div>
+                        <a
+                          href={`tel:${socorrista.contacto_emergencia_telefono_2}`}
+                          className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all shadow-xs shrink-0"
+                        >
+                          <Phone className="w-3.5 h-3.5 mr-1.5" />
+                          <span>Llamar: {socorrista.contacto_emergencia_telefono_2}</span>
+                        </a>
+                      </div>
+                    )}
+                  </dd>
                 </div>
               )}
               {allowedFields.motoristaAutorizado !== false && (

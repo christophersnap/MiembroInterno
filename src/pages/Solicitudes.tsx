@@ -4,13 +4,18 @@ import {
   ClipboardList, Fuel, Plus, Search, Filter, Eye, Download, Mail, 
   CheckCircle2, Clock, XCircle, AlertCircle, RefreshCw, ChevronLeft, 
   Building2, User, FileText, Send, Calendar, Check, ExternalLink,
-  DollarSign, Truck, AlertTriangle, ShieldCheck, Info, ArrowUpRight
+  DollarSign, Truck, AlertTriangle, ShieldCheck, Info, ArrowUpRight,
+  Sliders, Edit3, X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
 import { SolicitudCombustible, CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG } from '../types/combustible';
 import { SolicitudCompra, CompraConfig, DEFAULT_COMPRA_CONFIG } from '../types/compra';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
+import { sendEmailNotification } from '../lib/api';
+import { generarHtmlCorreoCombustible, generarHtmlCorreoCompra } from '../lib/emailNotification';
+import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 
@@ -71,6 +76,284 @@ export default function Solicitudes() {
   // Configuraciones de PDF
   const [combustibleConfig, setCombustibleConfig] = useState<CombustibleConfig>(DEFAULT_COMBUSTIBLE_CONFIG);
   const [compraConfig, setCompraConfig] = useState<CompraConfig>(DEFAULT_COMPRA_CONFIG);
+
+  // Permisos y estados para cambio de estado unificado
+  const canManageStatus = isAdmin || Boolean(permissions?.autorizar_solicitudes || permissions?.edit_solicitudes_compra || permissions?.edit_solicitudes_combustible);
+  const [statusModalItem, setStatusModalItem] = useState<SolicitudUnifiedItem | null>(null);
+  const [newStatus, setNewStatus] = useState<string>('Aprobada');
+  const [motivoRechazo, setMotivoRechazo] = useState('');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Modal para reenviar notificación oficial con PDF
+  const [resendEmailItem, setResendEmailItem] = useState<SolicitudUnifiedItem | null>(null);
+  const [resendEmailTo, setResendEmailTo] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendSuccessMsg, setSendSuccessMsg] = useState('');
+
+  const handleOpenStatusModal = (item: SolicitudUnifiedItem) => {
+    setStatusModalItem(item);
+    setNewStatus(item.estado || 'Pendiente');
+    setMotivoRechazo(item.motivo_rechazo || '');
+  };
+
+  const handleQuickStatus = async (item: SolicitudUnifiedItem, targetStatus: string) => {
+    if (targetStatus === 'Rechazada') {
+      handleOpenStatusModal(item);
+      setNewStatus('Rechazada');
+      return;
+    }
+
+    setUpdatingStatus(true);
+    try {
+      const payload: any = {
+        estado: targetStatus,
+        updated_at: new Date().toISOString()
+      };
+
+      if (targetStatus === 'Aprobada' || targetStatus === 'Finalizada' || targetStatus === 'Entregada') {
+        payload.autorizado_por = userName || user?.email || 'Administración Central';
+        payload.fecha_autorizacion = new Date().toISOString();
+        payload.motivo_rechazo = null;
+      } else if (targetStatus === 'Pendiente') {
+        payload.autorizado_por = null;
+        payload.fecha_autorizacion = null;
+        payload.motivo_rechazo = null;
+      }
+
+      const table = item.tipo === 'combustible' ? 'solicitudes_combustible' : 'solicitudes_compra';
+
+      await supabase
+        .from(table)
+        .update(payload)
+        .eq('id', item.originalId);
+
+      // Actualizar fallback en almacenamiento local
+      if (item.tipo === 'combustible') {
+        const stored = sessionStorage.getItem('cruz_verde_solicitudes_combustible');
+        if (stored) {
+          try {
+            const arr = JSON.parse(stored);
+            const upd = arr.map((s: any) => s.id === item.originalId ? { ...s, ...payload } : s);
+            sessionStorage.setItem('cruz_verde_solicitudes_combustible', JSON.stringify(upd));
+          } catch (e) {}
+        }
+      } else {
+        const stored = sessionStorage.getItem('cruz_verde_solicitudes_compra');
+        if (stored) {
+          try {
+            const arr = JSON.parse(stored);
+            const upd = arr.map((s: any) => s.id === item.originalId ? { ...s, ...payload } : s);
+            sessionStorage.setItem('cruz_verde_solicitudes_compra', JSON.stringify(upd));
+          } catch (e) {}
+        }
+      }
+
+      // Actualizar estado en UI
+      setSolicitudes(prev => prev.map(s => {
+        if (s.id === item.id) {
+          return {
+            ...s,
+            estado: targetStatus,
+            autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por,
+            fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion,
+            motivo_rechazo: null
+          };
+        }
+        return s;
+      }));
+
+      if (detailItem && detailItem.id === item.id) {
+        setDetailItem(prev => prev ? {
+          ...prev,
+          estado: targetStatus,
+          autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : prev.autorizado_por,
+          fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : prev.fecha_autorizacion,
+          motivo_rechazo: null
+        } : null);
+      }
+
+      await logActivity(
+        `Cambió estado a ${targetStatus}`,
+        item.tipo === 'combustible' ? 'SolicitudCombustible' : 'SolicitudCompra',
+        item.folio,
+        { estado: targetStatus }
+      );
+
+      window.dispatchEvent(new Event('solicitudes_updated'));
+    } catch (err: any) {
+      alert(`Error al actualizar estado: ${err.message || 'Error desconocido'}`);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleSaveStatus = async () => {
+    if (!statusModalItem) return;
+    setUpdatingStatus(true);
+    try {
+      const payload: any = {
+        estado: newStatus,
+        updated_at: new Date().toISOString()
+      };
+
+      if (newStatus === 'Aprobada' || newStatus === 'Finalizada' || newStatus === 'Entregada') {
+        payload.autorizado_por = userName || user?.email || 'Administración Central';
+        payload.fecha_autorizacion = new Date().toISOString();
+        payload.motivo_rechazo = null;
+      } else if (newStatus === 'Rechazada') {
+        payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';
+      } else if (newStatus === 'Pendiente') {
+        payload.autorizado_por = null;
+        payload.fecha_autorizacion = null;
+        payload.motivo_rechazo = null;
+      }
+
+      const table = statusModalItem.tipo === 'combustible' ? 'solicitudes_combustible' : 'solicitudes_compra';
+
+      const { error: updateErr } = await supabase
+        .from(table)
+        .update(payload)
+        .eq('id', statusModalItem.originalId);
+
+      if (updateErr) {
+        console.warn('Advertencia actualizando en Supabase:', updateErr);
+      }
+
+      // Actualizar fallback en almacenamiento local
+      if (statusModalItem.tipo === 'combustible') {
+        const stored = sessionStorage.getItem('cruz_verde_solicitudes_combustible');
+        if (stored) {
+          try {
+            const arr = JSON.parse(stored);
+            const upd = arr.map((s: any) => s.id === statusModalItem.originalId ? { ...s, ...payload } : s);
+            sessionStorage.setItem('cruz_verde_solicitudes_combustible', JSON.stringify(upd));
+          } catch (e) {}
+        }
+      } else {
+        const stored = sessionStorage.getItem('cruz_verde_solicitudes_compra');
+        if (stored) {
+          try {
+            const arr = JSON.parse(stored);
+            const upd = arr.map((s: any) => s.id === statusModalItem.originalId ? { ...s, ...payload } : s);
+            sessionStorage.setItem('cruz_verde_solicitudes_compra', JSON.stringify(upd));
+          } catch (e) {}
+        }
+      }
+
+      // Actualizar en el estado local de la tabla
+      setSolicitudes(prev => prev.map(s => {
+        if (s.id === statusModalItem.id) {
+          return {
+            ...s,
+            estado: newStatus,
+            autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por,
+            fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion,
+            motivo_rechazo: payload.motivo_rechazo !== undefined ? payload.motivo_rechazo : s.motivo_rechazo
+          };
+        }
+        return s;
+      }));
+
+      if (detailItem && detailItem.id === statusModalItem.id) {
+        setDetailItem(prev => prev ? {
+          ...prev,
+          estado: newStatus,
+          autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : prev.autorizado_por,
+          fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : prev.fecha_autorizacion,
+          motivo_rechazo: payload.motivo_rechazo !== undefined ? payload.motivo_rechazo : prev.motivo_rechazo
+        } : null);
+      }
+
+      await logActivity(
+        `Cambió estado a ${newStatus}`,
+        statusModalItem.tipo === 'combustible' ? 'SolicitudCombustible' : 'SolicitudCompra',
+        statusModalItem.folio,
+        { estado: newStatus, motivo: motivoRechazo }
+      );
+
+      // Disparar evento para actualizar notificaciones y contadores en el menú
+      window.dispatchEvent(new Event('solicitudes_updated'));
+
+      setStatusModalItem(null);
+    } catch (err: any) {
+      alert(`Error al actualizar estado: ${err.message || 'Error desconocido'}`);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleSendEmailWithPdf = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resendEmailItem) return;
+    setSendingEmail(true);
+    setSendSuccessMsg('');
+    try {
+      const isCombustible = resendEmailItem.tipo === 'combustible';
+      const pdfUrl = getOfficialSolicitudPdfUrl(resendEmailItem.tipo, resendEmailItem.folio);
+      const recipient = resendEmailTo.trim() || resendEmailItem.correo_solicitante || 'notificaciones@cruzverdesv.org';
+      
+      let htmlBody = '';
+      if (isCombustible && resendEmailItem.rawCombustible) {
+        htmlBody = generarHtmlCorreoCombustible({
+          folio: resendEmailItem.folio,
+          codigoSolicitud: resendEmailItem.folio,
+          seccional: resendEmailItem.seccional_nombre,
+          seccionalNombre: resendEmailItem.seccional_nombre,
+          solicitante: resendEmailItem.solicitante,
+          telefonoSolicitante: resendEmailItem.rawCombustible.telefono_solicitante,
+          correoSolicitante: resendEmailItem.rawCombustible.correo_electronico,
+          actividad: resendEmailItem.rawCombustible.actividad,
+          entregoLiquidacionAnterior: !!resendEmailItem.rawCombustible.entrego_liquidacion_anterior,
+          motivoNoLiquidacion: resendEmailItem.rawCombustible.motivo_no_liquidacion,
+          fecha: resendEmailItem.fecha,
+          fechaEnvio: resendEmailItem.fecha_completa,
+          asunto: `Solicitud de Combustible: ${resendEmailItem.folio} - ${resendEmailItem.seccional_nombre}`,
+          nombreArchivoPdf: `${resendEmailItem.folio}.pdf`,
+          pdfUrl
+        });
+      } else {
+        htmlBody = generarHtmlCorreoCompra({
+          folio: resendEmailItem.folio,
+          seccional: resendEmailItem.seccional_nombre,
+          solicitante: resendEmailItem.solicitante,
+          cargoSolicitante: resendEmailItem.cargo,
+          tipo: resendEmailItem.rawCompra?.tipo_solicitud || 'General',
+          esParaVehiculo: resendEmailItem.rawCompra?.es_para_vehiculo,
+          vehiculoPlaca: resendEmailItem.rawCompra?.vehiculo_placa,
+          vehiculoDescripcion: resendEmailItem.rawCompra?.vehiculo_descripcion,
+          justificacion: resendEmailItem.detalle_completo,
+          proveedorSugerido: resendEmailItem.rawCompra?.proveedor_sugerido,
+          items: [{
+            descripcion: resendEmailItem.detalle_resumen,
+            cantidad: 1,
+            precioEstimado: 0,
+            subtotal: 0
+          }],
+          totalEstimado: 0,
+          nombreArchivoPdf: `${resendEmailItem.folio}.pdf`,
+          pdfUrl
+        });
+      }
+
+      await sendEmailNotification({
+        destinatario: recipient,
+        asunto: `Documento Oficial: ${resendEmailItem.folio} - ${resendEmailItem.seccional_nombre} (${isCombustible ? 'Combustible' : 'Compra'})`,
+        cuerpoHtml: htmlBody,
+        tipo: isCombustible ? 'solicitud_combustible' : 'solicitud_compra',
+        remitente: 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'
+      });
+
+      setSendSuccessMsg(`Correo con el documento PDF enviado exitosamente a: ${recipient}`);
+      setTimeout(() => {
+        setResendEmailItem(null);
+        setSendSuccessMsg('');
+      }, 2000);
+    } catch (err: any) {
+      alert(`Error al enviar correo: ${err.message || 'Error en el servidor de correo'}`);
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   // 1. Cargar datos
   const fetchAllData = async () => {
@@ -717,22 +1000,70 @@ export default function Solicitudes() {
 
                       {/* Estado */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold ${
-                            item.estado === 'Aprobada'
-                              ? 'bg-green-100 text-green-800'
-                              : item.estado === 'Pendiente'
-                              ? 'bg-amber-100 text-amber-800'
-                              : item.estado === 'Rechazada'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}
-                        >
-                          {item.estado === 'Aprobada' && <CheckCircle2 className="w-3 h-3 mr-1" />}
-                          {item.estado === 'Pendiente' && <Clock className="w-3 h-3 mr-1" />}
-                          {item.estado === 'Rechazada' && <XCircle className="w-3 h-3 mr-1" />}
-                          {item.estado}
-                        </span>
+                        <div className="flex flex-col space-y-1">
+                          <button
+                            type="button"
+                            onClick={() => canManageStatus && handleOpenStatusModal(item)}
+                            disabled={!canManageStatus}
+                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold transition ${
+                              canManageStatus ? 'cursor-pointer hover:shadow-xs hover:ring-2 hover:ring-offset-1 hover:ring-primary/40' : 'cursor-default'
+                            } ${
+                              item.estado === 'Aprobada'
+                                ? 'bg-green-100 text-green-800'
+                                : item.estado === 'Pendiente'
+                                ? 'bg-amber-100 text-amber-800'
+                                : item.estado === 'Finalizada' || item.estado === 'Entregada'
+                                ? 'bg-purple-100 text-purple-800'
+                                : item.estado === 'Rechazada'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                            title={canManageStatus ? "Haga clic para cambiar estado (Aprobar, Finalizar, Pendiente, etc.)" : item.estado}
+                          >
+                            {item.estado === 'Aprobada' && <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />}
+                            {item.estado === 'Pendiente' && <Clock className="w-3 h-3 mr-1 text-amber-600" />}
+                            {(item.estado === 'Finalizada' || item.estado === 'Entregada') && <ShieldCheck className="w-3 h-3 mr-1 text-purple-600" />}
+                            {item.estado === 'Rechazada' && <XCircle className="w-3 h-3 mr-1 text-red-600" />}
+                            <span>{item.estado}</span>
+                            {canManageStatus && <Edit3 className="w-2.5 h-2.5 ml-1 opacity-60" />}
+                          </button>
+
+                          {/* Acciones directas de estado para administradores / coordinadores */}
+                          {canManageStatus && (
+                            <div className="flex items-center space-x-1 pt-0.5">
+                              {item.estado !== 'Aprobada' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickStatus(item, 'Aprobada')}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition cursor-pointer"
+                                  title="Aprobar solicitud inmediatamente"
+                                >
+                                  ✓ Aprobar
+                                </button>
+                              )}
+                              {item.estado !== 'Finalizada' && item.estado !== 'Entregada' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickStatus(item, 'Finalizada')}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition cursor-pointer"
+                                  title="Marcar como Finalizada (Entrega o despacho completado)"
+                                >
+                                  ★ Finalizar
+                                </button>
+                              )}
+                              {item.estado !== 'Pendiente' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickStatus(item, 'Pendiente')}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition cursor-pointer"
+                                  title="Regresar a estado Pendiente"
+                                >
+                                  ↺ Pendiente
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* Envío Correo y Copia PDF */}
@@ -747,15 +1078,34 @@ export default function Solicitudes() {
                             Notificado (Ver)
                           </button>
                         ) : (
-                          <span className="text-2xs text-gray-400 italic">
-                            No notificado
-                          </span>
+                          <button
+                            onClick={() => {
+                              setResendEmailItem(item);
+                              setResendEmailTo(item.correo_solicitante || '');
+                            }}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-600 transition cursor-pointer"
+                            title="Enviar correo de notificación con PDF ahora"
+                          >
+                            <Mail className="w-3 h-3 mr-1 text-gray-500" />
+                            Enviar Correo
+                          </button>
                         )}
                       </td>
 
                       {/* Acciones */}
                       <td className="px-4 py-3 whitespace-nowrap text-right space-x-1.5">
                         
+                        {/* Cambiar estado */}
+                        {canManageStatus && (
+                          <button
+                            onClick={() => handleOpenStatusModal(item)}
+                            className="inline-flex items-center p-1.5 text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition"
+                            title="Gestionar estado formal (Pendiente, Aprobada, Finalizada, Rechazada)"
+                          >
+                            <Sliders className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {/* Ver más detalles */}
                         <button
                           onClick={() => setDetailItem(item)}
@@ -765,11 +1115,14 @@ export default function Solicitudes() {
                           <Eye className="w-4 h-4" />
                         </button>
 
-                        {/* Ver correos notificados */}
+                        {/* Reenviar o ver correos notificados */}
                         <button
-                          onClick={() => setEmailInfoItem(item)}
-                          className="inline-flex items-center p-1.5 text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
-                          title="Ver a qué correos se envió la información y la copia de PDF"
+                          onClick={() => {
+                            setResendEmailItem(item);
+                            setResendEmailTo(item.correo_solicitante || '');
+                          }}
+                          className="inline-flex items-center p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition"
+                          title="Enviar o reenviar correo con enlace y documento oficial en PDF"
                         >
                           <Mail className="w-4 h-4" />
                         </button>
@@ -921,6 +1274,90 @@ export default function Solicitudes() {
                 </div>
               )}
 
+              {/* Acciones de Estado directamente desde el Detalle */}
+              {canManageStatus && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center">
+                      <Sliders className="w-3.5 h-3.5 mr-1.5 text-primary" />
+                      Gestión de Estado de la Solicitud
+                    </span>
+                    <span className="text-2xs font-semibold text-gray-600">
+                      Estado actual: <strong className="text-gray-900">{detailItem.estado}</strong>
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => handleQuickStatus(detailItem, 'Pendiente')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
+                        detailItem.estado === 'Pendiente'
+                          ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400'
+                          : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5 mr-1.5" />
+                      🟡 Marcar Pendiente
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => handleQuickStatus(detailItem, 'Aprobada')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
+                        detailItem.estado === 'Aprobada'
+                          ? 'bg-green-200 text-green-900 ring-2 ring-green-500'
+                          : 'bg-green-600 hover:bg-green-700 text-white shadow-xs'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                      🟢 Autorizar y Aprobar
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => handleQuickStatus(detailItem, 'Finalizada')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
+                        detailItem.estado === 'Finalizada' || detailItem.estado === 'Entregada'
+                          ? 'bg-purple-200 text-purple-900 ring-2 ring-purple-500'
+                          : 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs'
+                      }`}
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                      🟣 Marcar como Finalizada
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => {
+                        handleOpenStatusModal(detailItem);
+                        setNewStatus('Rechazada');
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-100 hover:bg-red-200 text-red-800 transition flex items-center cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5 mr-1.5" />
+                      🔴 Rechazar Solicitud...
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResendEmailItem(detailItem);
+                        setResendEmailTo(detailItem.correo_solicitante || '');
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center ml-auto shadow-xs cursor-pointer"
+                    >
+                      <Mail className="w-3.5 h-3.5 mr-1.5" />
+                      ✉️ Enviar Correo con PDF
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Footer con Acciones */}
@@ -930,16 +1367,16 @@ export default function Solicitudes() {
                   setDetailItem(null);
                   setEmailInfoItem(detailItem);
                 }}
-                className="inline-flex items-center px-3.5 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition"
+                className="inline-flex items-center px-3.5 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition cursor-pointer"
               >
                 <Mail className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                Ver Correos Enviados y Copias
+                Ver Correos Notificados
               </button>
 
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setDetailItem(null)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold transition"
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold transition cursor-pointer"
                 >
                   Cerrar
                 </button>
@@ -949,7 +1386,7 @@ export default function Solicitudes() {
                     handleOpenPdf(detailItem);
                     setDetailItem(null);
                   }}
-                  className="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition shadow-xs"
+                  className="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 mr-1.5" />
                   Descargar / Imprimir PDF
@@ -1090,7 +1527,7 @@ export default function Solicitudes() {
                   handleOpenPdf(emailInfoItem);
                   setEmailInfoItem(null);
                 }}
-                className="inline-flex items-center px-3.5 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition"
+                className="inline-flex items-center px-3.5 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" />
                 Descargar Copia de PDF
@@ -1098,12 +1535,214 @@ export default function Solicitudes() {
 
               <button
                 onClick={() => setEmailInfoItem(null)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-semibold transition"
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-semibold transition cursor-pointer"
               >
                 Cerrar
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CAMBIO DE ESTADO (PENDIENTE, APROBADA, FINALIZADA) */}
+      {/* ========================================================= */}
+      {statusModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
+              <div className="flex items-center space-x-2.5">
+                <span className={`p-2 rounded-xl text-white ${statusModalItem.tipo === 'combustible' ? 'bg-emerald-600' : 'bg-primary'}`}>
+                  <Sliders className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">
+                    Cambiar Estado de Solicitud
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Folio: <span className="font-mono font-bold text-gray-800">{statusModalItem.folio}</span> ({statusModalItem.tipo === 'combustible' ? 'Combustible' : 'Compra'})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setStatusModalItem(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <span className="text-gray-400 uppercase font-bold text-[10px] block">Seccional y Solicitante</span>
+                <p className="font-medium text-gray-800 mt-0.5">{statusModalItem.seccional_nombre} • {statusModalItem.solicitante}</p>
+                <p className="text-2xs text-gray-500 mt-0.5">{statusModalItem.detalle_resumen}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-2">
+                  Selecciona la Acción / Estado a Aplicar:
+                </label>
+                <div className="space-y-2">
+                  {[
+                    { val: 'Pendiente', label: '🟡 Pendiente de Revisión', desc: 'Permite dejar la solicitud en espera de confirmación o documentos.' },
+                    { val: 'Aprobada', label: '🟢 Aprobada (Autorizada formalmente)', desc: 'Autoriza la compra o dotación de combustible con su firma digital.' },
+                    { val: 'Finalizada', label: '🟣 Finalizada (Entrega / Despacho completado)', desc: 'Marca el proceso como concluido (vale entregado o compras recibidas).' },
+                    { val: 'En Proceso', label: '🔵 En Proceso de Gestión', desc: 'En cotizaciones de proveedores o turno operativo.' },
+                    { val: 'Rechazada', label: '🔴 Rechazada', desc: 'No procede la solicitud. Se registrará el motivo.' },
+                  ].map(opt => (
+                    <label
+                      key={opt.val}
+                      className={`flex items-start p-2.5 rounded-xl border cursor-pointer transition ${
+                        newStatus === opt.val
+                          ? 'border-primary bg-blue-50/50 ring-1 ring-primary shadow-xs'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="solicitudEstadoRadio"
+                        value={opt.val}
+                        checked={newStatus === opt.val}
+                        onChange={(e) => setNewStatus(e.target.value)}
+                        className="mt-0.5 text-primary focus:ring-primary"
+                      />
+                      <div className="ml-2.5">
+                        <span className="font-bold text-gray-900 block">{opt.label}</span>
+                        <span className="text-2xs text-gray-500">{opt.desc}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {newStatus === 'Rechazada' && (
+                <div>
+                  <label className="block text-xs font-bold text-red-700 mb-1">
+                    Motivo del Rechazo (Obligatorio):
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={motivoRechazo}
+                    onChange={(e) => setMotivoRechazo(e.target.value)}
+                    placeholder="Escriba la justificación por la cual no procede esta solicitud..."
+                    className="w-full p-2.5 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-xs"
+                  />
+                </div>
+              )}
+
+              {(newStatus === 'Aprobada' || newStatus === 'Finalizada') && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-900 text-2xs space-y-0.5">
+                  <span className="font-bold block">Firma y Registro de Auditoría:</span>
+                  <p>Autorizado por: <strong>{userName || user?.email || 'Administración Central'}</strong></p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex items-center justify-end space-x-2 bg-gray-50 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => setStatusModalItem(null)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={updatingStatus || (newStatus === 'Rechazada' && !motivoRechazo.trim())}
+                onClick={handleSaveStatus}
+                className="inline-flex items-center px-5 py-2 bg-primary hover:bg-blue-900 text-white rounded-lg text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+              >
+                {updatingStatus ? 'Guardando...' : 'Confirmar Estado'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: REENVIAR / NOTIFICAR POR CORREO CON ENLACE Y PDF   */}
+      {/* ========================================================= */}
+      {resendEmailItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-emerald-50/70">
+              <div className="flex items-center space-x-2.5">
+                <span className="p-2 bg-emerald-600 text-white rounded-xl">
+                  <Mail className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">
+                    Enviar Notificación con Enlace y PDF Oficial
+                  </h3>
+                  <p className="text-xs text-emerald-800">
+                    Folio: <span className="font-mono font-bold">{resendEmailItem.folio}</span> • {resendEmailItem.seccional_nombre}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResendEmailItem(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSendEmailWithPdf} className="p-6 space-y-4 text-xs">
+              {sendSuccessMsg ? (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                  <p className="font-bold text-emerald-900">{sendSuccessMsg}</p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Correo Electrónico del Destinatario:
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={resendEmailTo}
+                      onChange={(e) => setResendEmailTo(e.target.value)}
+                      placeholder="seccional@cruzverdesv.org, solicitante@cruzverdesv.org"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs"
+                    />
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      El correo incluirá el resumen institucional completo y el botón de acceso directo al documento oficial en PDF con firmas y sello.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                    <span className="font-bold text-gray-700 block text-2xs uppercase">Enlace que se enviará en el correo:</span>
+                    <p className="font-mono text-2xs text-emerald-700 bg-white p-2 rounded border border-gray-200 break-all select-all">
+                      {getOfficialSolicitudPdfUrl(resendEmailItem.tipo, resendEmailItem.folio)}
+                    </p>
+                  </div>
+                </>
+              )}
+
+              <div className="p-4 border-t border-gray-100 flex items-center justify-end space-x-2 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setResendEmailItem(null)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition cursor-pointer"
+                >
+                  Cerrar
+                </button>
+                {!sendSuccessMsg && (
+                  <button
+                    type="submit"
+                    disabled={sendingEmail || !resendEmailTo.trim()}
+                    className="inline-flex items-center px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5 mr-1.5" />
+                    {sendingEmail ? 'Enviando Correo...' : 'Enviar Notificación con PDF'}
+                  </button>
+                )}
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -22,12 +22,14 @@ interface ModalDisenadorCorreosProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  initialPreviewTab?: 'notificacion' | 'compra' | 'combustible';
 }
 
 export default function ModalDisenadorCorreos({
   isOpen,
   onClose,
-  onSaved
+  onSaved,
+  initialPreviewTab = 'compra'
 }: ModalDisenadorCorreosProps) {
   const { refreshSettings } = useSettings();
 
@@ -35,7 +37,14 @@ export default function ModalDisenadorCorreos({
   const [activeEditorTab, setActiveEditorTab] = useState<'diseno' | 'servidor' | 'prueba'>('diseno');
 
   // Tipo de correo en vista previa: 'notificacion' | 'compra' | 'combustible'
-  const [previewTab, setPreviewTab] = useState<'notificacion' | 'compra' | 'combustible'>('compra');
+  const [previewTab, setPreviewTab] = useState<'notificacion' | 'compra' | 'combustible'>(initialPreviewTab);
+
+  // Sincronizar pestaña inicial al abrir modal
+  useEffect(() => {
+    if (isOpen && initialPreviewTab) {
+      setPreviewTab(initialPreviewTab);
+    }
+  }, [isOpen, initialPreviewTab]);
 
   // Configuración de Remitente Unificado No-Reply
   const [remitenteGlobal, setRemitenteGlobal] = useState('notificaciones@cruzverdesv.org');

@@ -18,9 +18,10 @@ import CombustibleForm from '../components/combustible/CombustibleForm';
 import CombustibleEmailModal from '../components/combustible/CombustibleEmailModal';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
-import { sendEmailNotification } from '../lib/api';
+import { sendEmailNotification, getApiUrl } from '../lib/api';
 import { generarHtmlCorreoCombustible } from '../lib/emailNotification';
 import { getElSalvadorDateTime, formatFechaSV, formatFechaHoraSV } from '../utils/dateUtils';
+import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
@@ -137,15 +138,34 @@ NOTIFY pgrst, 'reload schema';`;
         if (rawLocal) storedLocalConfig = JSON.parse(rawLocal);
       } catch (e) {}
 
-      const { data: confData } = await supabase
-        .from('configuracion')
-        .select('*')
-        .like('clave', 'combustible_%');
+      const confMap: Record<string, string> = {};
 
-      if (confData && confData.length > 0) {
-        const confMap: Record<string, string> = {};
-        confData.forEach(c => { confMap[c.clave] = c.valor; });
+      // 1. Intentar cargar desde el backend SQLite
+      try {
+        const apiRes = await fetch(getApiUrl('/api/configuracion'));
+        if (apiRes.ok) {
+          const apiJson = await apiRes.json();
+          Object.entries(apiJson).forEach(([k, v]) => {
+            if (k.startsWith('combustible_')) {
+              confMap[k] = String(v);
+            }
+          });
+        }
+      } catch (e) {}
 
+      // 2. Intentar cargar desde Supabase
+      try {
+        const { data: confData } = await supabase
+          .from('configuracion')
+          .select('*')
+          .like('clave', 'combustible_%');
+
+        if (confData && confData.length > 0) {
+          confData.forEach(c => { confMap[c.clave] = c.valor; });
+        }
+      } catch (e) {}
+
+      if (Object.keys(confMap).length > 0 || Object.keys(storedLocalConfig).length > 0) {
         setConfig(prev => ({
           ...prev,
           ...storedLocalConfig,
@@ -373,7 +393,8 @@ NOTIFY pgrst, 'reload schema';`;
           fecha: svTime.fechaSV,
           fechaEnvio: fechaCompletaStr,
           asunto: asuntoGenerado,
-          nombreArchivoPdf: `${folioGenerado}.pdf`
+          nombreArchivoPdf: `${folioGenerado}.pdf`,
+          pdfUrl: getOfficialSolicitudPdfUrl('combustible', folioGenerado)
         });
 
         await sendEmailNotification({
@@ -391,6 +412,7 @@ NOTIFY pgrst, 'reload schema';`;
       // Mostrar modal de confirmación con el acuse de recibo
       setLastSubmittedSolicitud(newRecord);
       setShowCelebrationModal(true);
+      window.dispatchEvent(new Event('solicitudes_updated'));
 
     } catch (err: any) {
       console.error('Error guardando solicitud de combustible:', err);
@@ -405,7 +427,11 @@ NOTIFY pgrst, 'reload schema';`;
     setSavingConfig(true);
     try {
       setConfig(newConfig);
-      localStorage.setItem('cruz_verde_combustible_config', JSON.stringify(newConfig));
+      try {
+        localStorage.setItem('cruz_verde_combustible_config', JSON.stringify(newConfig));
+      } catch (storageErr) {
+        console.warn('localStorage quota excedida para combustible_config, omitiendo guardado local:', storageErr);
+      }
 
       const entries = [
         { clave: 'combustible_correo_destino', valor: newConfig.correoDestino },
@@ -458,16 +484,34 @@ NOTIFY pgrst, 'reload schema';`;
         { clave: 'combustible_pdf_label_fecha_auto', valor: newConfig.pdfLabelFechaAuto }
       ];
 
-      for (const item of entries) {
-        await supabase
-          .from('configuracion')
-          .upsert({ clave: item.clave, valor: item.valor }, { onConflict: 'clave' });
+      // 1. Guardar en SQLite del Backend
+      try {
+        const confObj: Record<string, string> = {};
+        entries.forEach(e => { confObj[e.clave] = e.valor; });
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confObj)
+        });
+      } catch (errApi) {
+        console.warn('Error guardando en backend /api/configuracion:', errApi);
+      }
+
+      // 2. Guardar en Supabase
+      try {
+        for (const item of entries) {
+          await supabase
+            .from('configuracion')
+            .upsert({ clave: item.clave, valor: item.valor }, { onConflict: 'clave' });
+        }
+      } catch (errSupabase) {
+        console.warn('Error sincronizando con Supabase configuracion:', errSupabase);
       }
 
       await logActivity('Actualizó plantilla y configuración de combustible', 'Configuracion', 'Combustible', {});
 
     } catch (err: any) {
-      console.warn('No se pudo guardar en tabla configuracion de Supabase, guardado en localStorage:', err);
+      console.warn('Aviso guardando configuración de combustible:', err);
     } finally {
       setSavingConfig(false);
     }
@@ -504,6 +548,7 @@ NOTIFY pgrst, 'reload schema';`;
       }
 
       await logActivity(`Cambió estado a ${newStatus}`, 'SolicitudCombustible', selectedSolicitud.folio, { estado: newStatus });
+      window.dispatchEvent(new Event('solicitudes_updated'));
       setShowStatusModal(false);
 
     } catch (err: any) {

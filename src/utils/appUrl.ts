@@ -7,20 +7,21 @@ export const OFFICIAL_APP_URL = 'https://cruzverdesv.org/miembros';
 
 /**
  * Obtiene la URL base de la aplicación.
- * En producción siempre retorna https://cruzverdesv.org/miembros
- * En entorno de desarrollo local puede reflejar localhost.
+ * En producción institucional en Hostinger retorna https://cruzverdesv.org/miembros
+ * En entorno de desarrollo o preview (Google AI Studio / localhost) retorna el origen actual para pruebas inmediatas.
  */
 export function getAppBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    // Si estamos en localhost para desarrollo local
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return window.location.pathname.startsWith('/miembros')
-        ? `${window.location.origin}/miembros`
-        : window.location.origin;
+    // Si estamos en el dominio institucional oficial
+    if (host.includes('cruzverdesv.org')) {
+      return OFFICIAL_APP_URL;
     }
+    // Entorno local o preview (localhost, run.app, googleusercontent, etc.)
+    return window.location.pathname.startsWith('/miembros')
+      ? `${window.location.origin}/miembros`
+      : window.location.origin;
   }
-  // En cualquier otro caso (preview, producción en Hostinger, correos oficiales)
   return OFFICIAL_APP_URL;
 }
 
@@ -28,14 +29,14 @@ export function getAppBaseUrl(): string {
  * URL oficial de acceso / inicio de sesión
  */
 export function getOfficialLoginUrl(): string {
-  return `${OFFICIAL_APP_URL}/login`;
+  return `${getAppBaseUrl()}/login`;
 }
 
 /**
  * URL oficial para compartir formularios públicos de inscripción
  */
 export function getOfficialFormUrl(slug: string): string {
-  return `${OFFICIAL_APP_URL}/f/${slug}`;
+  return `${getAppBaseUrl()}/f/${slug}`;
 }
 
 /**
@@ -44,5 +45,14 @@ export function getOfficialFormUrl(slug: string): string {
 export function getOfficialVerifyUrl(carnetOrToken: string, format: 'short' | 'long' = 'short'): string {
   const prefix = format === 'long' ? '/verificar' : '/v';
   const clean = encodeURIComponent((carnetOrToken || '').trim());
-  return `${OFFICIAL_APP_URL}${prefix}/${clean}`;
+  return `${getAppBaseUrl()}${prefix}/${clean}`;
 }
+
+/**
+ * URL oficial para acceso y visualización pública de documentos PDF de solicitudes
+ */
+export function getOfficialSolicitudPdfUrl(tipo: 'combustible' | 'compra', folio: string): string {
+  const cleanFolio = encodeURIComponent((folio || '').trim());
+  return `${getAppBaseUrl()}/v/solicitud/${tipo}/${cleanFolio}`;
+}
+

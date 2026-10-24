@@ -17,7 +17,7 @@ interface PermisosIndividualesModalProps {
 // Categories for clean grouping
 const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: string[] }> = {
   socorristas: {
-    label: 'Socorristas',
+    label: 'Socorristas y Méritos',
     icon: Users,
     keys: [
       'view_socorristas',
@@ -28,7 +28,8 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'view_carnet',
       'descargar_carnet',
       'view_solicitar_carnet',
-      'view_verificar_carnet'
+      'view_verificar_carnet',
+      'view_meritos'
     ]
   },
   vehiculos: {
@@ -66,7 +67,8 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'view_anuncios',
       'crear_anuncios',
       'view_formularios',
-      'crear_formularios'
+      'crear_formularios',
+      'ver_todos_formularios'
     ]
   },
   admin: {

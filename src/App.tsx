@@ -35,7 +35,9 @@ const Registro = React.lazy(() => import('./pages/Registro'));
 const Archivos = React.lazy(() => import('./pages/Archivos'));
 const Anuncios = React.lazy(() => import('./pages/Anuncios'));
 const Formularios = React.lazy(() => import('./pages/Formularios'));
+const Meritos = React.lazy(() => import('./pages/Meritos'));
 const PublicFormulario = React.lazy(() => import('./pages/PublicFormulario'));
+const PublicSolicitudPdf = React.lazy(() => import('./pages/PublicSolicitudPdf'));
 
 const ProtectedRoute = ({ children, requiredPermission, anyPermission }: { children: React.ReactNode, requiredPermission?: string, anyPermission?: string[] }) => {
   const { user, permissions, requiresPasswordReset, loading } = useAuth();
@@ -88,8 +90,11 @@ export default function App() {
             <Route path="/verificar/:carnetId" element={<VerificacionCarnet />} />
             <Route path="/v/:carnetId" element={<VerificacionCarnet />} />
             <Route path="/solicitud-carnet" element={<SolicitudCarnet />} />
+            <Route path="/solicitar-carnet" element={<Navigate to="/solicitud-carnet" replace />} />
             <Route path="/f/:slug" element={<PublicFormulario />} />
             <Route path="/formularios/:slug/responder" element={<PublicFormulario />} />
+            <Route path="/v/solicitud/:tipo/:folio" element={<PublicSolicitudPdf />} />
+            <Route path="/documento/:tipo/:folio" element={<PublicSolicitudPdf />} />
 
             {/* Authenticated/App Routes */}
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -105,6 +110,7 @@ export default function App() {
               <Route path="cursos" element={<ProtectedRoute requiredPermission="view_cursos"><Cursos /></ProtectedRoute>} />
               <Route path="cursos/:id" element={<ProtectedRoute requiredPermission="view_cursos"><CursoDetails /></ProtectedRoute>} />
               <Route path="formularios" element={<ProtectedRoute requiredPermission="view_formularios"><Formularios /></ProtectedRoute>} />
+              <Route path="meritos" element={<ProtectedRoute requiredPermission="view_meritos"><Meritos /></ProtectedRoute>} />
               <Route path="seccionales" element={<ProtectedRoute requiredPermission="view_seccionales"><Seccionales /></ProtectedRoute>} />
               <Route path="directorio" element={<ProtectedRoute requiredPermission="view_directorio"><Directorio /></ProtectedRoute>} />
               <Route path="configuracion" element={<ProtectedRoute anyPermission={['view_config', 'personalizar_colores']}><Configuracion /></ProtectedRoute>} />

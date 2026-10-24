@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, ArrowLeft, Upload, X, Check } from 'lucide-react';
+import { Save, ArrowLeft, Upload, X, Check, PhoneCall } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -21,6 +21,10 @@ export default function NewSocorrista() {
     fecha_nacimiento: '',
     telefono: '',
     direccion: '',
+    contacto_emergencia_nombre: '',
+    contacto_emergencia_telefono: '',
+    contacto_emergencia_nombre_2: '',
+    contacto_emergencia_telefono_2: '',
     seccional_id: directorSeccionalId ? directorSeccionalId.toString() : '',
     sexo: 'Masculino',
     fecha_ingreso: new Date().toISOString().split('T')[0],
@@ -456,19 +460,25 @@ export default function NewSocorrista() {
         .select();
 
       if (error) {
-        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo')) {
+        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo') || error.message?.includes('contacto_emergencia')) {
           // La columna aún no existe en Supabase, reintentar sin ella para no romper el registro
-          const { segundo_cargo_administrativo, ...fallbackData } = insertData;
+          const { 
+            segundo_cargo_administrativo, 
+            contacto_emergencia_nombre,
+            contacto_emergencia_telefono,
+            contacto_emergencia_nombre_2,
+            contacto_emergencia_telefono_2,
+            ...fallbackData 
+          } = insertData;
           const { data: retryData, error: retryError } = await supabase
             .from('socorristas')
             .insert([fallbackData])
             .select();
           if (retryError) {
-            console.error('Error al reintentar sin segundo_cargo_administrativo:', retryError);
+            console.error('Error al reintentar sin columnas nuevas:', retryError);
             throw new Error(`Error de base de datos: ${retryError.message} (Código: ${retryError.code})`);
           }
           insertedRecord = retryData?.[0];
-          alert('Aviso: El elemento fue guardado, pero la columna "segundo_cargo_administrativo" aún no ha sido agregada en Supabase. Ejecute el script 13_add_segundo_cargo_administrativo.sql en el SQL Editor de Supabase para habilitar esta función en la nube.');
         } else {
           console.error('Error de Supabase al insertar:', error);
           throw new Error(`Error de base de datos: ${error.message} (Código: ${error.code})`);
@@ -478,6 +488,24 @@ export default function NewSocorrista() {
       }
 
       console.log('Respuesta de Supabase exitosa:', insertedRecord);
+
+      // Guardar también siempre los contactos de emergencia en configuracion para disponibilidad inmediata
+      if (insertedRecord && (formData.contacto_emergencia_telefono || formData.contacto_emergencia_telefono_2)) {
+        try {
+          const emergenciaData = {
+            contacto_emergencia_nombre: formData.contacto_emergencia_nombre || '',
+            contacto_emergencia_telefono: formData.contacto_emergencia_telefono || '',
+            contacto_emergencia_nombre_2: formData.contacto_emergencia_nombre_2 || '',
+            contacto_emergencia_telefono_2: formData.contacto_emergencia_telefono_2 || '',
+            created_at: new Date().toISOString()
+          };
+          await supabase
+            .from('configuracion')
+            .upsert({ clave: `socorrista_emergencia_${insertedRecord.id}`, valor: JSON.stringify(emergenciaData) }, { onConflict: 'clave' });
+        } catch (confErr) {
+          console.warn('Error guardando contacto de emergencia en configuracion:', confErr);
+        }
+      }
 
       if (insertedRecord) {
         // Sincronizar con la tabla seccionales si se le asignó Director o Subdirector
@@ -882,6 +910,78 @@ export default function NewSocorrista() {
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Dirección</label>
                 <div className="mt-1 sm:mt-0 sm:col-span-2">
                   <textarea name="direccion" rows={3} value={formData.direccion} onChange={handleChange} className="max-w-lg shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border border-gray-300 rounded-md p-2" />
+                </div>
+              </div>
+
+              {/* Contactos de Emergencia (Máximo 2) */}
+              <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 flex items-center">
+                    <PhoneCall className="w-4 h-4 mr-1 text-red-600" />
+                    Contactos de Emergencia
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Hasta 2 números telefónicos de familiares o tutores para contacto rápido ante emergencias o validación en carnet.
+                  </p>
+                </div>
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-4 max-w-lg">
+                  {/* Contacto 1 */}
+                  <div className="p-3 bg-red-50/40 rounded-xl border border-red-200/80 space-y-3">
+                    <span className="text-xs font-bold text-red-700 uppercase tracking-wide block">Contacto de Emergencia 1 (Principal)</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">Nombre y Parentesco</label>
+                        <input
+                          type="text"
+                          name="contacto_emergencia_nombre"
+                          value={formData.contacto_emergencia_nombre}
+                          onChange={handleChange}
+                          placeholder="Ej. Ana Pérez (Madre)"
+                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">Teléfono</label>
+                        <input
+                          type="text"
+                          name="contacto_emergencia_telefono"
+                          value={formData.contacto_emergencia_telefono}
+                          onChange={handleChange}
+                          placeholder="Ej. 7000-0000"
+                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contacto 2 */}
+                  <div className="p-3 bg-red-50/40 rounded-xl border border-red-200/80 space-y-3">
+                    <span className="text-xs font-bold text-red-700 uppercase tracking-wide block">Contacto de Emergencia 2 (Opcional)</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">Nombre y Parentesco</label>
+                        <input
+                          type="text"
+                          name="contacto_emergencia_nombre_2"
+                          value={formData.contacto_emergencia_nombre_2}
+                          onChange={handleChange}
+                          placeholder="Ej. Roberto Gómez (Hermano)"
+                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">Teléfono</label>
+                        <input
+                          type="text"
+                          name="contacto_emergencia_telefono_2"
+                          value={formData.contacto_emergencia_telefono_2}
+                          onChange={handleChange}
+                          placeholder="Ej. 7111-2222"
+                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

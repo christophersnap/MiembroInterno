@@ -1,12 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Save, RotateCcw, Check, Type, FileText, Mail, Image as ImageIcon, 
   Sliders, Shield, Eye, GripVertical, ChevronUp, ChevronDown, 
   AlignLeft, AlignCenter, AlignRight, Sparkles, Upload, Database 
 } from 'lucide-react';
-import { CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, CombustibleBlockItem, SolicitudCombustible } from '../../types/combustible';
+import { 
+  CombustibleConfig, 
+  DEFAULT_COMBUSTIBLE_CONFIG, 
+  DEFAULT_COMBUSTIBLE_BLOCKS, 
+  CombustibleBlockItem, 
+  SolicitudCombustible 
+} from '../../types/combustible';
 import CombustiblePdfModal from './CombustiblePdfModal';
 import ImageUploadConfigCard from '../common/ImageUploadConfigCard';
+import { supabase } from '../../lib/supabase';
+import { getApiUrl } from '../../lib/api';
 
 interface CombustibleTemplateConfigProps {
   config: CombustibleConfig;
@@ -22,26 +30,44 @@ export default function CombustibleTemplateConfig({
   const [currentConfig, setCurrentConfig] = useState<CombustibleConfig>(() => ({
     ...DEFAULT_COMBUSTIBLE_CONFIG,
     ...initialConfig,
-    pdfBloquesOrden: initialConfig?.pdfBloquesOrden?.length 
+    pdfBloquesOrden: (initialConfig?.pdfBloquesOrden && initialConfig.pdfBloquesOrden.length > 0)
       ? initialConfig.pdfBloquesOrden 
-      : DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden
+      : DEFAULT_COMBUSTIBLE_BLOCKS
   }));
 
-  React.useEffect(() => {
-    if (initialConfig) {
+  const isInitializedRef = useRef(false);
+  useEffect(() => {
+    if (initialConfig && !isInitializedRef.current) {
+      isInitializedRef.current = true;
       setCurrentConfig(prev => ({
         ...prev,
         ...initialConfig,
-        pdfBloquesOrden: initialConfig.pdfBloquesOrden?.length
+        pdfBloquesOrden: (initialConfig.pdfBloquesOrden && initialConfig.pdfBloquesOrden.length > 0)
           ? initialConfig.pdfBloquesOrden
-          : prev.pdfBloquesOrden
+          : (prev.pdfBloquesOrden && prev.pdfBloquesOrden.length > 0)
+          ? prev.pdfBloquesOrden
+          : DEFAULT_COMBUSTIBLE_BLOCKS
       }));
     }
   }, [initialConfig]);
+
   const [activeSubTab, setActiveSubTab] = useState<'disenador' | 'imagenes' | 'pdf' | 'textos' | 'correo'>('disenador');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Auto-guardado inmediato en Supabase
+  const handleUpdateAndAutoSave = async (partial: Partial<CombustibleConfig>) => {
+    const updated = { ...currentConfig, ...partial };
+    setCurrentConfig(updated);
+    try {
+      await onSave(updated);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (err) {
+      console.warn('Auto-save error in CombustibleTemplateConfig:', err);
+    }
+  };
 
   // Manejo de drag and drop de bloques
   const handleDragStart = (index: number) => {
@@ -55,19 +81,26 @@ export default function CombustibleTemplateConfig({
   const handleDrop = (targetIndex: number) => {
     if (draggedIndex === null || draggedIndex === targetIndex) return;
 
-    const updatedBlocks = [...(currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!)];
+    const currentBlocks = currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0
+      ? currentConfig.pdfBloquesOrden
+      : DEFAULT_COMBUSTIBLE_BLOCKS;
+    const updatedBlocks = [...currentBlocks];
     const [movedItem] = updatedBlocks.splice(draggedIndex, 1);
     updatedBlocks.splice(targetIndex, 0, movedItem);
 
-    setCurrentConfig({
+    const updated = {
       ...currentConfig,
       pdfBloquesOrden: updatedBlocks
-    });
+    };
+    setCurrentConfig(updated);
     setDraggedIndex(null);
   };
 
   const moveBlock = (index: number, direction: 'up' | 'down') => {
-    const blocks = [...(currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!)];
+    const currentBlocks = currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0
+      ? currentConfig.pdfBloquesOrden
+      : DEFAULT_COMBUSTIBLE_BLOCKS;
+    const blocks = [...currentBlocks];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= blocks.length) return;
 
@@ -75,40 +108,107 @@ export default function CombustibleTemplateConfig({
     blocks[index] = blocks[targetIndex];
     blocks[targetIndex] = temp;
 
-    setCurrentConfig({
+    const updated = {
       ...currentConfig,
       pdfBloquesOrden: blocks
-    });
+    };
+    setCurrentConfig(updated);
   };
 
   const toggleBlock = (id: string) => {
-    const blocks = (currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!).map(b => 
+    const currentBlocks = currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0
+      ? currentConfig.pdfBloquesOrden
+      : DEFAULT_COMBUSTIBLE_BLOCKS;
+    const blocks = currentBlocks.map(b => 
       b.id === id ? { ...b, enabled: !b.enabled } : b
     );
-    setCurrentConfig({ ...currentConfig, pdfBloquesOrden: blocks });
+    const updated = { ...currentConfig, pdfBloquesOrden: blocks };
+    setCurrentConfig(updated);
   };
 
   const setBlockAlign = (id: string, align: 'left' | 'center' | 'right') => {
-    const blocks = (currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!).map(b => 
+    const currentBlocks = currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0
+      ? currentConfig.pdfBloquesOrden
+      : DEFAULT_COMBUSTIBLE_BLOCKS;
+    const blocks = currentBlocks.map(b => 
       b.id === id ? { ...b, align } : b
     );
-    setCurrentConfig({ ...currentConfig, pdfBloquesOrden: blocks });
+    const updated = { ...currentConfig, pdfBloquesOrden: blocks };
+    setCurrentConfig(updated);
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        setCurrentConfig({
-          ...currentConfig,
-          pdfLogoHeaderUrl: result,
-          pdfMostrarLogoHeader: true
+    if (!file) return;
+
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const cleanName = `logo_combus_header_${Date.now()}.${ext}`;
+
+      // 1. Intentar subir al bucket 'assets' de Supabase
+      let uploadRes = await supabase.storage.from('assets').upload(`combustible/${cleanName}`, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+      // 2. Si falla assets, intentar en 'socorristas'
+      if (uploadRes.error) {
+        uploadRes = await supabase.storage.from('socorristas').upload(`combustible/${cleanName}`, file, {
+          cacheControl: '3600',
+          upsert: true
         });
-      };
-      reader.readAsDataURL(file);
+        if (!uploadRes.error) {
+          const { data } = supabase.storage.from('socorristas').getPublicUrl(`combustible/${cleanName}`);
+          if (data?.publicUrl) {
+            await handleUpdateAndAutoSave({
+              pdfLogoHeaderUrl: data.publicUrl,
+              pdfMostrarLogoHeader: true
+            });
+            return;
+          }
+        }
+      } else {
+        const { data } = supabase.storage.from('assets').getPublicUrl(`combustible/${cleanName}`);
+        if (data?.publicUrl) {
+          await handleUpdateAndAutoSave({
+            pdfLogoHeaderUrl: data.publicUrl,
+            pdfMostrarLogoHeader: true
+          });
+          return;
+        }
+      }
+
+      // 3. Fallback a API local
+      const formData = new FormData();
+      formData.append('archivo', file);
+      const res = await fetch(getApiUrl('/api/upload-file'), {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          await handleUpdateAndAutoSave({
+            pdfLogoHeaderUrl: data.url,
+            pdfMostrarLogoHeader: true
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Subida directa de logo falló, usando lectura base64 local:', err);
     }
+
+    // 4. Fallback final base64
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const result = event.target?.result as string;
+      await handleUpdateAndAutoSave({
+        pdfLogoHeaderUrl: result,
+        pdfMostrarLogoHeader: true
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleReset = () => {
@@ -390,7 +490,7 @@ export default function CombustibleTemplateConfig({
               </div>
 
               <div className="space-y-2.5">
-                {(currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!).map((bloque, index) => (
+                {(currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0 ? currentConfig.pdfBloquesOrden : DEFAULT_COMBUSTIBLE_BLOCKS).map((bloque, index) => (
                   <div
                     key={bloque.id}
                     draggable
@@ -468,7 +568,7 @@ export default function CombustibleTemplateConfig({
                         </button>
                         <button
                           type="button"
-                          disabled={index === (currentConfig.pdfBloquesOrden || DEFAULT_COMBUSTIBLE_CONFIG.pdfBloquesOrden!).length - 1}
+                          disabled={index === ((currentConfig.pdfBloquesOrden && currentConfig.pdfBloquesOrden.length > 0 ? currentConfig.pdfBloquesOrden : DEFAULT_COMBUSTIBLE_BLOCKS).length - 1)}
                           onClick={() => moveBlock(index, 'down')}
                           className="p-1 rounded hover:bg-gray-100 text-gray-500 disabled:opacity-30"
                           title="Bajar posición"
@@ -729,10 +829,10 @@ export default function CombustibleTemplateConfig({
                 position={currentConfig.pdfLogoPosicion || 'left'}
                 size={currentConfig.pdfLogoSize || 'medium'}
                 visible={currentConfig.pdfMostrarLogoHeader}
-                onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfLogoHeaderUrl: url })}
-                onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfLogoPosicion: pos })}
-                onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfLogoSize: size })}
-                onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarLogoHeader: visible })}
+                onImageChange={(url) => handleUpdateAndAutoSave({ pdfLogoHeaderUrl: url, pdfMostrarLogoHeader: Boolean(url) })}
+                onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfLogoPosicion: pos })}
+                onSizeChange={(size) => handleUpdateAndAutoSave({ pdfLogoSize: size })}
+                onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogoHeader: visible })}
                 defaultPlaceholderText="Cruz Verde Salvadoreña"
                 defaultLogoName="Escudo Oficial Cruz Verde"
               />
@@ -745,10 +845,10 @@ export default function CombustibleTemplateConfig({
                 position={currentConfig.pdfLogoSecundarioPosicion || 'right'}
                 size={currentConfig.pdfLogoSecundarioSize || 'medium'}
                 visible={currentConfig.pdfMostrarLogoSecundario || false}
-                onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioUrl: url })}
-                onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioPosicion: pos })}
-                onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioSize: size })}
-                onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarLogoSecundario: visible })}
+                onImageChange={(url) => handleUpdateAndAutoSave({ pdfLogoSecundarioUrl: url, pdfMostrarLogoSecundario: Boolean(url) })}
+                onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfLogoSecundarioPosicion: pos })}
+                onSizeChange={(size) => handleUpdateAndAutoSave({ pdfLogoSecundarioSize: size })}
+                onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogoSecundario: visible })}
                 defaultPlaceholderText="Logo Secundario / Cooperante"
                 defaultLogoName="Sin logo secundario por defecto"
               />
@@ -761,15 +861,13 @@ export default function CombustibleTemplateConfig({
                 position={currentConfig.pdfSelloImgPosicion || 'center'}
                 size={currentConfig.pdfSelloImgSize || 'medium'}
                 visible={currentConfig.pdfMostrarSelloImg || false}
-                onImageChange={(url) => setCurrentConfig({ 
-                  ...currentConfig, 
+                onImageChange={(url) => handleUpdateAndAutoSave({ 
                   pdfSelloImgUrl: url, 
                   pdfMostrarSelloImg: Boolean(url) 
                 })}
-                onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfSelloImgPosicion: pos })}
-                onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfSelloImgSize: size })}
-                onVisibilityChange={(visible) => setCurrentConfig({ 
-                  ...currentConfig, 
+                onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfSelloImgPosicion: pos })}
+                onSizeChange={(size) => handleUpdateAndAutoSave({ pdfSelloImgSize: size })}
+                onVisibilityChange={(visible) => handleUpdateAndAutoSave({ 
                   pdfMostrarSelloImg: visible 
                 })}
                 defaultPlaceholderText="Sello Cruz Verde Salvadoreña"
@@ -784,10 +882,10 @@ export default function CombustibleTemplateConfig({
                 position={currentConfig.pdfFooterImgPosicion || 'center'}
                 size={currentConfig.pdfFooterImgSize || 'medium'}
                 visible={currentConfig.pdfMostrarLogoFooter}
-                onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfLogoFooterUrl: url })}
-                onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfFooterImgPosicion: pos })}
-                onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfFooterImgSize: size })}
-                onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarLogoFooter: visible })}
+                onImageChange={(url) => handleUpdateAndAutoSave({ pdfLogoFooterUrl: url, pdfMostrarLogoFooter: Boolean(url) })}
+                onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfFooterImgPosicion: pos })}
+                onSizeChange={(size) => handleUpdateAndAutoSave({ pdfFooterImgSize: size })}
+                onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogoFooter: visible })}
                 defaultPlaceholderText="Cintillo Oficial Cruz Verde"
                 defaultLogoName="Sin cintillo por defecto"
               />

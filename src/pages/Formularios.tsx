@@ -259,8 +259,24 @@ export default function Formularios() {
     }
   };
 
-  // Filtered list
-  const filteredFormularios = formularios.filter(f => {
+  // Control de acceso: solo el admin o usuarios con permiso 'ver_todos_formularios' pueden ver todos los formularios
+  const canViewAllFormularios = role === 'admin' || Boolean(permissions?.ver_todos_formularios);
+
+  const isFormCreator = (f: Formulario) => {
+    if (canViewAllFormularios) return true;
+    return (
+      (user?.id && f.creado_por === user.id) ||
+      (user?.email && f.creado_por === user.email) ||
+      (userName && f.creado_por_nombre && f.creado_por_nombre.toLowerCase() === userName.toLowerCase()) ||
+      (user?.email && f.creado_por_nombre && f.creado_por_nombre.toLowerCase() === user.email.toLowerCase())
+    );
+  };
+
+  // Formularios que este usuario tiene permiso de ver
+  const userVisibleFormularios = formularios.filter(isFormCreator);
+
+  // Filtered list con búsqueda y categorías
+  const filteredFormularios = userVisibleFormularios.filter(f => {
     if (search.trim()) {
       const term = search.toLowerCase();
       const matchTitle = f.titulo.toLowerCase().includes(term);
@@ -279,9 +295,9 @@ export default function Formularios() {
     return true;
   });
 
-  const totalRespuestas = formularios.reduce((sum, f) => sum + (f.respuestas_count || 0), 0);
-  const totalPublicos = formularios.filter(f => !f.requiere_autenticacion).length;
-  const totalPrivados = formularios.filter(f => f.requiere_autenticacion).length;
+  const totalRespuestas = userVisibleFormularios.reduce((sum, f) => sum + (f.respuestas_count || 0), 0);
+  const totalPublicos = userVisibleFormularios.filter(f => !f.requiere_autenticacion).length;
+  const totalPrivados = userVisibleFormularios.filter(f => f.requiere_autenticacion).length;
 
   return (
     <div className="space-y-6">
@@ -306,6 +322,19 @@ export default function Formularios() {
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
             Crea formularios con campos institucionales (carnet, DUI, seccional, teléfono internacional con código de país), enlaces para compartir y control de acceso.
           </p>
+          <div className="mt-2.5 flex items-center gap-2">
+            {canViewAllFormularios ? (
+              <span className="inline-flex items-center text-3xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
+                Permiso Activo: Visualizando formularios de todos los usuarios
+              </span>
+            ) : (
+              <span className="inline-flex items-center text-3xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
+                <Users className="w-3 h-3 mr-1 text-slate-500" />
+                Vista Filtrada: Únicamente formularios creados por tu cuenta
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">

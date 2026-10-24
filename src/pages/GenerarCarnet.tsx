@@ -1,12 +1,53 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye } from 'lucide-react';
+import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye, Sliders, Shield } from 'lucide-react';
 import * as QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
 import { generateSecureQrToken } from '../utils/qrSecurity';
+import { getApiUrl } from '../lib/api';
 
 import WatermarkImage from '../components/WatermarkImage';
+
+export const VERIFICATION_FIELD_DEFINITIONS = [
+  { id: 'foto', label: 'Fotografía Oficial' },
+  { id: 'carnetId', label: 'Número de Carnet' },
+  { id: 'nombre', label: 'Nombre Completo' },
+  { id: 'cargoInstitucional', label: 'Cargo Institucional' },
+  { id: 'cargoAdministrativo', label: 'Cargo Administrativo' },
+  { id: 'seccional', label: 'Seccional o Filial' },
+  { id: 'estado', label: 'Estado de Membresía' },
+  { id: 'dui', label: 'Documento DUI' },
+  { id: 'telefono', label: 'Teléfono de Contacto' },
+  { id: 'email', label: 'Correo Electrónico' },
+  { id: 'fechaNacimiento', label: 'Fecha de Nacimiento' },
+  { id: 'fechaIngreso', label: 'Fecha de Ingreso' },
+  { id: 'tipoSangre', label: 'Tipo de Sangre' },
+  { id: 'motoristaAutorizado', label: 'Habilitación de Motorista' },
+  { id: 'licencias', label: 'Licencias de Conducir' },
+  { id: 'cursos', label: 'Cursos y Capacitaciones' },
+  { id: 'carnetImagen', label: 'Fotografía del Carnet Físico' }
+];
+
+export const DEFAULT_VERIFICATION_FIELDS: Record<string, boolean> = {
+  foto: true,
+  carnetId: true,
+  nombre: true,
+  cargoInstitucional: true,
+  cargoAdministrativo: true,
+  seccional: true,
+  estado: true,
+  dui: true,
+  telefono: true,
+  email: true,
+  fechaNacimiento: true,
+  fechaIngreso: true,
+  tipoSangre: true,
+  motoristaAutorizado: true,
+  licencias: true,
+  cursos: true,
+  carnetImagen: true
+};
 
 export default function GenerarCarnet() {
   const { role, watermarkEnabled, userName } = useAuth();
@@ -17,6 +58,8 @@ export default function GenerarCarnet() {
   const [filterSolicitud, setFilterSolicitud] = useState('Todos');
   const [selectedSocorrista, setSelectedSocorrista] = useState<any>(null);
   const [templateImage, setTemplateImage] = useState<HTMLImageElement | null>(null);
+  const [currentTemplateUrl, setCurrentTemplateUrl] = useState<string | null>(null);
+  const [loadedSocorristaAjustes, setLoadedSocorristaAjustes] = useState<boolean>(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sortOrder, setSortOrder] = useState<'alphabetical' | 'carnet'>('alphabetical');
@@ -95,17 +138,10 @@ export default function GenerarCarnet() {
   const [qrBaseUrl, setQrBaseUrl] = useState<string>('https://cruzverdesv.org/miembros');
   const [qrLinkFormat, setQrLinkFormat] = useState<string>('short');
 
-  // Verification fields state
-  const [verificationFields, setVerificationFields] = useState({
-    showDui: true,
-    showSeccional: true,
-    showCargoInst: true,
-    showCargoAdmin: true,
-    showFechaIngreso: true,
-    showCursos: true,
-    showTipoSangre: true,
-    showEmail: true
-  });
+  // Verification fields & mode state
+  const [verificationMode, setVerificationMode] = useState<'system' | 'custom'>('system');
+  const [systemVerificationFields, setSystemVerificationFields] = useState<Record<string, boolean>>(DEFAULT_VERIFICATION_FIELDS);
+  const [verificationFields, setVerificationFields] = useState<Record<string, boolean>>(DEFAULT_VERIFICATION_FIELDS);
 
   // Presets, Templates, Fonts
   const [presets, setPresets] = useState<any[]>([]);
@@ -145,6 +181,25 @@ export default function GenerarCarnet() {
           });
         }
       } catch(e) {}
+
+      // Fallback: consultar solicitudes guardadas en configuracion
+      try {
+        const { data: backupSols } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .like('clave', 'solicitud_carnet_%');
+
+        if (backupSols) {
+          backupSols.forEach(row => {
+            try {
+              const sol = JSON.parse(row.valor);
+              if (sol && sol.socorrista_id && !solicitudesMap[sol.socorrista_id]) {
+                solicitudesMap[sol.socorrista_id] = sol;
+              }
+            } catch (err) {}
+          });
+        }
+      } catch (backupErr) {}
       
       const mappedData = (data || []).map(s => {
         let seccional_nombre = 'N/A';
@@ -221,7 +276,11 @@ export default function GenerarCarnet() {
       if (configRows) {
         configRows.forEach(row => {
           if (row.clave === 'verificacion_fields' && row.valor) {
-            try { setVerificationFields(JSON.parse(row.valor)); } catch (e) {}
+            try {
+              const parsed = JSON.parse(row.valor);
+              setSystemVerificationFields(parsed);
+              setVerificationFields(parsed);
+            } catch (e) {}
           }
           if (row.clave === 'qr_base_url' && row.valor) {
             setQrBaseUrl(row.valor);
@@ -232,6 +291,22 @@ export default function GenerarCarnet() {
         });
       }
     } catch (e) { console.warn(e); }
+
+    try {
+      const res = await fetch(getApiUrl('/api/configuracion'));
+      if (res.ok) {
+        const confObj = await res.json();
+        if (confObj.verificacion_fields) {
+          try {
+            const parsed = typeof confObj.verificacion_fields === 'string' ? JSON.parse(confObj.verificacion_fields) : confObj.verificacion_fields;
+            setSystemVerificationFields(parsed);
+            setVerificationFields(parsed);
+          } catch (e) {}
+        }
+        if (confObj.qr_base_url) setQrBaseUrl(confObj.qr_base_url);
+        if (confObj.qr_link_format) setQrLinkFormat(confObj.qr_link_format);
+      }
+    } catch (e) {}
   };
 
   const saveVerificationConfig = async (fields: any) => {
@@ -347,6 +422,137 @@ export default function GenerarCarnet() {
     setShowPresetModal(false);
   };
 
+  // Carga y aplica todos los ajustes guardados de un carnet específico
+  const applyAdjustments = (config: any) => {
+    if (!config) return;
+    if (config.customFontName) setCustomFontName(config.customFontName);
+    if (config.fontSizeNames !== undefined) setFontSizeNames(config.fontSizeNames);
+    if (config.fontColorNames) setFontColorNames(config.fontColorNames);
+    if (config.posNamesX !== undefined) setPosNamesX(config.posNamesX);
+    if (config.posNamesY !== undefined) setPosNamesY(config.posNamesY);
+
+    if (config.fontSizeLastNames !== undefined) setFontSizeLastNames(config.fontSizeLastNames);
+    if (config.fontColorLastNames) setFontColorLastNames(config.fontColorLastNames);
+    if (config.posLastNamesX !== undefined) setPosLastNamesX(config.posLastNamesX);
+    if (config.posLastNamesY !== undefined) setPosLastNamesY(config.posLastNamesY);
+
+    if (config.fontSizeCargo !== undefined) setFontSizeCargo(config.fontSizeCargo);
+    if (config.fontColorCargo) setFontColorCargo(config.fontColorCargo);
+    if (config.bgColorCargo) setBgColorCargo(config.bgColorCargo);
+    if (config.borderRadiusCargo !== undefined) setBorderRadiusCargo(config.borderRadiusCargo);
+    if (config.posCargoX !== undefined) setPosCargoX(config.posCargoX);
+    if (config.posCargoY !== undefined) setPosCargoY(config.posCargoY);
+    if (config.showBgCargo !== undefined) setShowBgCargo(config.showBgCargo);
+    if (config.bgCargoWidth !== undefined) setBgCargoWidth(config.bgCargoWidth);
+    if (config.bgCargoHeight !== undefined) setBgCargoHeight(config.bgCargoHeight);
+
+    if (config.fontSizeCargoAdmin !== undefined) setFontSizeCargoAdmin(config.fontSizeCargoAdmin);
+    if (config.fontColorCargoAdmin) setFontColorCargoAdmin(config.fontColorCargoAdmin);
+    if (config.bgColorCargoAdmin) setBgColorCargoAdmin(config.bgColorCargoAdmin);
+    if (config.borderRadiusCargoAdmin !== undefined) setBorderRadiusCargoAdmin(config.borderRadiusCargoAdmin);
+    if (config.posCargoAdminX !== undefined) setPosCargoAdminX(config.posCargoAdminX);
+    if (config.posCargoAdminY !== undefined) setPosCargoAdminY(config.posCargoAdminY);
+    if (config.showBgCargoAdmin !== undefined) setShowBgCargoAdmin(config.showBgCargoAdmin);
+    if (config.bgCargoAdminWidth !== undefined) setBgCargoAdminWidth(config.bgCargoAdminWidth);
+    if (config.bgCargoAdminHeight !== undefined) setBgCargoAdminHeight(config.bgCargoAdminHeight);
+
+    if (config.fontSizeSeccional !== undefined) setFontSizeSeccional(config.fontSizeSeccional);
+    if (config.fontColorSeccional) setFontColorSeccional(config.fontColorSeccional);
+    if (config.posSeccionalX !== undefined) setPosSeccionalX(config.posSeccionalX);
+    if (config.posSeccionalY !== undefined) setPosSeccionalY(config.posSeccionalY);
+
+    if (config.fontSizeDui !== undefined) setFontSizeDui(config.fontSizeDui);
+    if (config.fontColorDui) setFontColorDui(config.fontColorDui);
+    if (config.posDuiX !== undefined) setPosDuiX(config.posDuiX);
+    if (config.posDuiY !== undefined) setPosDuiY(config.posDuiY);
+
+    if (config.fontSizeCarnet !== undefined) setFontSizeCarnet(config.fontSizeCarnet);
+    if (config.fontColorCarnet) setFontColorCarnet(config.fontColorCarnet);
+    if (config.posCarnetX !== undefined) setPosCarnetX(config.posCarnetX);
+    if (config.posCarnetY !== undefined) setPosCarnetY(config.posCarnetY);
+
+    if (config.showMotorista !== undefined) setShowMotorista(config.showMotorista);
+    if (config.fontSizeMotorista !== undefined) setFontSizeMotorista(config.fontSizeMotorista);
+    if (config.fontColorMotorista) setFontColorMotorista(config.fontColorMotorista);
+    if (config.posMotoristaX !== undefined) setPosMotoristaX(config.posMotoristaX);
+    if (config.posMotoristaY !== undefined) setPosMotoristaY(config.posMotoristaY);
+    if (config.showBgMotorista !== undefined) setShowBgMotorista(config.showBgMotorista);
+    if (config.bgColorMotorista) setBgColorMotorista(config.bgColorMotorista);
+    if (config.borderRadiusMotorista !== undefined) setBorderRadiusMotorista(config.borderRadiusMotorista);
+    if (config.bgMotoristaWidth !== undefined) setBgMotoristaWidth(config.bgMotoristaWidth);
+    if (config.bgMotoristaHeight !== undefined) setBgMotoristaHeight(config.bgMotoristaHeight);
+
+    if (config.qrSize !== undefined) setQrSize(config.qrSize);
+    if (config.posQrX !== undefined) setPosQrX(config.posQrX);
+    if (config.posQrY !== undefined) setPosQrY(config.posQrY);
+    if (config.showQR !== undefined) setShowQR(config.showQR);
+    if (config.photoSize !== undefined) setPhotoSize(config.photoSize);
+    if (config.posPhotoX !== undefined) setPosPhotoX(config.posPhotoX);
+    if (config.posPhotoY !== undefined) setPosPhotoY(config.posPhotoY);
+
+    if (config.verificationMode) setVerificationMode(config.verificationMode);
+    if (config.verificationFields) setVerificationFields(config.verificationFields);
+
+    if (config.templateUrl) {
+      setCurrentTemplateUrl(config.templateUrl);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => setTemplateImage(img);
+      img.src = config.templateUrl;
+    }
+  };
+
+  // Al seleccionar un socorrista, cargar todos los ajustes que se realizaron previamente a su carnet
+  const handleSelectSocorrista = async (socorrista: any) => {
+    setSelectedSocorrista(socorrista);
+    setLoadedSocorristaAjustes(false);
+
+    let loadedConfig: any = null;
+
+    // 1. Consultar localStorage
+    try {
+      const local = localStorage.getItem(`carnet_ajustes_${socorrista.id}`);
+      if (local) {
+        loadedConfig = JSON.parse(local);
+      }
+    } catch (e) {}
+
+    // 2. Consultar SQLite del backend
+    try {
+      const res = await fetch(getApiUrl('/api/configuracion'));
+      if (res.ok) {
+        const confObj = await res.json();
+        const key = `carnet_ajustes_${socorrista.id}`;
+        if (confObj[key]) {
+          try {
+            loadedConfig = JSON.parse(confObj[key]);
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
+    // 3. Fallback a Supabase
+    if (!loadedConfig) {
+      try {
+        const { data: row } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', `carnet_ajustes_${socorrista.id}`)
+          .maybeSingle();
+        if (row?.valor) {
+          try {
+            loadedConfig = JSON.parse(row.valor);
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    if (loadedConfig) {
+      applyAdjustments(loadedConfig);
+      setLoadedSocorristaAjustes(true);
+    }
+  };
+
   const deletePreset = async (id: string) => {
     try {
       const { error } = await supabase
@@ -405,6 +611,7 @@ export default function GenerarCarnet() {
           .select();
 
         if (dbError) throw dbError;
+        setCurrentTemplateUrl(publicUrl);
         if (data) setSavedTemplates([...savedTemplates, data[0]]);
       } catch (error) {
         console.error('Error uploading template:', error);
@@ -469,6 +676,7 @@ export default function GenerarCarnet() {
   };
 
   const loadSavedTemplate = (url: string) => {
+    setCurrentTemplateUrl(url);
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => setTemplateImage(img);
@@ -520,15 +728,16 @@ export default function GenerarCarnet() {
     // Draw background
     ctx.drawImage(templateImage, 0, 0);
 
-    // ... (rest of the photo drawing code remains the same up to text drawing)
-    if (selectedSocorrista.foto_url) {
+    // Draw photo (prioritize new photo from solicitud if present, otherwise profile photo)
+    const effectivePhotoUrl = selectedSocorrista.solicitud?.foto_url || selectedSocorrista.foto_url;
+    if (effectivePhotoUrl) {
       try {
         const photo = new Image();
         photo.crossOrigin = "anonymous";
         await new Promise((resolve, reject) => {
           photo.onload = resolve;
           photo.onerror = reject;
-          photo.src = selectedSocorrista.foto_url;
+          photo.src = effectivePhotoUrl;
         });
 
         // Draw circular photo
@@ -918,6 +1127,43 @@ export default function GenerarCarnet() {
         }
       }
 
+      // Guardar todos los ajustes específicos para este socorrista (para recargarlos al volver a seleccionarlo)
+      const carnetAjustes = {
+        templateUrl: currentTemplateUrl,
+        customFontName,
+        fontSizeNames, fontColorNames, posNamesX, posNamesY,
+        fontSizeLastNames, fontColorLastNames, posLastNamesX, posLastNamesY,
+        fontSizeCargo, fontColorCargo, bgColorCargo, borderRadiusCargo, posCargoX, posCargoY, showBgCargo, bgCargoWidth, bgCargoHeight,
+        fontSizeCargoAdmin, fontColorCargoAdmin, bgColorCargoAdmin, borderRadiusCargoAdmin, posCargoAdminX, posCargoAdminY, showBgCargoAdmin, bgCargoAdminWidth, bgCargoAdminHeight,
+        fontSizeSeccional, fontColorSeccional, posSeccionalX, posSeccionalY,
+        fontSizeDui, fontColorDui, posDuiX, posDuiY,
+        fontSizeCarnet, fontColorCarnet, posCarnetX, posCarnetY,
+        showMotorista, fontSizeMotorista, fontColorMotorista, posMotoristaX, posMotoristaY, showBgMotorista, bgColorMotorista, borderRadiusMotorista, bgMotoristaWidth, bgMotoristaHeight,
+        showQR, posQrX, posQrY, qrSize, qrBaseUrl, qrLinkFormat,
+        photoSize, posPhotoX, posPhotoY,
+        verificationMode,
+        verificationFields
+      };
+
+      const ajustesClave = `carnet_ajustes_${selectedSocorrista.id}`;
+      try {
+        localStorage.setItem(ajustesClave, JSON.stringify(carnetAjustes));
+      } catch (e) {}
+
+      try {
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [ajustesClave]: JSON.stringify(carnetAjustes) })
+        });
+      } catch (e) {}
+
+      try {
+        await supabase
+          .from('configuracion')
+          .upsert({ clave: ajustesClave, valor: JSON.stringify(carnetAjustes) }, { onConflict: 'clave' });
+      } catch (e) {}
+
       await logActivity('Generó carnet', 'Socorrista', selectedSocorrista.id, {
         nombre: `${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido}`,
         carnet: selectedSocorrista.carnet,
@@ -970,9 +1216,9 @@ export default function GenerarCarnet() {
         <h1 className="text-2xl font-semibold text-gray-900">Generador de Carnet</h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Controles */}
-        <div className="lg:col-span-1 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Controles con scroll independiente */}
+        <div className="lg:col-span-5 space-y-6 max-h-[calc(100vh-100px)] overflow-y-auto pr-2 custom-scrollbar">
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">1. Plantilla de Fondo</h2>
             <div className="flex space-x-2 mb-4">
@@ -1064,8 +1310,8 @@ export default function GenerarCarnet() {
                   {filteredSocorristas.map((socorrista) => (
                     <li 
                       key={socorrista.id} 
-                      className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center space-x-3 ${selectedSocorrista?.id === socorrista.id ? 'bg-blue-50 border-l-4 border-primary' : ''}`}
-                      onClick={() => setSelectedSocorrista(socorrista)}
+                      className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center space-x-3 transition-colors ${selectedSocorrista?.id === socorrista.id ? 'bg-blue-50 border-l-4 border-primary' : ''}`}
+                      onClick={() => handleSelectSocorrista(socorrista)}
                     >
                       <div className="flex-shrink-0 h-10 w-10">
                         {socorrista.foto_url ? (
@@ -1087,7 +1333,14 @@ export default function GenerarCarnet() {
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500 truncate">{socorrista.carnet}</p>
+                        <div className="flex items-center space-x-2 mt-0.5">
+                          <p className="text-xs text-gray-500 truncate">{socorrista.carnet}</p>
+                          {loadedSocorristaAjustes && selectedSocorrista?.id === socorrista.id && (
+                            <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800">
+                              ✓ Ajustes restaurados
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {socorrista.carnet_generado_url && (
                         <div className="flex-shrink-0" title="Carnet ya generado">
@@ -1145,40 +1398,176 @@ export default function GenerarCarnet() {
           )}
 
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">3. Verificación en línea</h2>
-            <div className="space-y-4">
-              <p className="text-sm text-gray-500 mb-2">Selecciona qué datos se mostrarán al escanear el QR:</p>
-              <div className="grid grid-cols-2 gap-4">
-                {Object.entries(verificationFields).map(([key, value]) => (
-                  <label key={key} className="flex items-center space-x-3 cursor-pointer">
-                    <div className="relative">
-                      <input 
-                        type="checkbox" 
-                        className="sr-only" 
-                        checked={value} 
-                        onChange={() => {
-                          const newFields = { ...verificationFields, [key]: !value };
-                          setVerificationFields(newFields);
-                          saveVerificationConfig(newFields);
-                        }} 
-                      />
-                      <div className={`block w-8 h-5 rounded-full ${value ? 'bg-primary' : 'bg-gray-300'}`}></div>
-                      <div className={`dot absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition ${value ? 'transform translate-x-3' : ''}`}></div>
-                    </div>
-                    <span className="text-xs font-medium text-gray-700">
-                      {key === 'showDui' ? 'DUI' : 
-                       key === 'showSeccional' ? 'Seccional' : 
-                       key === 'showCargoInst' ? 'Cargo Inst.' : 
-                       key === 'showCargoAdmin' ? 'Cargo Admin.' : 
-                       key === 'showFechaIngreso' ? 'Fecha Ingreso' : 
-                       key === 'showTipoSangre' ? 'Tipo Sangre' :
-                       key === 'showEmail' ? 'Email' :
-                       'Cursos'}
-                    </span>
-                  </label>
-                ))}
-              </div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-medium text-gray-900">3. Verificación en línea</h2>
+              <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                verificationMode === 'system' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {verificationMode === 'system' ? 'Predeterminado' : 'Personalizado'}
+              </span>
             </div>
+            
+            <p className="text-xs text-gray-500 mb-4">
+              Configura los datos que se revelarán al consultar o escanear el código QR del carnet:
+            </p>
+
+            <div className="space-y-3 mb-4">
+              <label 
+                className={`flex items-start p-3 border rounded-lg cursor-pointer transition-all ${
+                  verificationMode === 'system' 
+                    ? 'border-emerald-500 bg-emerald-50/50 shadow-sm' 
+                    : 'border-gray-200 hover:bg-gray-50'
+                }`}
+                onClick={() => {
+                  setVerificationMode('system');
+                  setVerificationFields({ ...systemVerificationFields });
+                }}
+              >
+                <input
+                  type="radio"
+                  name="verificationMode"
+                  checked={verificationMode === 'system'}
+                  onChange={() => {
+                    setVerificationMode('system');
+                    setVerificationFields({ ...systemVerificationFields });
+                  }}
+                  className="mt-1 h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300"
+                />
+                <div className="ml-3">
+                  <span className="block text-sm font-medium text-gray-900">
+                    Seleccionar el predeterminado del sistema
+                  </span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Utiliza la configuración global del portal definida en <strong>Configuraciones</strong>.
+                  </span>
+                </div>
+              </label>
+
+              <label 
+                className={`flex items-start p-3 border rounded-lg cursor-pointer transition-all ${
+                  verificationMode === 'custom' 
+                    ? 'border-blue-500 bg-blue-50/50 shadow-sm' 
+                    : 'border-gray-200 hover:bg-gray-50'
+                }`}
+                onClick={() => setVerificationMode('custom')}
+              >
+                <input
+                  type="radio"
+                  name="verificationMode"
+                  checked={verificationMode === 'custom'}
+                  onChange={() => setVerificationMode('custom')}
+                  className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                />
+                <div className="ml-3">
+                  <span className="block text-sm font-medium text-gray-900">
+                    Personalizar verificación para este carnet
+                  </span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Activa o desactiva campos específicos exclusivamente para este carnet.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {verificationMode === 'system' ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-xs text-gray-600 space-y-2">
+                <div className="flex items-center justify-between text-gray-700 font-medium">
+                  <span>Campos activos según configuración del sistema:</span>
+                  <span className="text-[11px] text-gray-500">
+                    {VERIFICATION_FIELD_DEFINITIONS.filter(def => systemVerificationFields[def.id] !== false).length} de {VERIFICATION_FIELD_DEFINITIONS.length} activos
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {VERIFICATION_FIELD_DEFINITIONS.map(def => {
+                    const isActive = systemVerificationFields[def.id] !== false;
+                    return (
+                      <span
+                        key={def.id}
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] ${
+                          isActive 
+                            ? 'bg-emerald-100 text-emerald-800 font-medium' 
+                            : 'bg-gray-200 text-gray-400 line-through'
+                        }`}
+                      >
+                        {def.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="border border-blue-200 bg-blue-50/30 rounded-md p-3 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-blue-100">
+                  <span className="text-xs font-semibold text-gray-700">Campos visibles en QR:</span>
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allOn: Record<string, boolean> = {};
+                        VERIFICATION_FIELD_DEFINITIONS.forEach(d => { allOn[d.id] = true; });
+                        setVerificationFields(allOn);
+                      }}
+                      className="text-primary hover:underline font-medium"
+                    >
+                      Marcar todos
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allOff: Record<string, boolean> = {};
+                        VERIFICATION_FIELD_DEFINITIONS.forEach(d => { allOff[d.id] = false; });
+                        setVerificationFields(allOff);
+                      }}
+                      className="text-gray-500 hover:underline"
+                    >
+                      Ninguno
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setVerificationFields({ ...systemVerificationFields })}
+                      className="text-gray-500 hover:underline"
+                      title="Copiar configuración del sistema"
+                    >
+                      Restablecer
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                  {VERIFICATION_FIELD_DEFINITIONS.map(field => {
+                    const isChecked = verificationFields[field.id] !== false;
+                    return (
+                      <label
+                        key={field.id}
+                        className="flex items-center space-x-2.5 p-1.5 rounded hover:bg-white cursor-pointer transition-colors"
+                      >
+                        <div className="relative flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={isChecked}
+                            onChange={() => {
+                              const updated = {
+                                ...verificationFields,
+                                [field.id]: !isChecked
+                              };
+                              setVerificationFields(updated);
+                            }}
+                          />
+                          <div className={`block w-7 h-4 rounded-full transition-colors ${isChecked ? 'bg-primary' : 'bg-gray-300'}`}></div>
+                          <div className={`dot absolute left-0.5 top-0.5 bg-white w-3 h-3 rounded-full transition-transform ${isChecked ? 'transform translate-x-3' : ''}`}></div>
+                        </div>
+                        <span className={`text-xs select-none ${isChecked ? 'font-medium text-gray-800' : 'text-gray-500'}`}>
+                          {field.label}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-white shadow rounded-lg p-6">
@@ -1569,7 +1958,7 @@ export default function GenerarCarnet() {
         </div>
 
         {/* Vista Previa */}
-        <div className="lg:col-span-2 space-y-6 lg:sticky lg:top-6 self-start">
+        <div className="lg:col-span-7 space-y-6 lg:sticky lg:top-6 self-start">
           <div className="bg-white shadow rounded-lg p-6 flex flex-col items-center">
             <div className="flex items-center justify-between w-full mb-4">
               <h2 className="text-lg font-medium text-gray-900">5. Vista Previa y Guardar</h2>

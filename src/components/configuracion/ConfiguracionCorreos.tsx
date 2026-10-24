@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
 import { useSettings } from '../../contexts/SettingsContext';
+import { getApiUrl } from '../../lib/api';
 import ModalDisenadorCorreos from './ModalDisenadorCorreos';
 
 interface SeccionalInfo {
@@ -82,13 +83,33 @@ export default function ConfiguracionCorreos() {
         setTestSeccionalId(santaAnita ? String(santaAnita.id) : String(secData[0].id));
       }
 
-      // 2. Cargar Configuración de la base de datos
-      const { data: configData } = await supabase.from('configuracion').select('*');
-      if (configData) {
+      // 2. Cargar Configuración desde SQLite del backend y Supabase
+      const configRows: { clave: string; valor: string }[] = [];
+
+      try {
+        const apiRes = await fetch(getApiUrl('/api/configuracion'));
+        if (apiRes.ok) {
+          const apiJson = await apiRes.json();
+          Object.entries(apiJson).forEach(([clave, valor]) => {
+            configRows.push({ clave, valor: String(valor) });
+          });
+        }
+      } catch (e) {}
+
+      try {
+        const { data: configData } = await supabase.from('configuracion').select('*');
+        if (configData) {
+          configData.forEach(row => {
+            configRows.push({ clave: row.clave, valor: row.valor });
+          });
+        }
+      } catch (e) {}
+
+      if (configRows.length > 0) {
         const compraUpdates: Partial<typeof configCompra> = {};
         const combUpdates: Partial<typeof configCombustible> = {};
 
-        configData.forEach(row => {
+        configRows.forEach(row => {
           // Compra
           if (row.clave === 'solicitudes_correo_destino') compraUpdates.destino = row.valor;
           if (row.clave === 'solicitudes_correo_remitente') compraUpdates.remitente = row.valor;
@@ -174,25 +195,44 @@ export default function ConfiguracionCorreos() {
         ];
       }
 
-      // Guardar o actualizar en Supabase
-      for (const pair of pairs) {
-        const { data: existing } = await supabase
-          .from('configuracion')
-          .select('id')
-          .eq('clave', pair.clave)
-          .maybeSingle();
-
-        if (existing) {
-          await supabase.from('configuracion').update({ valor: pair.valor }).eq('id', existing.id);
-        } else {
-          await supabase.from('configuracion').insert({ clave: pair.clave, valor: pair.valor });
-        }
+      // 1. Guardar en SQLite del Backend
+      try {
+        const confObj: Record<string, string> = {};
+        pairs.forEach(p => { confObj[p.clave] = p.valor; });
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confObj)
+        });
+      } catch (errApi) {
+        console.warn('Error guardando en backend /api/configuracion:', errApi);
       }
 
-      // También guardar en localStorage de contingencia
-      localStorage.setItem(`cruz_verde_config_correo_${activeFormTab}`, JSON.stringify(
-        activeFormTab === 'compra' ? configCompra : configCombustible
-      ));
+      // 2. Guardar o actualizar en Supabase
+      try {
+        for (const pair of pairs) {
+          const { data: existing } = await supabase
+            .from('configuracion')
+            .select('id')
+            .eq('clave', pair.clave)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase.from('configuracion').update({ valor: pair.valor }).eq('id', existing.id);
+          } else {
+            await supabase.from('configuracion').insert({ clave: pair.clave, valor: pair.valor });
+          }
+        }
+      } catch (errSupabase) {
+        console.warn('Error sincronizando con Supabase:', errSupabase);
+      }
+
+      // 3. También guardar en localStorage de contingencia
+      try {
+        localStorage.setItem(`cruz_verde_config_correo_${activeFormTab}`, JSON.stringify(
+          activeFormTab === 'compra' ? configCompra : configCombustible
+        ));
+      } catch (e) {}
 
       await refreshSettings();
       await logActivity(
@@ -898,6 +938,7 @@ ${currentConfig.footer}
         isOpen={isDisenadorOpen}
         onClose={() => setIsDisenadorOpen(false)}
         onSaved={loadAll}
+        initialPreviewTab={activeFormTab}
       />
 
     </div>

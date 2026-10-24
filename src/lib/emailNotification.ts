@@ -2,7 +2,7 @@
  * Helper de plantillas, estilos y notificaciones por correo para Cruz Verde Salvadoreña
  * Soporta personalización de colores de header, footer, fuentes, logos y remitente No-Reply.
  */
-import { getOfficialLoginUrl } from '../utils/appUrl';
+import { getOfficialLoginUrl, getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export interface EmailDesignConfig {
   headerColor?: string;
@@ -323,6 +323,7 @@ export function generarHtmlCorreoCompra(
 
   const codigo = d.numeroSolicitud || d.folio || 'SC-CVS';
   const pdfName = d.nombreArchivoPdf || `Solicitud_Compra_${codigo}.pdf`;
+  const pdfUrl = d.pdfUrl || getOfficialSolicitudPdfUrl('compra', codigo);
   const items = Array.isArray(d.items) && d.items.length > 0 
     ? d.items 
     : [{ descripcion: d.justificacion || d.descripcion || 'Bienes o servicios solicitados', cantidad: 1, unidad: 'Serv/Lote', precioEstimado: d.totalEstimado || 0, subtotal: d.totalEstimado || 0 }];
@@ -457,17 +458,28 @@ export function generarHtmlCorreoCompra(
 
       <!-- Documento PDF Adjunto Oficial -->
       <div class="section-title">4. Documento Oficial PDF Generado</div>
-      <div class="pdf-card">
-        <div style="display: flex; align-items: center;">
-          <div class="pdf-icon-box">PDF</div>
-          <div class="pdf-info">
-            <div class="pdf-title">${pdfName}</div>
-            <div class="pdf-sub">Documento con firmas, sellos institucionales y código oficial</div>
-          </div>
-        </div>
-        <div style="background-color: #e2e8f0; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; color: #475569;">
-          Adjunto Oficial
-        </div>
+      <table style="width: 100%; background-color: #f8fafc; border: 2px solid #cbd5e1; border-radius: 12px; margin: 18px 0 12px 0; border-collapse: separate; padding: 16px;">
+        <tr>
+          <td style="width: 52px; vertical-align: middle;">
+            <div style="width: 48px; height: 48px; background-color: #fee2e2; border-radius: 10px; text-align: center; line-height: 48px; font-weight: 900; color: #dc2626; font-size: 15px; border: 1px solid #fca5a5;">PDF</div>
+          </td>
+          <td style="padding-left: 14px; vertical-align: middle;">
+            <div style="font-weight: 800; font-size: 15px; color: #0f172a; margin-bottom: 3px;">${pdfName}</div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 500;">Documento oficial con firmas, sellos institucionales y folio oficial</div>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding-top: 14px; text-align: center;">
+            <a href="${pdfUrl}" target="_blank" style="display: block; background-color: ${cfg.headerColor || '#008f39'}; color: #ffffff; padding: 12px 20px; border-radius: 8px; font-weight: 800; font-size: 14px; text-decoration: none; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.12);">
+              📄 ABRIR Y DESCARGAR DOCUMENTO OFICIAL EN PDF
+            </a>
+          </td>
+        </tr>
+      </table>
+      <div style="background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px; font-size: 12px; color: #334155; margin-bottom: 24px; border-left: 4px solid ${cfg.headerColor || '#008f39'};">
+        <strong>Enlace directo al documento oficial:</strong><br>
+        <a href="${pdfUrl}" target="_blank" style="color: #0284c7; word-break: break-all; font-weight: 600; text-decoration: underline;">${pdfUrl}</a>
+        <p style="margin: 6px 0 0 0; font-size: 11px; color: #64748b;">(Haga clic sobre el enlace o cópielo en su navegador para visualizar el PDF oficial emitido con sellos y firmas)</p>
       </div>
 
     </div>
@@ -516,6 +528,7 @@ export function generarHtmlCorreoCombustible(
 
   const codigo = d.codigoSolicitud || d.folio || 'COMB-CVS';
   const pdfName = d.nombreArchivoPdf || `Solicitud_Combustible_${codigo}.pdf`;
+  const pdfUrl = d.pdfUrl || getOfficialSolicitudPdfUrl('combustible', codigo);
   const asuntoStr = p.asunto || `Solicitud de Combustible: ${codigo}`;
   const datos = d;
   const params = p;
@@ -626,17 +639,28 @@ export function generarHtmlCorreoCombustible(
 
       <!-- Documento PDF Adjunto Oficial -->
       <div class="section-title">3. Vale / Documento PDF Oficial Generado</div>
-      <div class="pdf-card">
-        <div style="display: flex; align-items: center;">
-          <div class="pdf-icon-box">PDF</div>
-          <div class="pdf-info">
-            <div class="pdf-title">${pdfName}</div>
-            <div class="pdf-sub">Vale oficial de combustible para gasolinera con firmas y sello</div>
-          </div>
-        </div>
-        <div style="background-color: #e2e8f0; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; color: #475569;">
-          Adjunto Oficial
-        </div>
+      <table style="width: 100%; background-color: #f8fafc; border: 2px solid #cbd5e1; border-radius: 12px; margin: 18px 0 12px 0; border-collapse: separate; padding: 16px;">
+        <tr>
+          <td style="width: 52px; vertical-align: middle;">
+            <div style="width: 48px; height: 48px; background-color: #fee2e2; border-radius: 10px; text-align: center; line-height: 48px; font-weight: 900; color: #dc2626; font-size: 15px; border: 1px solid #fca5a5;">PDF</div>
+          </td>
+          <td style="padding-left: 14px; vertical-align: middle;">
+            <div style="font-weight: 800; font-size: 15px; color: #0f172a; margin-bottom: 3px;">${pdfName}</div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 500;">Vale oficial de combustible para gasolinera con firmas y sello</div>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding-top: 14px; text-align: center;">
+            <a href="${pdfUrl}" target="_blank" style="display: block; background-color: ${cfg.headerColor || '#008f39'}; color: #ffffff; padding: 12px 20px; border-radius: 8px; font-weight: 800; font-size: 14px; text-decoration: none; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.12);">
+              📄 ABRIR Y DESCARGAR VALE OFICIAL EN PDF
+            </a>
+          </td>
+        </tr>
+      </table>
+      <div style="background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px; font-size: 12px; color: #334155; margin-bottom: 24px; border-left: 4px solid ${cfg.headerColor || '#008f39'};">
+        <strong>Enlace directo al vale oficial:</strong><br>
+        <a href="${pdfUrl}" target="_blank" style="color: #0284c7; word-break: break-all; font-weight: 600; text-decoration: underline;">${pdfUrl}</a>
+        <p style="margin: 6px 0 0 0; font-size: 11px; color: #64748b;">(Haga clic sobre el enlace o cópielo en su navegador para visualizar el Vale oficial emitido con sellos y firmas)</p>
       </div>
 
     </div>

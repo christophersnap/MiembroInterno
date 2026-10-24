@@ -101,6 +101,16 @@ export interface CombustibleConfig {
   pdfBloquesOrden?: CombustibleBlockItem[];
 }
 
+export const DEFAULT_COMBUSTIBLE_BLOCKS: CombustibleBlockItem[] = [
+  { id: 'encabezado', name: 'Encabezado Institucional', description: 'Logos, Título y Código de Formulario', enabled: true, align: 'center' },
+  { id: 'subtitulo_folio', name: 'Subtítulo y Folio', description: 'Nombre del documento y número de folio', enabled: true, align: 'left' },
+  { id: 'datos_solicitante', name: 'Datos de la Solicitud y Seccional', description: 'Seccional, solicitante, director, fecha y hora', enabled: true, align: 'left' },
+  { id: 'actividad_motivo', name: 'Actividad y Motivo de Combustible', description: 'Misión asignada, emergencias y observaciones', enabled: true, align: 'left' },
+  { id: 'liquidacion_anterior', name: 'Estado de Liquidación Anterior', description: 'Verificación de comprobantes de combustible previo', enabled: true, align: 'left' },
+  { id: 'firmas_sello', name: 'Firmas y Sello Oficial', description: 'Firma de solicitante, administración y sello', enabled: true, align: 'center' },
+  { id: 'pie_pagina', name: 'Cintillo y Pie de Página', description: 'Leyenda oficial y membrete inferior', enabled: true, align: 'center' }
+];
+
 export const DEFAULT_COMBUSTIBLE_CONFIG: CombustibleConfig = {
   correoDestino: 'control_combustible@cruzverdesv.org',
   correoCcDefault: 'presidencia@cruzverdesv.org, administracion@cruzverdesv.org',
@@ -155,5 +165,7 @@ export const DEFAULT_COMBUSTIBLE_CONFIG: CombustibleConfig = {
   pdfLabelFecha: 'Fecha:',
   pdfLabelFirmaSello: 'Firma y Sello Oficial',
   pdfLabelAutoriza: 'Autorizado por:',
-  pdfLabelFechaAuto: 'Fecha Autorización:'
+  pdfLabelFechaAuto: 'Fecha Autorización:',
+
+  pdfBloquesOrden: DEFAULT_COMBUSTIBLE_BLOCKS
 };

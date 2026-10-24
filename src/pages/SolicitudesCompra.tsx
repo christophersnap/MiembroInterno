@@ -16,7 +16,8 @@ import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import CompraForm, { ArchivoCotizacion } from '../components/compra/CompraForm';
 import { generarHtmlCorreoCompra } from '../lib/emailNotification';
-import { sendEmailNotification } from '../lib/api';
+import { sendEmailNotification, getApiUrl } from '../lib/api';
+import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export interface SolicitudCompra {
   id: number;
@@ -441,7 +442,11 @@ export default function SolicitudesCompra() {
     setSavingCompraConfig(true);
     try {
       setCompraConfig(newConfig);
-      localStorage.setItem('cruz_verde_compra_config', JSON.stringify(newConfig));
+      try {
+        localStorage.setItem('cruz_verde_compra_config', JSON.stringify(newConfig));
+      } catch (storageErr) {
+        console.warn('localStorage quota excedida para compra_config, omitiendo almacenamiento local:', storageErr);
+      }
 
       // Actualizar también configParams para compatibilidad hacia atrás
       setConfigParams(prev => ({
@@ -512,10 +517,28 @@ export default function SolicitudesCompra() {
         { clave: 'solicitudes_pdf_bloques_orden', valor: JSON.stringify(newConfig.pdfBloquesOrden) }
       ];
 
-      for (const item of entries) {
-        await supabase
-          .from('configuracion')
-          .upsert(item, { onConflict: 'clave' });
+      // 1. Guardar en SQLite del Backend
+      try {
+        const confObj: Record<string, string> = {};
+        entries.forEach(e => { confObj[e.clave] = e.valor; });
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confObj)
+        });
+      } catch (errApi) {
+        console.warn('Error guardando en backend /api/configuracion:', errApi);
+      }
+
+      // 2. Guardar en Supabase
+      try {
+        for (const item of entries) {
+          await supabase
+            .from('configuracion')
+            .upsert(item, { onConflict: 'clave' });
+        }
+      } catch (errSupabase) {
+        console.warn('Error sincronizando con Supabase configuracion:', errSupabase);
       }
 
       await logActivity('Actualizó configuración de plantilla de compras/mantenimiento', 'Configuracion', 'plantilla_compras');
@@ -801,7 +824,8 @@ NOTIFY pgrst, 'reload schema';`;
               subtotal: formData.monto_estimado ? parseFloat(formData.monto_estimado) : undefined
             }],
             totalEstimado: formData.monto_estimado ? parseFloat(formData.monto_estimado) : 0,
-            nombreArchivoPdf: `${folioGenerado}.pdf`
+            nombreArchivoPdf: `${folioGenerado}.pdf`,
+            pdfUrl: getOfficialSolicitudPdfUrl('compra', folioGenerado)
           });
 
           await sendEmailNotification({
@@ -826,6 +850,7 @@ NOTIFY pgrst, 'reload schema';`;
       }));
 
       setActiveTab('lista');
+      window.dispatchEvent(new Event('solicitudes_updated'));
       alert(`¡Solicitud ${folioGenerado} registrada con éxito! Puede imprimir el PDF o revisar el estado en el historial.`);
 
     } catch (err: any) {
@@ -963,7 +988,8 @@ NOTIFY pgrst, 'reload schema';`;
               subtotal: Number(it.subtotal) || undefined
             })),
             totalEstimado: payloadData.monto_estimado || 0,
-            nombreArchivoPdf: `${folioGenerado}.pdf`
+            nombreArchivoPdf: `${folioGenerado}.pdf`,
+            pdfUrl: getOfficialSolicitudPdfUrl('compra', folioGenerado)
           });
 
           await sendEmailNotification({
@@ -979,7 +1005,7 @@ NOTIFY pgrst, 'reload schema';`;
       }
 
       alert(`¡Solicitud ${folioGenerado} registrada con éxito! Ha sido enviada al Área Administrativa.`);
-
+      window.dispatchEvent(new Event('solicitudes_updated'));
       setActiveTab('lista');
     } catch (err: any) {
       console.error('Error guardando solicitud:', err);
@@ -1076,7 +1102,8 @@ Cruz Verde Salvadoreña`;
           subtotal: Number(it.subtotal) || undefined
         })),
         totalEstimado: Number(selectedSolicitud.monto_estimado) || 0,
-        nombreArchivoPdf: pdfFileName
+        nombreArchivoPdf: pdfFileName,
+        pdfUrl: getOfficialSolicitudPdfUrl('compra', selectedSolicitud.folio)
       });
 
       // Despacho vía servicio SMTP (Hostinger / Servidor)
@@ -1179,6 +1206,7 @@ Cruz Verde Salvadoreña`;
         autorizado_por: payload.autorizado_por
       });
 
+      window.dispatchEvent(new Event('solicitudes_updated'));
       setShowStatusModal(false);
       setShowDetailModal(false);
       alert(`El estado de la solicitud ${selectedSolicitud.folio} se actualizó a: ${newStatus}`);

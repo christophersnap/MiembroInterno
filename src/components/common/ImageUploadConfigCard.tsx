@@ -3,6 +3,8 @@ import {
   Upload, X, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, 
   EyeOff, Check, Link as LinkIcon, Sparkles, RefreshCw
 } from 'lucide-react';
+import { getApiUrl } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 
 export interface ImageUploadConfigCardProps {
   title: string;
@@ -37,18 +39,96 @@ export default function ImageUploadConfigCard({
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // Procesa y comprime la imagen a tamaño adecuado para PDF
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Procesa y sube la imagen a Supabase Storage con fallbacks
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setProcessing(true);
+
+    const fileExt = file.name.split('.').pop() || 'png';
+    const cleanFileName = `plantilla_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `plantillas/${cleanFileName}`;
+
+    // 1. Intentar subir directamente a Supabase Storage (bucket 'assets')
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from('assets')
+        .upload(filePath, file, { upsert: true });
+
+      if (!uploadError) {
+        const { data: { publicUrl } } = supabase.storage
+          .from('assets')
+          .getPublicUrl(filePath);
+
+        if (publicUrl) {
+          onImageChange(publicUrl);
+          onVisibilityChange(true);
+          if (position === 'none') onPositionChange('center');
+          setProcessing(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+      }
+    } catch (errAssets) {
+      console.warn('Subida a bucket assets falló:', errAssets);
+    }
+
+    // 2. Intentar subir a Supabase Storage (bucket 'socorristas')
+    try {
+      const { error: uploadError2 } = await supabase.storage
+        .from('socorristas')
+        .upload(`logos/${cleanFileName}`, file, { upsert: true });
+
+      if (!uploadError2) {
+        const { data: { publicUrl } } = supabase.storage
+          .from('socorristas')
+          .getPublicUrl(`logos/${cleanFileName}`);
+
+        if (publicUrl) {
+          onImageChange(publicUrl);
+          onVisibilityChange(true);
+          if (position === 'none') onPositionChange('center');
+          setProcessing(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+      }
+    } catch (errSocorristas) {
+      console.warn('Subida a bucket socorristas falló:', errSocorristas);
+    }
+
+    // 3. Intentar subir al servidor local (/api/upload-file)
+    try {
+      const formData = new FormData();
+      formData.append('archivo', file);
+
+      const res = await fetch(getApiUrl('/api/upload-file'), {
+        method: 'POST',
+        body: formData
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          onImageChange(data.url);
+          onVisibilityChange(true);
+          if (position === 'none') onPositionChange('center');
+          setProcessing(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+      }
+    } catch (uploadErr) {
+      console.warn('Subida al servidor falló, usando compresión canvas:', uploadErr);
+    }
+
+    // 2. Respaldo: compresión canvas optimizada a max 400px para no saturar memoria
     const reader = new FileReader();
 
     reader.onload = (event) => {
       const result = event.target?.result as string;
 
-      // Optimizar en canvas si es un formato rasterizado (evitar SVGs)
       if (file.type === 'image/svg+xml') {
         onImageChange(result);
         onVisibilityChange(true);
@@ -59,7 +139,7 @@ export default function ImageUploadConfigCard({
 
       const img = new Image();
       img.onload = () => {
-        const maxDim = 800;
+        const maxDim = 400;
         let width = img.width;
         let height = img.height;
 
@@ -81,7 +161,7 @@ export default function ImageUploadConfigCard({
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
           const mime = file.type.includes('png') ? 'image/png' : 'image/jpeg';
-          const compressedDataUrl = canvas.toDataURL(mime, 0.88);
+          const compressedDataUrl = canvas.toDataURL(mime, 0.78);
           onImageChange(compressedDataUrl);
         } else {
           onImageChange(result);

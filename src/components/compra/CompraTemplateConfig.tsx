@@ -35,6 +35,19 @@ export default function CompraTemplateConfig({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
+  // Auto-guardado inmediato en Supabase
+  const handleUpdateAndAutoSave = async (partial: Partial<CompraConfig>) => {
+    const updated = { ...currentConfig, ...partial };
+    setCurrentConfig(updated);
+    try {
+      await onSave(updated);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (err) {
+      console.warn('Auto-save error in CompraTemplateConfig:', err);
+    }
+  };
+
   // Manejo de drag and drop de bloques
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
@@ -590,10 +603,10 @@ export default function CompraTemplateConfig({
               position={currentConfig.pdfLogoPosicion}
               size={currentConfig.pdfLogoSize}
               visible={currentConfig.pdfMostrarLogo}
-              onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfLogoUrl: url })}
-              onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfLogoPosicion: pos })}
-              onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfLogoSize: size })}
-              onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarLogo: visible })}
+              onImageChange={(url) => handleUpdateAndAutoSave({ pdfLogoUrl: url, pdfMostrarLogo: Boolean(url) })}
+              onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfLogoPosicion: pos })}
+              onSizeChange={(size) => handleUpdateAndAutoSave({ pdfLogoSize: size })}
+              onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogo: visible })}
               defaultPlaceholderText="Cruz Verde Salvadoreña"
               defaultLogoName="Escudo Oficial Cruz Verde"
             />
@@ -606,10 +619,10 @@ export default function CompraTemplateConfig({
               position={currentConfig.pdfLogoSecundarioPosicion}
               size={currentConfig.pdfLogoSecundarioSize}
               visible={currentConfig.pdfMostrarLogoSecundario}
-              onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioUrl: url })}
-              onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioPosicion: pos })}
-              onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfLogoSecundarioSize: size })}
-              onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarLogoSecundario: visible })}
+              onImageChange={(url) => handleUpdateAndAutoSave({ pdfLogoSecundarioUrl: url, pdfMostrarLogoSecundario: Boolean(url) })}
+              onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfLogoSecundarioPosicion: pos })}
+              onSizeChange={(size) => handleUpdateAndAutoSave({ pdfLogoSecundarioSize: size })}
+              onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogoSecundario: visible })}
               defaultPlaceholderText="Logo Secundario / Cooperante"
               defaultLogoName="Sin logo secundario por defecto"
             />
@@ -622,15 +635,13 @@ export default function CompraTemplateConfig({
               position={currentConfig.pdfSelloImgPosicion}
               size={currentConfig.pdfSelloImgSize}
               visible={currentConfig.pdfMostrarSelloImg || currentConfig.pdfMostrarSello}
-              onImageChange={(url) => setCurrentConfig({ 
-                ...currentConfig, 
+              onImageChange={(url) => handleUpdateAndAutoSave({ 
                 pdfSelloImgUrl: url, 
                 pdfMostrarSelloImg: Boolean(url) 
               })}
-              onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfSelloImgPosicion: pos })}
-              onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfSelloImgSize: size })}
-              onVisibilityChange={(visible) => setCurrentConfig({ 
-                ...currentConfig, 
+              onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfSelloImgPosicion: pos })}
+              onSizeChange={(size) => handleUpdateAndAutoSave({ pdfSelloImgSize: size })}
+              onVisibilityChange={(visible) => handleUpdateAndAutoSave({ 
                 pdfMostrarSello: visible, 
                 pdfMostrarSelloImg: visible && Boolean(currentConfig.pdfSelloImgUrl) 
               })}
@@ -646,10 +657,10 @@ export default function CompraTemplateConfig({
               position={currentConfig.pdfFooterImgPosicion}
               size={currentConfig.pdfFooterImgSize}
               visible={currentConfig.pdfMostrarFooterImg}
-              onImageChange={(url) => setCurrentConfig({ ...currentConfig, pdfFooterImgUrl: url })}
-              onPositionChange={(pos) => setCurrentConfig({ ...currentConfig, pdfFooterImgPosicion: pos })}
-              onSizeChange={(size) => setCurrentConfig({ ...currentConfig, pdfFooterImgSize: size })}
-              onVisibilityChange={(visible) => setCurrentConfig({ ...currentConfig, pdfMostrarFooterImg: visible })}
+              onImageChange={(url) => handleUpdateAndAutoSave({ pdfFooterImgUrl: url, pdfMostrarFooterImg: Boolean(url) })}
+              onPositionChange={(pos) => handleUpdateAndAutoSave({ pdfFooterImgPosicion: pos })}
+              onSizeChange={(size) => handleUpdateAndAutoSave({ pdfFooterImgSize: size })}
+              onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarFooterImg: visible })}
               defaultPlaceholderText="Cintillo Oficial Cruz Verde"
               defaultLogoName="Sin imagen de pie por defecto"
             />

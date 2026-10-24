@@ -5,6 +5,7 @@ import {
   Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check, QrCode
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getApiUrl } from '../lib/api';
 import { logActivity } from '../lib/logger';
 import { useSettings } from '../contexts/SettingsContext';
 import ConfiguracionCorreos from '../components/configuracion/ConfiguracionCorreos';
@@ -80,6 +81,7 @@ export default function Configuracion() {
       estado: true,
       dui: true,
       telefono: true,
+      contactoEmergencia: true,
       email: true,
       fechaNacimiento: true,
       fechaIngreso: true,
@@ -151,10 +153,17 @@ export default function Configuracion() {
             if (row.clave === 'verificacion_mensaje') newConfig.verificacion_mensaje = row.valor;
             if (row.clave === 'qr_base_url') newConfig.qr_base_url = row.valor;
             if (row.clave === 'qr_link_format') newConfig.qr_link_format = row.valor;
-            if (row.clave === 'verificacion_fields' && row.verificacion_fields) {
-              newConfig.verificacion_fields = { ...newConfig.verificacion_fields, ...row.verificacion_fields };
-            } else if (row.clave === 'verificacion_fields' && row.valor) {
-              try { newConfig.verificacion_fields = { ...newConfig.verificacion_fields, ...JSON.parse(row.valor) }; } catch (e) {}
+            if (row.clave === 'verificacion_fields') {
+              let parsedFields: any = null;
+              if (row.valor) {
+                try { parsedFields = JSON.parse(row.valor); } catch (e) {}
+              }
+              if (!parsedFields && row.verificacion_fields && typeof row.verificacion_fields === 'object') {
+                parsedFields = row.verificacion_fields;
+              }
+              if (parsedFields) {
+                newConfig.verificacion_fields = { ...newConfig.verificacion_fields, ...parsedFields };
+              }
             }
             if (row.clave === 'logos' && row.valor) {
               try { newConfig.logos = { ...newConfig.logos, ...JSON.parse(row.valor) }; } catch (e) {}
@@ -252,10 +261,16 @@ export default function Configuracion() {
   const saveConfigPairs = async (pairs: { clave: string; valor: string }[]) => {
     for (const pair of pairs) {
       const { data: existing } = await supabase.from('configuracion').select('id').eq('clave', pair.clave).maybeSingle();
+      const payload: Record<string, any> = { valor: pair.valor };
+      if (pair.clave === 'verificacion_fields') {
+        try {
+          payload.verificacion_fields = JSON.parse(pair.valor);
+        } catch (e) {}
+      }
       if (existing) {
-        await supabase.from('configuracion').update({ valor: pair.valor }).eq('id', existing.id);
+        await supabase.from('configuracion').update(payload).eq('id', existing.id);
       } else {
-        await supabase.from('configuracion').insert({ clave: pair.clave, valor: pair.valor });
+        await supabase.from('configuracion').insert({ clave: pair.clave, ...payload });
       }
     }
     await refreshSettings();
@@ -361,6 +376,34 @@ export default function Configuracion() {
       ];
 
       await saveConfigPairs(pairs);
+
+      // Asegurar actualización directa con JSON en Supabase
+      try {
+        await supabase
+          .from('configuracion')
+          .update({
+            valor: JSON.stringify(config.verificacion_fields || {}),
+            verificacion_fields: config.verificacion_fields || {}
+          })
+          .eq('clave', 'verificacion_fields');
+      } catch (err) {
+        console.warn('Sync directo verificacion_fields:', err);
+      }
+
+      // Sincronizar también con backend API si existe
+      try {
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            verificacion_titulo: config.verificacion_titulo,
+            verificacion_mensaje: config.verificacion_mensaje,
+            verificacion_fields: config.verificacion_fields,
+            qr_base_url: config.qr_base_url,
+            qr_link_format: config.qr_link_format
+          })
+        });
+      } catch (e) {}
 
       // Subir public config json para acceso público sin login
       try {
@@ -1196,7 +1239,7 @@ export default function Configuracion() {
                   type="button"
                   onClick={() => {
                     const allTrue: Record<string, boolean> = {};
-                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allTrue[k] = true; });
+                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'contactoEmergencia', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allTrue[k] = true; });
                     setConfig({ ...config, verificacion_fields: allTrue });
                   }}
                   className="px-2.5 py-1 text-2xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
@@ -1207,7 +1250,7 @@ export default function Configuracion() {
                   type="button"
                   onClick={() => {
                     const allFalse: Record<string, boolean> = {};
-                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allFalse[k] = false; });
+                    ['foto', 'carnetId', 'nombre', 'cargoInstitucional', 'cargoAdministrativo', 'seccional', 'estado', 'dui', 'telefono', 'contactoEmergencia', 'email', 'fechaNacimiento', 'fechaIngreso', 'tipoSangre', 'motoristaAutorizado', 'licencias', 'cursos', 'carnetImagen'].forEach(k => { allFalse[k] = false; });
                     setConfig({ ...config, verificacion_fields: allFalse });
                   }}
                   className="px-2.5 py-1 text-2xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
@@ -1266,6 +1309,7 @@ export default function Configuracion() {
                   {[
                     { id: 'dui', label: 'Documento DUI', desc: 'Número de documento de identidad' },
                     { id: 'telefono', label: 'Teléfono Móvil', desc: 'Contacto telefónico oficial' },
+                    { id: 'contactoEmergencia', label: 'Contacto de Emergencia', desc: 'Números de teléfono para avisos de emergencia' },
                     { id: 'email', label: 'Correo Electrónico', desc: 'Dirección de email registrada' },
                     { id: 'fechaNacimiento', label: 'Fecha de Nacimiento', desc: 'Día de nacimiento / cumpleaños' },
                     { id: 'fechaIngreso', label: 'Fecha de Ingreso', desc: 'Antigüedad en la institución' },

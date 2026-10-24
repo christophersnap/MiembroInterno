@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, BookOpen, MapPin, Settings, LogOut, Menu, X, 
   IdCard, ChevronLeft, ChevronRight, User as UserIcon, Activity, Shield, 
   PhoneCall, BadgeCheck, FileText, Truck, ClipboardList, Fuel, FolderDown, 
-  Megaphone, Sparkles, ChevronDown, Palette, FileSpreadsheet
+  Megaphone, Sparkles, ChevronDown, Palette, FileSpreadsheet, Award
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { usePresence } from '../hooks/usePresence';
+import { supabase } from '../lib/supabase';
 import MisAccesosModal from './accesos/MisAccesosModal';
 import PresenceModal from './PresenceModal';
 
@@ -18,7 +19,7 @@ interface NavItem {
   icon: any;
   show: boolean;
   category: 'principal' | 'operaciones' | 'gestion' | 'identificacion' | 'sistema';
-  badge?: string;
+  badge?: number;
 }
 
 export default function Layout() {
@@ -33,6 +34,131 @@ export default function Layout() {
   const [showMisAccesosModal, setShowMisAccesosModal] = useState(false);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
 
+  // Estados para notificaciones de solicitudes no leídas
+  const [unreadCombustible, setUnreadCombustible] = useState(0);
+  const [unreadCompra, setUnreadCompra] = useState(0);
+  const [unreadGeneral, setUnreadGeneral] = useState(0);
+
+  const checkUnreadSolicitudes = async () => {
+    try {
+      const lastSeenComb = Number(localStorage.getItem('cv_last_seen_combustible') || '0');
+      const lastSeenComp = Number(localStorage.getItem('cv_last_seen_compra') || '0');
+      const lastSeenGen = Number(localStorage.getItem('cv_last_seen_solicitudes') || '0');
+
+      // 1. Solicitudes de combustible
+      let combItems: { id: number; created_at?: string; estado?: string }[] = [];
+      try {
+        const { data: combData } = await supabase
+          .from('solicitudes_combustible')
+          .select('id, created_at, estado')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (combData && combData.length > 0) combItems = combData;
+      } catch (e) {}
+
+      // Fallback a almacenamiento local si no hay datos de Supabase
+      if (combItems.length === 0) {
+        try {
+          const localComb = sessionStorage.getItem('cruz_verde_solicitudes_combustible') || localStorage.getItem('cruz_verde_solicitudes_combustible');
+          if (localComb) combItems = JSON.parse(localComb);
+        } catch (e) {}
+      }
+
+      if (location.pathname === '/solicitudes-combustible') {
+        setUnreadCombustible(0);
+      } else {
+        const unreadComb = combItems.filter(s => {
+          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
+          if (lastSeenComb === 0) {
+            return s.estado === 'Pendiente';
+          }
+          return itemTime > lastSeenComb || (s.estado === 'Pendiente' && itemTime > lastSeenComb);
+        }).length;
+        setUnreadCombustible(unreadComb);
+      }
+
+      // 2. Solicitudes de compra
+      let compItems: { id: number; created_at?: string; estado?: string }[] = [];
+      try {
+        const { data: compData } = await supabase
+          .from('solicitudes_compra')
+          .select('id, created_at, estado')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (compData && compData.length > 0) compItems = compData;
+      } catch (e) {}
+
+      if (compItems.length === 0) {
+        try {
+          const localComp = sessionStorage.getItem('cruz_verde_solicitudes_compra') || localStorage.getItem('cruz_verde_solicitudes_compra');
+          if (localComp) compItems = JSON.parse(localComp);
+        } catch (e) {}
+      }
+
+      if (location.pathname === '/solicitudes-compra') {
+        setUnreadCompra(0);
+      } else {
+        const unreadComp = compItems.filter(s => {
+          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
+          if (lastSeenComp === 0) {
+            return s.estado === 'Pendiente';
+          }
+          return itemTime > lastSeenComp || (s.estado === 'Pendiente' && itemTime > lastSeenComp);
+        }).length;
+        setUnreadCompra(unreadComp);
+      }
+
+      // 3. Solicitudes generales
+      if (location.pathname === '/solicitudes') {
+        setUnreadGeneral(0);
+      } else {
+        const allItems = [...combItems, ...compItems];
+        const unreadGen = allItems.filter(s => {
+          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
+          if (lastSeenGen === 0) {
+            return s.estado === 'Pendiente';
+          }
+          return itemTime > lastSeenGen;
+        }).length;
+        setUnreadGeneral(unreadGen);
+      }
+
+    } catch (e) {
+      // Ignorar errores silenciosos
+    }
+  };
+
+  // Limpiar badges según la ruta activa al ingresar
+  useEffect(() => {
+    const now = Date.now().toString();
+    if (location.pathname === '/solicitudes') {
+      localStorage.setItem('cv_last_seen_solicitudes', now);
+      setUnreadGeneral(0);
+    } else if (location.pathname === '/solicitudes-combustible') {
+      localStorage.setItem('cv_last_seen_combustible', now);
+      setUnreadCombustible(0);
+    } else if (location.pathname === '/solicitudes-compra') {
+      localStorage.setItem('cv_last_seen_compra', now);
+      setUnreadCompra(0);
+    }
+    checkUnreadSolicitudes();
+  }, [location.pathname]);
+
+  // Escuchar eventos globales y polling periódico
+  useEffect(() => {
+    const handleUpdate = () => checkUnreadSolicitudes();
+    window.addEventListener('solicitudes_updated', handleUpdate);
+    window.addEventListener('focus', handleUpdate);
+    const interval = setInterval(checkUnreadSolicitudes, 15000);
+    return () => {
+      window.removeEventListener('solicitudes_updated', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const totalUnreadSolicitudes = unreadGeneral > 0 ? unreadGeneral : (unreadCombustible + unreadCompra);
+
   const navigation: NavItem[] = [
     // Principal
     { name: 'Dashboard', href: '/', icon: LayoutDashboard, show: permissions.view_dashboard, category: 'principal' },
@@ -44,14 +170,15 @@ export default function Layout() {
     { name: 'Socorristas', href: '/socorristas', icon: Users, show: permissions.view_socorristas, category: 'operaciones' },
     { name: 'Vehículos', href: '/vehiculos', icon: Truck, show: permissions.view_vehiculos ?? true, category: 'operaciones' },
     { name: 'Cursos', href: '/cursos', icon: BookOpen, show: permissions.view_cursos, category: 'operaciones' },
+    { name: 'Méritos y Premios', href: '/meritos', icon: Award, show: Boolean(role === 'admin' || (permissions.view_meritos ?? true)), category: 'operaciones' },
     { name: 'Formularios', href: '/formularios', icon: FileSpreadsheet, show: Boolean(role === 'admin' || permissions.view_formularios), category: 'operaciones' },
     { name: 'Seccionales', href: '/seccionales', icon: MapPin, show: permissions.view_seccionales, category: 'operaciones' },
     { name: 'Directorio', href: '/directorio', icon: PhoneCall, show: permissions.view_directorio, category: 'operaciones' },
     
     // Gestión & Solicitudes
-    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible), category: 'gestion' },
-    { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: permissions.view_solicitudes_compra ?? true, category: 'gestion' },
-    { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: permissions.view_solicitudes_combustible ?? true, category: 'gestion' },
+    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
+    { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: permissions.view_solicitudes_compra ?? true, category: 'gestion', badge: unreadCompra > 0 ? unreadCompra : undefined },
+    { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: permissions.view_solicitudes_combustible ?? true, category: 'gestion', badge: unreadCombustible > 0 ? unreadCombustible : undefined },
     
     // Identificación
     { name: 'Carnet Oficial', href: '/carnet', icon: IdCard, show: permissions.view_carnet, category: 'identificacion' },
@@ -195,7 +322,12 @@ export default function Layout() {
                           }`}
                         >
                           <item.icon className="w-4 h-4 mr-3 flex-shrink-0" />
-                          <span>{item.name}</span>
+                          <span className="truncate">{item.name}</span>
+                          {item.badge !== undefined && item.badge > 0 && (
+                            <span className="ml-auto px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-xs">
+                              {item.badge > 99 ? '99+' : item.badge}
+                            </span>
+                          )}
                         </Link>
                       );
                     })}
@@ -360,6 +492,20 @@ export default function Layout() {
 
                       {!isSidebarCollapsed && (
                         <span className="truncate">{item.name}</span>
+                      )}
+
+                      {/* Notificación Badge Estilo iOS */}
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <span 
+                          className={`font-black rounded-full shadow-xs transition-all ${
+                            isSidebarCollapsed 
+                              ? 'absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 ring-2 ring-emerald-950' 
+                              : 'ml-auto px-1.5 py-0.5 text-[10px] bg-rose-500 text-white min-w-5 text-center leading-none'
+                          }`}
+                          title={`${item.badge} nueva(s) solicitud(es)`}
+                        >
+                          {!isSidebarCollapsed && (item.badge > 99 ? '99+' : item.badge)}
+                        </span>
                       )}
                     </Link>
                   );

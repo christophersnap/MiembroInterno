@@ -959,6 +959,8 @@ END $$;`;
     crear_anuncios: 'Crear, Publicar y Eliminar Anuncios',
     view_formularios: 'Ver Pestaña de Formularios y Respuestas',
     crear_formularios: 'Crear y Gestionar Formularios (Fluent Forms)',
+    ver_todos_formularios: 'Ver Todos los Formularios (Ignorar restricción de ver solo creados por el usuario)',
+    view_meritos: 'Ver y Gestionar Méritos y Reconocimientos Institucionales',
     personalizar_colores: 'Personalizar Colores del Sistema y Marca',
     view_config: 'Ajustes de Verificación',
     view_activity: 'Ver Registro de Actividad',

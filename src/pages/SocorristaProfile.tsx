@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield } from 'lucide-react';
+import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, FileText, Phone } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
@@ -8,12 +8,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 import WatermarkImage from '../components/WatermarkImage';
 import DateInput from '../components/DateInput';
+import DocumentosSocorristaCard from '../components/socorristas/DocumentosSocorristaCard';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { role, permissions, watermarkEnabled, userName } = useAuth();
   const [socorrista, setSocorrista] = useState<any>(null);
+  const [meritosList, setMeritosList] = useState<any[]>([]);
+  const [loadingMeritos, setLoadingMeritos] = useState<boolean>(false);
 
   const downloadImageWithWatermark = async (format: 'png' | 'jpeg') => {
     if (!carnetGeneradoUrl) return;
@@ -207,8 +210,37 @@ export default function SocorristaProfile() {
 
       if (cursosError) throw cursosError;
 
+      // Cargar contactos de emergencia (desde socData o fallback configuracion)
+      let contactoNombre = socData.contacto_emergencia_nombre || '';
+      let contactoTelefono = socData.contacto_emergencia_telefono || '';
+      let contactoNombre2 = socData.contacto_emergencia_nombre_2 || '';
+      let contactoTelefono2 = socData.contacto_emergencia_telefono_2 || '';
+
+      if (!contactoNombre && !contactoTelefono) {
+        try {
+          const { data: confRow } = await supabase
+            .from('configuracion')
+            .select('valor')
+            .eq('clave', `socorrista_emergencia_${id}`)
+            .maybeSingle();
+          if (confRow && confRow.valor) {
+            const parsed = JSON.parse(confRow.valor);
+            contactoNombre = parsed.contacto_emergencia_nombre || '';
+            contactoTelefono = parsed.contacto_emergencia_telefono || '';
+            contactoNombre2 = parsed.contacto_emergencia_nombre_2 || '';
+            contactoTelefono2 = parsed.contacto_emergencia_telefono_2 || '';
+          }
+        } catch (confErr) {
+          console.warn('Fallback emergencia config:', confErr);
+        }
+      }
+
       const formattedSocorrista = {
         ...socData,
+        contacto_emergencia_nombre: contactoNombre,
+        contacto_emergencia_telefono: contactoTelefono,
+        contacto_emergencia_nombre_2: contactoNombre2,
+        contacto_emergencia_telefono_2: contactoTelefono2,
         seccional_nombre: Array.isArray(socData.seccionales) 
           ? (socData.seccionales[0]?.nombre || 'N/A') 
           : (socData.seccionales?.nombre || 'N/A'),
@@ -224,10 +256,53 @@ export default function SocorristaProfile() {
         tiene_licencia_vehiculo: !!formattedSocorrista.licencia_vehiculo_numero,
         tiene_licencia_moto: !!formattedSocorrista.licencia_moto_numero
       });
+
+      // Cargar Méritos asignados a este socorrista
+      fetchSocorristaMeritos(Number(id));
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSocorristaMeritos = async (socId: number) => {
+    setLoadingMeritos(true);
+    try {
+      let allMerits: any[] = [];
+      const { data: dbData, error: dbErr } = await supabase
+        .from('meritos')
+        .select('*')
+        .eq('activo', true)
+        .order('fecha_otorgamiento', { ascending: false });
+
+      if (!dbErr && dbData) {
+        allMerits = dbData;
+      } else {
+        // Fallback desde configuracion sistema_meritos
+        const { data: confRow } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', 'sistema_meritos')
+          .maybeSingle();
+        if (confRow && confRow.valor) {
+          try {
+            allMerits = JSON.parse(confRow.valor);
+          } catch (e) {}
+        }
+      }
+
+      // Filtrar aquellos donde este socorrista fue galardonado
+      const filtered = allMerits.filter(m => {
+        if (!m.socorristas_asignados || !Array.isArray(m.socorristas_asignados)) return false;
+        return m.socorristas_asignados.some((a: any) => Number(a.socorrista_id) === Number(socId));
+      });
+
+      setMeritosList(filtered);
+    } catch (err) {
+      console.error('Error fetching meritos de socorrista:', err);
+    } finally {
+      setLoadingMeritos(false);
     }
   };
 
@@ -476,8 +551,41 @@ export default function SocorristaProfile() {
         licencia_vehiculo_clase: editForm.tiene_licencia_vehiculo ? editForm.licencia_vehiculo_clase : null,
         licencia_vehiculo_vencimiento: (editForm.tiene_licencia_vehiculo && editForm.licencia_vehiculo_vencimiento) ? editForm.licencia_vehiculo_vencimiento : null,
         licencia_moto_numero: editForm.tiene_licencia_moto ? editForm.licencia_moto_numero : null,
-        licencia_moto_vencimiento: (editForm.tiene_licencia_moto && editForm.licencia_moto_vencimiento) ? editForm.licencia_moto_vencimiento : null
+        licencia_moto_vencimiento: (editForm.tiene_licencia_moto && editForm.licencia_moto_vencimiento) ? editForm.licencia_moto_vencimiento : null,
+        contacto_emergencia_nombre: editForm.contacto_emergencia_nombre || null,
+        contacto_emergencia_telefono: editForm.contacto_emergencia_telefono || null,
+        contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || null,
+        contacto_emergencia_telefono_2: editForm.contacto_emergencia_telefono_2 || null
       };
+
+      // Guardar también siempre en configuracion como respaldo garantizado
+      try {
+        const emergenciaData = {
+          contacto_emergencia_nombre: editForm.contacto_emergencia_nombre || '',
+          contacto_emergencia_telefono: editForm.contacto_emergencia_telefono || '',
+          contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || '',
+          contacto_emergencia_telefono_2: editForm.contacto_emergencia_telefono_2 || '',
+          updated_at: new Date().toISOString()
+        };
+        const { data: existingConf } = await supabase
+          .from('configuracion')
+          .select('id')
+          .eq('clave', `socorrista_emergencia_${id}`)
+          .maybeSingle();
+
+        if (existingConf) {
+          await supabase
+            .from('configuracion')
+            .update({ valor: JSON.stringify(emergenciaData) })
+            .eq('id', existingConf.id);
+        } else {
+          await supabase
+            .from('configuracion')
+            .insert({ clave: `socorrista_emergencia_${id}`, valor: JSON.stringify(emergenciaData) });
+        }
+      } catch (confErr) {
+        console.warn('Error guardando respaldo de contactos de emergencia en configuracion:', confErr);
+      }
 
       const { error } = await supabase
         .from('socorristas')
@@ -485,14 +593,20 @@ export default function SocorristaProfile() {
         .eq('id', id);
 
       if (error) {
-        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo')) {
-          const { segundo_cargo_administrativo, ...fallbackPayload } = updatePayload;
+        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo') || error.message?.includes('contacto_emergencia')) {
+          const { 
+            segundo_cargo_administrativo, 
+            contacto_emergencia_nombre,
+            contacto_emergencia_telefono,
+            contacto_emergencia_nombre_2,
+            contacto_emergencia_telefono_2,
+            ...fallbackPayload 
+          } = updatePayload;
           const { error: retryError } = await supabase
             .from('socorristas')
             .update(fallbackPayload)
             .eq('id', id);
           if (retryError) throw retryError;
-          alert('Aviso: Perfil actualizado, pero la columna "segundo_cargo_administrativo" aún no ha sido agregada en Supabase. Ejecute el script 13_add_segundo_cargo_administrativo.sql en el SQL Editor de Supabase.');
         } else {
           throw error;
         }
@@ -959,6 +1073,75 @@ export default function SocorristaProfile() {
                       <input type="text" value={editForm.direccion || ''} name="direccion" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border" />
                     </div>
                   </div>
+
+                  {/* Contactos de Emergencia (Máximo 2) */}
+                  <div className="sm:col-span-6 bg-red-50/50 p-4 rounded-xl border border-red-200/80">
+                    <div className="flex items-center space-x-2 mb-3">
+                      <div className="w-7 h-7 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
+                        <PhoneCall className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-gray-900">Contactos de Emergencia (Máximo 2)</h4>
+                        <p className="text-xs text-gray-500">Aparecerán disponibles para llamada rápida en la verificación oficial del carnet.</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Contacto 1 */}
+                      <div className="p-3 bg-white rounded-lg border border-red-100 space-y-3">
+                        <span className="text-xs font-bold text-red-700 uppercase tracking-wide block">Contacto de Emergencia 1 (Principal)</span>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Nombre Completo / Parentesco</label>
+                          <input 
+                            type="text" 
+                            name="contacto_emergencia_nombre"
+                            value={editForm.contacto_emergencia_nombre || ''} 
+                            onChange={handleEditChange}
+                            placeholder="Ej. María Pérez (Madre)"
+                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Teléfono de Emergencia</label>
+                          <input 
+                            type="text" 
+                            name="contacto_emergencia_telefono"
+                            value={editForm.contacto_emergencia_telefono || ''} 
+                            onChange={handleEditChange}
+                            placeholder="Ej. 7000-0000 o +503 7000-0000"
+                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Contacto 2 */}
+                      <div className="p-3 bg-white rounded-lg border border-red-100 space-y-3">
+                        <span className="text-xs font-bold text-red-700 uppercase tracking-wide block">Contacto de Emergencia 2 (Secundario)</span>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Nombre Completo / Parentesco</label>
+                          <input 
+                            type="text" 
+                            name="contacto_emergencia_nombre_2"
+                            value={editForm.contacto_emergencia_nombre_2 || ''} 
+                            onChange={handleEditChange}
+                            placeholder="Ej. Carlos Gómez (Hermano)"
+                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Teléfono de Emergencia</label>
+                          <input 
+                            type="text" 
+                            name="contacto_emergencia_telefono_2"
+                            value={editForm.contacto_emergencia_telefono_2 || ''} 
+                            onChange={handleEditChange}
+                            placeholder="Ej. 7111-2222 o +503 7111-2222"
+                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1198,6 +1381,50 @@ export default function SocorristaProfile() {
                 <dt className="text-sm font-medium text-gray-500">Dirección</dt>
                 <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{socorrista.direccion}</dd>
               </div>
+              <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6 bg-red-50/30">
+                <dt className="text-sm font-medium text-gray-700 flex items-center">
+                  <PhoneCall className="w-4 h-4 mr-1.5 text-red-600" />
+                  Contactos de Emergencia
+                </dt>
+                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                  {(socorrista.contacto_emergencia_telefono || socorrista.contacto_emergencia_telefono_2) ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {socorrista.contacto_emergencia_telefono && (
+                        <div className="flex items-center space-x-3 bg-white p-2.5 rounded-lg border border-red-200 shadow-2xs">
+                          <span className="w-6 h-6 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-xs font-bold shrink-0">1</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-gray-900 block text-xs truncate">{socorrista.contacto_emergencia_nombre || 'Contacto Principal'}</span>
+                            <a 
+                              href={`tel:${socorrista.contacto_emergencia_telefono}`}
+                              className="text-emerald-700 hover:text-emerald-900 font-mono font-medium inline-flex items-center text-xs mt-0.5"
+                            >
+                              <Phone className="w-3 h-3 mr-1 text-emerald-600 shrink-0" />
+                              {socorrista.contacto_emergencia_telefono}
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                      {socorrista.contacto_emergencia_telefono_2 && (
+                        <div className="flex items-center space-x-3 bg-white p-2.5 rounded-lg border border-red-200 shadow-2xs">
+                          <span className="w-6 h-6 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-xs font-bold shrink-0">2</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-gray-900 block text-xs truncate">{socorrista.contacto_emergencia_nombre_2 || 'Contacto Secundario'}</span>
+                            <a 
+                              href={`tel:${socorrista.contacto_emergencia_telefono_2}`}
+                              className="text-emerald-700 hover:text-emerald-900 font-mono font-medium inline-flex items-center text-xs mt-0.5"
+                            >
+                              <Phone className="w-3 h-3 mr-1 text-emerald-600 shrink-0" />
+                              {socorrista.contacto_emergencia_telefono_2}
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 italic text-xs">No se han registrado contactos de emergencia aún.</span>
+                  )}
+                </dd>
+              </div>
               <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
                 <dt className="text-sm font-medium text-gray-500">Cargo Institucional</dt>
                 <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{socorrista.cargo_institucional || 'N/A'}</dd>
@@ -1368,6 +1595,87 @@ export default function SocorristaProfile() {
           )}
         </div>
       </div>
+
+      {/* Sección de Méritos, Premios y Reconocimientos */}
+      <div className="bg-white shadow sm:rounded-lg overflow-hidden border border-slate-200/80">
+        <div className="px-4 py-5 sm:px-6 flex justify-between items-center border-b border-gray-200 bg-linear-to-r from-amber-500/10 via-yellow-500/5 to-transparent">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
+              <Award className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg leading-6 font-bold text-gray-900">Méritos, Premios y Condecoraciones</h3>
+              <p className="text-xs text-gray-500">Distinciones institucionales, misiones humanitarias y reconocimientos oficiales</p>
+            </div>
+          </div>
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+            <Sparkles className="w-3.5 h-3.5 mr-1 text-amber-600" />
+            {meritosList.length} {meritosList.length === 1 ? 'Reconocimiento' : 'Reconocimientos'}
+          </span>
+        </div>
+
+        <div className="p-4 sm:p-6">
+          {loadingMeritos ? (
+            <div className="py-6 text-center text-xs text-gray-500">Cargando condecoraciones...</div>
+          ) : meritosList.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {meritosList.map(merito => {
+                const asignacion = (merito.socorristas_asignados || []).find((a: any) => Number(a.socorrista_id) === Number(id));
+                return (
+                  <div 
+                    key={merito.id} 
+                    className="p-4 rounded-xl border border-amber-200/90 bg-linear-to-br from-amber-50/50 via-white to-yellow-50/30 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-2xs font-bold bg-amber-500 text-white shadow-2xs">
+                          {merito.categoria || 'Honor al Mérito'}
+                        </span>
+                        <span className="text-xs font-semibold text-gray-500">
+                          {asignacion?.fecha_asignacion || merito.fecha_otorgamiento || 'Condecorado'}
+                        </span>
+                      </div>
+                      <h4 className="text-base font-bold text-gray-950 mb-1">{merito.titulo}</h4>
+                      {merito.descripcion && (
+                        <p className="text-xs text-gray-700 leading-relaxed mb-3">{merito.descripcion}</p>
+                      )}
+                      {asignacion?.observaciones && (
+                        <div className="p-2 rounded bg-amber-100/60 text-amber-900 text-2xs mb-2">
+                          <strong>Mención especial:</strong> {asignacion.observaciones}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-amber-100/80 flex items-center justify-between text-2xs text-gray-500">
+                      <span>Otorgado por: <strong className="text-gray-800">{merito.institucion_otorgante || 'Cruz Verde Salvadoreña'}</strong></span>
+                      {merito.numero_acuerdo && (
+                        <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">
+                          Acuerdo: {merito.numero_acuerdo}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
+              <Award className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-medium text-gray-700">Sin méritos o condecoraciones registradas</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Los méritos otorgados desde el módulo de Operaciones &gt; Méritos y Premios aparecerán reflejados aquí automáticamente.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sección de Documentos Oficiales Versionados (CV, Antecedentes Penales, Policiales, Solvencias) */}
+      <DocumentosSocorristaCard 
+        socorristaId={Number(id)} 
+        socorristaNombre={`${socorrista.primer_nombre} ${socorrista.primer_apellido}`} 
+      />
+
     </div>
   );
 }

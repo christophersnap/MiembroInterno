@@ -272,6 +272,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const canCreateAnuncios = currentRole === 'admin' || !!permData?.permissions?.crear_anuncios;
       const canViewFormularios = currentRole === 'admin' || (permData?.permissions?.view_formularios ?? true);
       const canCreateFormularios = currentRole === 'admin' || !!permData?.permissions?.crear_formularios;
+      const canViewAllFormularios = currentRole === 'admin' || !!(roleData as any)?.can_view_all_formularios || !!permData?.permissions?.ver_todos_formularios;
       const canPersonalizarColores = currentRole === 'admin' || !!permData?.permissions?.personalizar_colores;
 
       let resolvedPerms: Record<string, boolean> = {};
@@ -303,6 +304,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           crear_anuncios: canCreateAnuncios,
           view_formularios: canViewFormularios,
           crear_formularios: canCreateFormularios,
+          ver_todos_formularios: canViewAllFormularios,
+          view_meritos: true,
           personalizar_colores: canPersonalizarColores
         };
       } else {
@@ -321,6 +324,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_archivos: true, subir_archivos: true, 
             view_anuncios: true, crear_anuncios: true,
             view_formularios: true, crear_formularios: true,
+            ver_todos_formularios: true,
+            view_meritos: true,
             personalizar_colores: true
           };
         } else if (currentRole === 'instructor') {
