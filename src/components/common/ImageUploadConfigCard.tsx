@@ -39,151 +39,149 @@ export default function ImageUploadConfigCard({
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // Procesa y sube la imagen a Supabase Storage con fallbacks
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [imgLoadFailed, setImgLoadFailed] = useState(false);
+
+  // Procesa y sube la imagen a Supabase Storage con fallbacks seguros
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validación de tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Por favor seleccione un archivo de imagen válido (PNG, JPG, WEBP o SVG)');
+      return;
+    }
+
     setProcessing(true);
+    setUploadError(null);
+    setUploadSuccess(false);
+    setImgLoadFailed(false);
 
     const fileExt = file.name.split('.').pop() || 'png';
-    const cleanFileName = `plantilla_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `plantillas/${cleanFileName}`;
+    const cleanFileName = `logo_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-    // 1. Intentar subir directamente a Supabase Storage (bucket 'assets')
     try {
-      const { error: uploadError } = await supabase.storage
-        .from('assets')
-        .upload(filePath, file, { upsert: true });
-
-      if (!uploadError) {
-        const { data: { publicUrl } } = supabase.storage
-          .from('assets')
-          .getPublicUrl(filePath);
-
-        if (publicUrl) {
-          onImageChange(publicUrl);
-          onVisibilityChange(true);
-          if (position === 'none') onPositionChange('center');
-          setProcessing(false);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          return;
-        }
-      }
-    } catch (errAssets) {
-      console.warn('Subida a bucket assets falló:', errAssets);
-    }
-
-    // 2. Intentar subir a Supabase Storage (bucket 'socorristas')
-    try {
-      const { error: uploadError2 } = await supabase.storage
-        .from('socorristas')
-        .upload(`logos/${cleanFileName}`, file, { upsert: true });
-
-      if (!uploadError2) {
-        const { data: { publicUrl } } = supabase.storage
-          .from('socorristas')
-          .getPublicUrl(`logos/${cleanFileName}`);
-
-        if (publicUrl) {
-          onImageChange(publicUrl);
-          onVisibilityChange(true);
-          if (position === 'none') onPositionChange('center');
-          setProcessing(false);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          return;
-        }
-      }
-    } catch (errSocorristas) {
-      console.warn('Subida a bucket socorristas falló:', errSocorristas);
-    }
-
-    // 3. Intentar subir al servidor local (/api/upload-file)
-    try {
-      const formData = new FormData();
-      formData.append('archivo', file);
-
-      const res = await fetch(getApiUrl('/api/upload-file'), {
-        method: 'POST',
-        body: formData
+      // 1. Crear inmediatamente una versión optimizada base64 local para visualización instantánea sin latencia
+      const localDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const rawResult = ev.target?.result as string;
+          if (file.type === 'image/svg+xml') {
+            resolve(rawResult);
+            return;
+          }
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 360;
+            let width = img.width;
+            let height = img.height;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              const mime = file.type.includes('png') ? 'image/png' : 'image/jpeg';
+              resolve(canvas.toDataURL(mime, 0.82));
+            } else {
+              resolve(rawResult);
+            }
+          };
+          img.onerror = () => resolve(rawResult);
+          img.src = rawResult;
+        };
+        reader.onerror = () => reject(new Error('Error al leer archivo local'));
+        reader.readAsDataURL(file);
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) {
-          onImageChange(data.url);
-          onVisibilityChange(true);
-          if (position === 'none') onPositionChange('center');
-          setProcessing(false);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          return;
-        }
-      }
-    } catch (uploadErr) {
-      console.warn('Subida al servidor falló, usando compresión canvas:', uploadErr);
-    }
+      // Aplicar de inmediato el dataUrl para que el usuario y el PDF vean la imagen sin esperar la red
+      onImageChange(localDataUrl);
+      onVisibilityChange(true);
+      if (position === 'none') onPositionChange('center');
 
-    // 2. Respaldo: compresión canvas optimizada a max 400px para no saturar memoria
-    const reader = new FileReader();
+      let resolvedPublicUrl: string | null = null;
 
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
+      // 2. Intentar subir al bucket 'socorristas' de Supabase (carpeta 'logos/')
+      try {
+        const { error: uploadError1 } = await supabase.storage
+          .from('socorristas')
+          .upload(`logos/${cleanFileName}`, file, { upsert: true, cacheControl: '3600' });
 
-      if (file.type === 'image/svg+xml') {
-        onImageChange(result);
-        onVisibilityChange(true);
-        if (position === 'none') onPositionChange('center');
-        setProcessing(false);
-        return;
-      }
+        if (!uploadError1) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('socorristas')
+            .getPublicUrl(`logos/${cleanFileName}`);
 
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 400;
-        let width = img.width;
-        let height = img.height;
+          if (publicUrl) {
+            // Verificar rápidamente si el URL es accesible y no arroja 400/403
+            const canLoad = await new Promise<boolean>((res) => {
+              const testImg = new Image();
+              testImg.onload = () => res(true);
+              testImg.onerror = () => res(false);
+              testImg.src = publicUrl;
+              setTimeout(() => res(false), 2000);
+            });
 
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
+            if (canLoad) {
+              resolvedPublicUrl = publicUrl;
+            }
           }
         }
+      } catch (errSoc) {
+        console.warn('Subida a Supabase storage falló:', errSoc);
+      }
 
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
+      // 3. Si no hay publicUrl verificado, intentar subir al servidor backend (/api/upload-file)
+      if (!resolvedPublicUrl) {
+        try {
+          const formData = new FormData();
+          formData.append('archivo', file);
+          const res = await fetch(getApiUrl('/api/upload-file'), {
+            method: 'POST',
+            body: formData
+          });
 
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const mime = file.type.includes('png') ? 'image/png' : 'image/jpeg';
-          const compressedDataUrl = canvas.toDataURL(mime, 0.78);
-          onImageChange(compressedDataUrl);
-        } else {
-          onImageChange(result);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.url) {
+              // Convertir a URL absoluto si es necesario para correos
+              const fullUrl = data.url.startsWith('http') 
+                ? data.url 
+                : `${window.location.origin}${data.url}`;
+              resolvedPublicUrl = fullUrl;
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('Subida al servidor backend falló:', uploadErr);
         }
+      }
 
-        onVisibilityChange(true);
-        if (position === 'none') onPositionChange('center');
-        setProcessing(false);
-      };
+      // Si obtuvimos un URL público accesible, actualizarlo (ideal para correos y compatibilidad multiplataforma)
+      if (resolvedPublicUrl) {
+        onImageChange(resolvedPublicUrl);
+      }
 
-      img.onerror = () => {
-        onImageChange(result);
-        onVisibilityChange(true);
-        setProcessing(false);
-      };
-
-      img.src = result;
-    };
-
-    reader.readAsDataURL(file);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      setUploadSuccess(true);
+      setTimeout(() => setUploadSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Error procesando imagen:', err);
+      setUploadError(err.message || 'Error al procesar la imagen');
+    } finally {
+      setProcessing(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -252,12 +250,16 @@ export default function ImageUploadConfigCard({
       <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
         {/* Previsualización Miniatura */}
         <div className="sm:col-span-4 flex flex-col items-center justify-center p-3 bg-gray-100/80 rounded-xl border border-dashed border-gray-300 min-h-[95px]">
-          {imageUrl ? (
+          {imageUrl && !imgLoadFailed ? (
             <div className="relative group w-full flex flex-col items-center">
               <img
                 src={imageUrl}
                 alt={title}
                 referrerPolicy="no-referrer"
+                onError={() => {
+                  console.warn('Fallo al cargar URL de imagen:', imageUrl);
+                  setImgLoadFailed(true);
+                }}
                 className={`object-contain max-w-full rounded-sm bg-white p-1 border border-gray-200 shadow-2xs ${
                   size === 'small' ? 'h-11' : size === 'large' ? 'h-18' : 'h-14'
                 }`}
@@ -273,6 +275,25 @@ export default function ImageUploadConfigCard({
                 </button>
               </div>
             </div>
+          ) : imageUrl && imgLoadFailed ? (
+            <div className="text-center space-y-1 p-1">
+              <span className="text-3xs text-amber-700 font-bold block">
+                ⚠️ URL inaccesible
+              </span>
+              <p className="text-4xs text-gray-500 leading-tight">
+                El enlace remoto no cargó. Se recomienda subir el archivo directo.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setImgLoadFailed(false);
+                  fileInputRef.current?.click();
+                }}
+                className="text-3xs text-primary font-bold hover:underline"
+              >
+                Volver a subir
+              </button>
+            </div>
           ) : (
             <div className="text-center space-y-1">
               <div className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white text-green-700 font-bold border border-green-700 shadow-2xs">
@@ -284,6 +305,18 @@ export default function ImageUploadConfigCard({
               <span className="text-4xs text-gray-400 block">
                 Predeterminado institucional
               </span>
+            </div>
+          )}
+
+          {uploadSuccess && (
+            <div className="mt-1 px-2 py-0.5 bg-emerald-100 text-emerald-800 text-4xs font-bold rounded-md animate-fade-in flex items-center">
+              <Check className="w-2.5 h-2.5 mr-0.5" /> Lista para PDF y Correo
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="mt-1 px-2 py-0.5 bg-red-100 text-red-700 text-4xs font-medium rounded-md leading-tight text-center">
+              {uploadError}
             </div>
           )}
         </div>

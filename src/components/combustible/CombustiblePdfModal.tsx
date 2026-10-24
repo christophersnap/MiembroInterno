@@ -104,6 +104,9 @@ export default function CombustiblePdfModal({
                   <img
                     src={config.pdfLogoHeaderUrl}
                     alt="Logo Principal Cruz Verde"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
                     className={`object-contain ${
                       config.pdfLogoSize === 'small' ? 'w-12 h-12' : config.pdfLogoSize === 'large' ? 'w-20 h-20' : 'w-16 h-16'
                     }`}
@@ -135,6 +138,9 @@ export default function CombustiblePdfModal({
                 <img
                   src={config.pdfLogoSecundarioUrl}
                   alt="Logo Secundario / Cooperante"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
                   className={`object-contain ${
                     config.pdfLogoSecundarioSize === 'small' ? 'w-10 h-10' : config.pdfLogoSecundarioSize === 'large' ? 'w-18 h-18' : 'w-14 h-14'
                   }`}
@@ -295,6 +301,9 @@ export default function CombustiblePdfModal({
                     <img
                       src={config.pdfSelloImgUrl}
                       alt="Sello Oficial"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
                       className={`object-contain opacity-90 ${
                         config.pdfSelloImgSize === 'small' ? 'h-12 max-w-[120px]' : config.pdfSelloImgSize === 'large' ? 'h-20 max-w-[200px]' : 'h-16 max-w-[160px]'
                       }`}
@@ -325,7 +334,14 @@ export default function CombustiblePdfModal({
           <div className="flex items-center space-x-2">
             {config.pdfMostrarLogoFooter && (
               config.pdfLogoFooterUrl ? (
-                <img src={config.pdfLogoFooterUrl} alt="Logo" className="w-7 h-7 object-contain" />
+                <img 
+                  src={config.pdfLogoFooterUrl} 
+                  alt="Logo" 
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                  className="w-7 h-7 object-contain" 
+                />
               ) : (
                 <div className="w-7 h-7 rounded-full border border-green-800 flex items-center justify-center font-bold text-green-900 text-xs">
                   +

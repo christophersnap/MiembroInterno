@@ -76,6 +76,9 @@ export default function CompraPdfPreviewModal({
               src={config.pdfLogoUrl}
               alt="Logo Oficial"
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
               className={`object-contain ${
                 config.pdfLogoSize === 'small' ? 'h-10' : config.pdfLogoSize === 'large' ? 'h-20' : 'h-14'
               }`}
@@ -92,6 +95,9 @@ export default function CompraPdfPreviewModal({
             src={config.pdfLogoSecundarioUrl}
             alt="Logo Secundario"
             referrerPolicy="no-referrer"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
             className={`object-contain ${
               config.pdfLogoSecundarioSize === 'small' ? 'h-10' : config.pdfLogoSecundarioSize === 'large' ? 'h-20' : 'h-14'
             }`}
@@ -311,6 +317,9 @@ export default function CompraPdfPreviewModal({
                     src={config.pdfSelloImgUrl}
                     alt="Sello Oficial"
                     referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
                     className={`object-contain ${
                       config.pdfSelloImgSize === 'small' ? 'h-14' : config.pdfSelloImgSize === 'large' ? 'h-24' : 'h-18'
                     }`}
@@ -370,6 +379,9 @@ export default function CompraPdfPreviewModal({
                   src={config.pdfFooterImgUrl}
                   alt="Cintillo Pie de Página"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
                   className={`object-contain ${
                     config.pdfFooterImgSize === 'small' ? 'h-8' : config.pdfFooterImgSize === 'large' ? 'h-16' : 'h-11'
                   }`}

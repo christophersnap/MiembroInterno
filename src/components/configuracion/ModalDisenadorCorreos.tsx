@@ -3,7 +3,7 @@ import {
   X, Palette, Type, Image as ImageIcon, Mail, FileText, CheckCircle2, 
   Send, Save, Copy, Check, Eye, EyeOff, AlertCircle, RefreshCw, 
   ShoppingCart, Fuel, Server, Info, Key, ChevronRight, ShieldCheck,
-  Code, Database, Sparkles
+  Code, Database, Sparkles, Upload
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
@@ -92,6 +92,92 @@ export default function ModalDisenadorCorreos({
   const [mostrarLogo, setMostrarLogo] = useState(true);
   const [leyendaNoReply, setLeyendaNoReply] = useState(DEFAULT_EMAIL_DESIGN.leyendaNoReply);
   const [telefonoContacto, setTelefonoContacto] = useState('2284-0000 / 7695-7911');
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoUploadMsg, setLogoUploadMsg] = useState<string | null>(null);
+
+  // Subir imagen para la plantilla de correo con URL pública
+  const handleUploadEmailLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor selecciona una imagen válida (PNG, JPG, SVG o WEBP).');
+      return;
+    }
+
+    setUploadingLogo(true);
+    setLogoUploadMsg('Procesando y subiendo imagen...');
+
+    // 1. Vista previa local inmediata vía data URL
+    try {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        if (ev.target?.result && typeof ev.target.result === 'string') {
+          setLogoUrl(ev.target.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (e) {}
+
+    // 2. Subida a Supabase Storage y Backend
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const fileName = `email_logo_${Date.now()}.${ext}`;
+      const filePath = `logos/${fileName}`;
+
+      let publicUrlCandidate = '';
+
+      // Intento 1: Supabase Storage bucket 'socorristas'
+      try {
+        const { error: sbErr } = await supabase.storage
+          .from('socorristas')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+        if (!sbErr) {
+          const { data } = supabase.storage.from('socorristas').getPublicUrl(filePath);
+          if (data?.publicUrl) {
+            publicUrlCandidate = data.publicUrl;
+          }
+        }
+      } catch (sbE) {
+        console.warn('Supabase storage upload skipped/error:', sbE);
+      }
+
+      // Intento 2: Backend /api/upload-file si Supabase falló o para redundancia
+      if (!publicUrlCandidate) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const uploadRes = await fetch(getApiUrl('/api/upload-file'), {
+            method: 'POST',
+            body: formData
+          });
+          if (uploadRes.ok) {
+            const upJson = await uploadRes.json();
+            if (upJson.url) {
+              publicUrlCandidate = upJson.url.startsWith('http') 
+                ? upJson.url 
+                : `${window.location.origin}${upJson.url}`;
+            }
+          }
+        } catch (upE) {
+          console.warn('Backend upload-file error:', upE);
+        }
+      }
+
+      if (publicUrlCandidate) {
+        setLogoUrl(publicUrlCandidate);
+        setLogoUploadMsg('✓ Imagen subida y URL pública generada');
+      } else {
+        setLogoUploadMsg('✓ Imagen precargada');
+      }
+      setTimeout(() => setLogoUploadMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Error uploading email logo:', err);
+      setLogoUploadMsg('Aviso: Imagen en vista local');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
 
   // Estado de carga y guardado
   const [loading, setLoading] = useState(false);
@@ -833,8 +919,22 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                     </label>
                   </div>
 
-                  <div>
-                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">URL del Logo</label>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider">Logo / Escudo para Correo</label>
+                      <label className="inline-flex items-center px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-3xs font-bold cursor-pointer transition-colors shadow-2xs">
+                        <Upload className="w-3 h-3 mr-1" />
+                        {uploadingLogo ? 'Subiendo...' : 'Subir imagen'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleUploadEmailLogo}
+                          disabled={uploadingLogo}
+                        />
+                      </label>
+                    </div>
+
                     <input
                       type="text"
                       value={logoUrl}
@@ -842,6 +942,13 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       placeholder="https://.../logo.png"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
+
+                    {logoUploadMsg && (
+                      <p className="text-3xs text-emerald-700 font-semibold flex items-center">
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        {logoUploadMsg}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
@@ -853,8 +960,15 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       Restaurar escudo oficial Cruz Verde
                     </button>
                     {logoUrl && (
-                      <div className="h-7 w-7 rounded-lg bg-slate-100 p-0.5 border border-slate-200 flex items-center justify-center overflow-hidden">
-                        <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain" />
+                      <div className="h-8 w-8 rounded-lg bg-slate-100 p-0.5 border border-slate-200 flex items-center justify-center overflow-hidden">
+                        <img 
+                          src={logoUrl} 
+                          alt="Logo" 
+                          className="max-h-full max-w-full object-contain" 
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
                       </div>
                     )}
                   </div>

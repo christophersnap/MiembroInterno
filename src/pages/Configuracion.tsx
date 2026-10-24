@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
   Save, Settings, Info, Palette, Image as ImageIcon, Mail, FileText, Truck, 
-  Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check, QrCode
+  Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check, QrCode,
+  ShoppingCart, Fuel
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
@@ -11,6 +12,10 @@ import { useSettings } from '../contexts/SettingsContext';
 import ConfiguracionCorreos from '../components/configuracion/ConfiguracionCorreos';
 import ModalDisenadorCorreos from '../components/configuracion/ModalDisenadorCorreos';
 import PersonalizacionColores from '../components/configuracion/PersonalizacionColores';
+import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
+import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
+import { CompraConfig, DEFAULT_COMPRA_CONFIG, DEFAULT_COMPRA_BLOCKS } from '../types/compra';
+import { CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, DEFAULT_COMBUSTIBLE_BLOCKS } from '../types/combustible';
 
 interface PlantillaFormulario {
   id: string;
@@ -63,6 +68,29 @@ export default function Configuracion() {
 
   // Modal Diseñador de Plantillas y Remitente No-Reply
   const [isEmailDesignerOpen, setIsEmailDesignerOpen] = useState(false);
+
+  // Subpestaña para separar claramente Compra y Combustible en la categoría de Plantillas PDF
+  const [plantillaSubTab, setPlantillaSubTab] = useState<'compra' | 'combustible'>('compra');
+
+  // Configuración de Plantilla Compra / Mantenimiento
+  const [compraConfig, setCompraConfig] = useState<CompraConfig>(() => {
+    try {
+      const cached = localStorage.getItem('cruz_verde_compra_config');
+      if (cached) return { ...DEFAULT_COMPRA_CONFIG, ...JSON.parse(cached) };
+    } catch (e) {}
+    return DEFAULT_COMPRA_CONFIG;
+  });
+  const [savingCompraConfig, setSavingCompraConfig] = useState(false);
+
+  // Configuración de Plantilla Combustible
+  const [combustibleConfig, setCombustibleConfig] = useState<CombustibleConfig>(() => {
+    try {
+      const cached = localStorage.getItem('cruz_verde_combustible_config');
+      if (cached) return { ...DEFAULT_COMBUSTIBLE_CONFIG, ...JSON.parse(cached) };
+    } catch (e) {}
+    return DEFAULT_COMBUSTIBLE_CONFIG;
+  });
+  const [savingCombustibleConfig, setSavingCombustibleConfig] = useState(false);
 
   // Estado general de configuración
   const [config, setConfig] = useState<any>({
@@ -207,8 +235,128 @@ export default function Configuracion() {
         }
 
         setConfig(newConfig);
-      } catch (err) {
-        console.error('Error cargando configuración:', err);
+
+        // Mapear configuración de Compra y Combustible
+        const confMap: Record<string, string> = {};
+        if (data) {
+          data.forEach(r => { confMap[r.clave] = r.valor; });
+        }
+        try {
+          const apiRes = await fetch(getApiUrl('/api/configuracion'));
+          if (apiRes.ok) {
+            const apiJson = await apiRes.json();
+            Object.entries(apiJson).forEach(([k, v]) => {
+              confMap[k] = String(v);
+            });
+          }
+        } catch (e) {}
+
+        // 1. Cargar Compra
+        let parsedCompraBlocks = DEFAULT_COMPRA_CONFIG.pdfBloquesOrden;
+        if (confMap.solicitudes_pdf_bloques_orden) {
+          try { parsedCompraBlocks = JSON.parse(confMap.solicitudes_pdf_bloques_orden); } catch (e) {}
+        }
+        setCompraConfig(prev => ({
+          ...prev,
+          correoDestino: confMap.solicitudes_correo_destino || prev.correoDestino,
+          correoRemitente: confMap.solicitudes_correo_remitente || prev.correoRemitente,
+          correoCcDefault: confMap.solicitudes_correo_cc || prev.correoCcDefault,
+          asuntoPlantilla: confMap.solicitudes_asunto_plantilla || prev.asuntoPlantilla,
+          enviarCopiaSolicitante: confMap.solicitudes_enviar_copia_solicitante !== 'false',
+          correoTitulo: confMap.solicitudes_correo_titulo || prev.correoTitulo,
+          correoSubtitulo: confMap.solicitudes_correo_subtitulo || prev.correoSubtitulo,
+          correoFooterTexto: confMap.solicitudes_correo_footer_texto || prev.correoFooterTexto,
+          pdfTitulo: confMap.solicitudes_pdf_titulo || prev.pdfTitulo,
+          pdfDepartamento: confMap.solicitudes_pdf_departamento || prev.pdfDepartamento,
+          pdfSubtitulo: confMap.solicitudes_pdf_subtitulo || prev.pdfSubtitulo,
+          pdfFontFamily: (confMap.solicitudes_pdf_font_family as any) || prev.pdfFontFamily,
+          pdfFontSize: (confMap.solicitudes_pdf_font_size as any) || prev.pdfFontSize,
+          pdfWatermark: confMap.solicitudes_pdf_watermark !== 'false',
+          pdfWatermarkText: confMap.solicitudes_pdf_watermark_text || prev.pdfWatermarkText,
+          pdfWatermarkOpacity: confMap.solicitudes_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
+          pdfPiePagina: confMap.solicitudes_pdf_pie_pagina || prev.pdfPiePagina,
+          pdfMostrarLogo: confMap.solicitudes_pdf_mostrar_logo !== 'false',
+          pdfLogoUrl: confMap.solicitudes_pdf_logo_url ?? prev.pdfLogoUrl,
+          pdfLogoPosicion: (confMap.solicitudes_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
+          pdfLogoSize: (confMap.solicitudes_pdf_logo_size as any) || prev.pdfLogoSize,
+          pdfMostrarLogoSecundario: confMap.solicitudes_pdf_mostrar_logo_secundario === 'true',
+          pdfLogoSecundarioUrl: confMap.solicitudes_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
+          pdfLogoSecundarioPosicion: (confMap.solicitudes_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
+          pdfLogoSecundarioSize: (confMap.solicitudes_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
+          pdfMostrarSello: confMap.solicitudes_pdf_mostrar_sello !== 'false',
+          pdfMostrarSelloImg: confMap.solicitudes_pdf_mostrar_sello_img === 'true',
+          pdfSelloImgUrl: confMap.solicitudes_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
+          pdfSelloImgPosicion: (confMap.solicitudes_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
+          pdfSelloImgSize: (confMap.solicitudes_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
+          pdfMostrarFooterImg: confMap.solicitudes_pdf_mostrar_footer_img === 'true',
+          pdfFooterImgUrl: confMap.solicitudes_pdf_footer_img_url ?? prev.pdfFooterImgUrl,
+          pdfFooterImgPosicion: (confMap.solicitudes_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
+          pdfFooterImgSize: (confMap.solicitudes_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
+          pdfSelloTextoSuperior: confMap.solicitudes_pdf_sello_texto_superior || prev.pdfSelloTextoSuperior,
+          pdfSelloTextoInferior: confMap.solicitudes_pdf_sello_texto_inferior || prev.pdfSelloTextoInferior,
+          pdfFirma1Titulo: confMap.solicitudes_pdf_firma1_titulo || prev.pdfFirma1Titulo,
+          pdfFirma1Subtitulo: confMap.solicitudes_pdf_firma1_subtitulo || prev.pdfFirma1Subtitulo,
+          pdfFirma2Titulo: confMap.solicitudes_pdf_firma2_titulo || prev.pdfFirma2Titulo,
+          pdfFirma2Subtitulo: confMap.solicitudes_pdf_firma2_subtitulo || prev.pdfFirma2Subtitulo,
+          pdfFirma3Titulo: confMap.solicitudes_pdf_firma3_titulo || prev.pdfFirma3Titulo,
+          pdfFirma3Subtitulo: confMap.solicitudes_pdf_firma3_subtitulo || prev.pdfFirma3Subtitulo,
+          pdfBloquesOrden: parsedCompraBlocks
+        }));
+
+        // 2. Cargar Combustible
+        setCombustibleConfig(prev => ({
+          ...prev,
+          correoDestino: confMap.combustible_correo_destino || prev.correoDestino,
+          correoCcDefault: confMap.combustible_correo_cc || prev.correoCcDefault,
+          correoContactoTelefono: confMap.combustible_correo_contacto_telefono || prev.correoContactoTelefono,
+          asuntoPlantilla: confMap.combustible_correo_asunto_plantilla || prev.asuntoPlantilla,
+          enviarCopiaSolicitante: confMap.combustible_correo_enviar_copia_solicitante !== 'false',
+          correoTitulo: confMap.combustible_correo_titulo || prev.correoTitulo,
+          correoSubtitulo: confMap.combustible_correo_subtitulo || prev.correoSubtitulo,
+          correoFooterTexto: confMap.combustible_correo_footer_texto || prev.correoFooterTexto,
+          pdfTitulo: confMap.combustible_pdf_titulo || prev.pdfTitulo,
+          pdfSubtitulo: confMap.combustible_pdf_subtitulo || prev.pdfSubtitulo,
+          pdfFontFamily: (confMap.combustible_pdf_font_family as any) || prev.pdfFontFamily,
+          pdfFontSize: (confMap.combustible_pdf_font_size as any) || prev.pdfFontSize,
+          pdfCodigoFormulario: confMap.combustible_pdf_codigo_formulario || prev.pdfCodigoFormulario,
+          pdfWatermark: confMap.combustible_pdf_watermark !== 'false',
+          pdfWatermarkText: confMap.combustible_pdf_watermark_text || prev.pdfWatermarkText,
+          pdfWatermarkOpacity: confMap.combustible_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
+          pdfMostrarLogoHeader: confMap.combustible_pdf_mostrar_logo_header !== 'false',
+          pdfLogoHeaderUrl: confMap.combustible_pdf_logo_header_url ?? prev.pdfLogoHeaderUrl,
+          pdfLogoPosicion: (confMap.combustible_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
+          pdfLogoSize: (confMap.combustible_pdf_logo_size as any) || prev.pdfLogoSize,
+          pdfMostrarLogoSecundario: confMap.combustible_pdf_mostrar_logo_secundario === 'true',
+          pdfLogoSecundarioUrl: confMap.combustible_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
+          pdfLogoSecundarioPosicion: (confMap.combustible_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
+          pdfLogoSecundarioSize: (confMap.combustible_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
+          pdfMostrarSelloImg: confMap.combustible_pdf_mostrar_sello_img === 'true',
+          pdfSelloImgUrl: confMap.combustible_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
+          pdfSelloImgPosicion: (confMap.combustible_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
+          pdfSelloImgSize: (confMap.combustible_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
+          pdfMostrarLogoFooter: confMap.combustible_pdf_mostrar_logo_footer !== 'false',
+          pdfLogoFooterUrl: confMap.combustible_pdf_logo_footer_url ?? prev.pdfLogoFooterUrl,
+          pdfFooterImgPosicion: (confMap.combustible_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
+          pdfFooterImgSize: (confMap.combustible_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
+          pdfLabelSolicitante: confMap.combustible_pdf_label_solicitante || prev.pdfLabelSolicitante,
+          pdfLabelSeccional: confMap.combustible_pdf_label_seccional || prev.pdfLabelSeccional,
+          pdfLabelDirector: confMap.combustible_pdf_label_director || prev.pdfLabelDirector,
+          pdfLabelActividad: confMap.combustible_pdf_label_actividad || prev.pdfLabelActividad,
+          pdfLabelCorreo: confMap.combustible_pdf_label_correo || prev.pdfLabelCorreo,
+          pdfLabelContacto: confMap.combustible_pdf_label_contacto || prev.pdfLabelContacto,
+          pdfLabelLiquidacion: confMap.combustible_pdf_label_liquidacion || prev.pdfLabelLiquidacion,
+          pdfLabelMotivo: confMap.combustible_pdf_label_motivo || prev.pdfLabelMotivo,
+          pdfLabelObservaciones: confMap.combustible_pdf_label_observaciones || prev.pdfLabelObservaciones,
+          pdfLabelFirmaSolicitante: confMap.combustible_pdf_label_firma_solicitante || prev.pdfLabelFirmaSolicitante,
+          pdfLabelFirmaAdmin: confMap.combustible_pdf_label_firma_admin || prev.pdfLabelFirmaAdmin,
+          pdfLabelDui: confMap.combustible_pdf_label_dui || prev.pdfLabelDui,
+          pdfLabelFecha: confMap.combustible_pdf_label_fecha || prev.pdfLabelFecha,
+          pdfLabelFirmaSello: confMap.combustible_pdf_label_firma_sello || prev.pdfLabelFirmaSello,
+          pdfLabelAutoriza: confMap.combustible_pdf_label_autoriza || prev.pdfLabelAutoriza,
+          pdfLabelFechaAuto: confMap.combustible_pdf_label_fecha_auto || prev.pdfLabelFechaAuto
+        }));
+      } catch (error: any) {
+        console.error('Error loading config:', error);
       } finally {
         setLoading(false);
       }
@@ -281,6 +429,181 @@ export default function Configuracion() {
     setTimeout(() => {
       setSaveSuccessMsg(null);
     }, 4000);
+  };
+
+  // Guardar configuración de Solicitud de Compra / Mantenimiento
+  const handleSaveCompraConfig = async (newConfig: CompraConfig) => {
+    setSavingCompraConfig(true);
+    try {
+      setCompraConfig(newConfig);
+      try {
+        localStorage.setItem('cruz_verde_compra_config', JSON.stringify(newConfig));
+      } catch (e) {}
+
+      const entries = [
+        { clave: 'solicitudes_correo_destino', valor: newConfig.correoDestino },
+        { clave: 'solicitudes_correo_remitente', valor: newConfig.correoRemitente },
+        { clave: 'solicitudes_correo_cc', valor: newConfig.correoCcDefault },
+        { clave: 'solicitudes_asunto_plantilla', valor: newConfig.asuntoPlantilla },
+        { clave: 'solicitudes_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
+        { clave: 'solicitudes_correo_titulo', valor: newConfig.correoTitulo },
+        { clave: 'solicitudes_correo_subtitulo', valor: newConfig.correoSubtitulo },
+        { clave: 'solicitudes_correo_footer_texto', valor: newConfig.correoFooterTexto },
+        { clave: 'solicitudes_pdf_titulo', valor: newConfig.pdfTitulo },
+        { clave: 'solicitudes_pdf_departamento', valor: newConfig.pdfDepartamento },
+        { clave: 'solicitudes_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
+        { clave: 'solicitudes_pdf_font_family', valor: newConfig.pdfFontFamily },
+        { clave: 'solicitudes_pdf_font_size', valor: newConfig.pdfFontSize },
+        { clave: 'solicitudes_pdf_watermark', valor: String(newConfig.pdfWatermark) },
+        { clave: 'solicitudes_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
+        { clave: 'solicitudes_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
+        { clave: 'solicitudes_pdf_pie_pagina', valor: newConfig.pdfPiePagina },
+        { clave: 'solicitudes_pdf_mostrar_logo', valor: String(newConfig.pdfMostrarLogo) },
+        { clave: 'solicitudes_pdf_logo_url', valor: newConfig.pdfLogoUrl },
+        { clave: 'solicitudes_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion },
+        { clave: 'solicitudes_pdf_logo_size', valor: newConfig.pdfLogoSize },
+        { clave: 'solicitudes_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
+        { clave: 'solicitudes_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
+        { clave: 'solicitudes_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion },
+        { clave: 'solicitudes_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize },
+        { clave: 'solicitudes_pdf_mostrar_sello', valor: String(newConfig.pdfMostrarSello) },
+        { clave: 'solicitudes_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
+        { clave: 'solicitudes_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
+        { clave: 'solicitudes_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion },
+        { clave: 'solicitudes_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize },
+        { clave: 'solicitudes_pdf_mostrar_footer_img', valor: String(newConfig.pdfMostrarFooterImg) },
+        { clave: 'solicitudes_pdf_footer_img_url', valor: newConfig.pdfFooterImgUrl || '' },
+        { clave: 'solicitudes_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion },
+        { clave: 'solicitudes_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize },
+        { clave: 'solicitudes_pdf_sello_texto_superior', valor: newConfig.pdfSelloTextoSuperior },
+        { clave: 'solicitudes_pdf_sello_texto_inferior', valor: newConfig.pdfSelloTextoInferior },
+        { clave: 'solicitudes_pdf_firma1_titulo', valor: newConfig.pdfFirma1Titulo },
+        { clave: 'solicitudes_pdf_firma1_subtitulo', valor: newConfig.pdfFirma1Subtitulo },
+        { clave: 'solicitudes_pdf_firma2_titulo', valor: newConfig.pdfFirma2Titulo },
+        { clave: 'solicitudes_pdf_firma2_subtitulo', valor: newConfig.pdfFirma2Subtitulo },
+        { clave: 'solicitudes_pdf_firma3_titulo', valor: newConfig.pdfFirma3Titulo },
+        { clave: 'solicitudes_pdf_firma3_subtitulo', valor: newConfig.pdfFirma3Subtitulo },
+        { clave: 'solicitudes_pdf_bloques_orden', valor: JSON.stringify(newConfig.pdfBloquesOrden) }
+      ];
+
+      try {
+        const confObj: Record<string, string> = {};
+        entries.forEach(e => { confObj[e.clave] = e.valor; });
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confObj)
+        });
+      } catch (errApi) {
+        console.warn('Error backend API config:', errApi);
+      }
+
+      try {
+        for (const item of entries) {
+          await supabase.from('configuracion').upsert(item, { onConflict: 'clave' });
+        }
+      } catch (errSupabase) {
+        console.warn('Error supabase config:', errSupabase);
+      }
+
+      await logActivity('Actualizó configuración de plantilla de compras/mantenimiento', 'Configuracion', 'plantilla_compras');
+      showSuccessAlert('Plantilla de Solicitud de Compra y Mantenimiento guardada exitosamente.');
+      await refreshSettings();
+    } catch (err: any) {
+      alert('Error guardando plantilla de compras: ' + err.message);
+    } finally {
+      setSavingCompraConfig(false);
+    }
+  };
+
+  // Guardar configuración de Solicitud de Vales de Combustible
+  const handleSaveCombustibleConfig = async (newConfig: CombustibleConfig) => {
+    setSavingCombustibleConfig(true);
+    try {
+      setCombustibleConfig(newConfig);
+      try {
+        localStorage.setItem('cruz_verde_combustible_config', JSON.stringify(newConfig));
+      } catch (e) {}
+
+      const entries = [
+        { clave: 'combustible_correo_destino', valor: newConfig.correoDestino },
+        { clave: 'combustible_correo_cc', valor: newConfig.correoCcDefault },
+        { clave: 'combustible_correo_contacto_telefono', valor: newConfig.correoContactoTelefono },
+        { clave: 'combustible_correo_asunto_plantilla', valor: newConfig.asuntoPlantilla },
+        { clave: 'combustible_correo_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
+        { clave: 'combustible_correo_titulo', valor: newConfig.correoTitulo },
+        { clave: 'combustible_correo_subtitulo', valor: newConfig.correoSubtitulo },
+        { clave: 'combustible_correo_footer_texto', valor: newConfig.correoFooterTexto },
+        { clave: 'combustible_pdf_titulo', valor: newConfig.pdfTitulo },
+        { clave: 'combustible_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
+        { clave: 'combustible_pdf_font_family', valor: newConfig.pdfFontFamily },
+        { clave: 'combustible_pdf_font_size', valor: newConfig.pdfFontSize },
+        { clave: 'combustible_pdf_codigo_formulario', valor: newConfig.pdfCodigoFormulario },
+        { clave: 'combustible_pdf_watermark', valor: String(newConfig.pdfWatermark) },
+        { clave: 'combustible_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
+        { clave: 'combustible_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
+        { clave: 'combustible_pdf_mostrar_logo_header', valor: String(newConfig.pdfMostrarLogoHeader) },
+        { clave: 'combustible_pdf_logo_header_url', valor: newConfig.pdfLogoHeaderUrl || '' },
+        { clave: 'combustible_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion || 'left' },
+        { clave: 'combustible_pdf_logo_size', valor: newConfig.pdfLogoSize || 'medium' },
+        { clave: 'combustible_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
+        { clave: 'combustible_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
+        { clave: 'combustible_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion || 'right' },
+        { clave: 'combustible_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize || 'medium' },
+        { clave: 'combustible_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
+        { clave: 'combustible_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
+        { clave: 'combustible_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion || 'center' },
+        { clave: 'combustible_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize || 'medium' },
+        { clave: 'combustible_pdf_mostrar_logo_footer', valor: String(newConfig.pdfMostrarLogoFooter) },
+        { clave: 'combustible_pdf_logo_footer_url', valor: newConfig.pdfLogoFooterUrl || '' },
+        { clave: 'combustible_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion || 'center' },
+        { clave: 'combustible_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize || 'medium' },
+        { clave: 'combustible_pdf_label_solicitante', valor: newConfig.pdfLabelSolicitante },
+        { clave: 'combustible_pdf_label_seccional', valor: newConfig.pdfLabelSeccional },
+        { clave: 'combustible_pdf_label_director', valor: newConfig.pdfLabelDirector },
+        { clave: 'combustible_pdf_label_actividad', valor: newConfig.pdfLabelActividad },
+        { clave: 'combustible_pdf_label_correo', valor: newConfig.pdfLabelCorreo },
+        { clave: 'combustible_pdf_label_contacto', valor: newConfig.pdfLabelContacto },
+        { clave: 'combustible_pdf_label_liquidacion', valor: newConfig.pdfLabelLiquidacion },
+        { clave: 'combustible_pdf_label_motivo', valor: newConfig.pdfLabelMotivo },
+        { clave: 'combustible_pdf_label_observaciones', valor: newConfig.pdfLabelObservaciones },
+        { clave: 'combustible_pdf_label_firma_solicitante', valor: newConfig.pdfLabelFirmaSolicitante },
+        { clave: 'combustible_pdf_label_firma_admin', valor: newConfig.pdfLabelFirmaAdmin },
+        { clave: 'combustible_pdf_label_dui', valor: newConfig.pdfLabelDui },
+        { clave: 'combustible_pdf_label_fecha', valor: newConfig.pdfLabelFecha },
+        { clave: 'combustible_pdf_label_firma_sello', valor: newConfig.pdfLabelFirmaSello },
+        { clave: 'combustible_pdf_label_autoriza', valor: newConfig.pdfLabelAutoriza },
+        { clave: 'combustible_pdf_label_fecha_auto', valor: newConfig.pdfLabelFechaAuto }
+      ];
+
+      try {
+        const confObj: Record<string, string> = {};
+        entries.forEach(e => { confObj[e.clave] = e.valor; });
+        await fetch(getApiUrl('/api/configuracion'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confObj)
+        });
+      } catch (errApi) {
+        console.warn('Error backend API config:', errApi);
+      }
+
+      try {
+        for (const item of entries) {
+          await supabase.from('configuracion').upsert(item, { onConflict: 'clave' });
+        }
+      } catch (errSupabase) {
+        console.warn('Error supabase config:', errSupabase);
+      }
+
+      await logActivity('Actualizó plantilla y configuración de combustible', 'Configuracion', 'plantilla_combustible');
+      showSuccessAlert('Plantilla de Solicitud de Vales de Combustible guardada exitosamente.');
+      await refreshSettings();
+    } catch (err: any) {
+      alert('Error guardando plantilla de combustible: ' + err.message);
+    } finally {
+      setSavingCombustibleConfig(false);
+    }
   };
 
   // 1. Guardar Plantilla de Formulario y PDF
@@ -566,507 +889,66 @@ export default function Configuracion() {
       {activeCategory === 'plantillas' && (
         <div className="space-y-6 animate-in fade-in">
           
-          {/* Selector de Formulario - Estilo Apple Inset */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* Selector Segmentado Superior: Compra / Mantenimiento vs Vales de Combustible */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
                 <FileText className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-gray-900">Plantillas Oficiales de Formatos y PDF</h2>
-                <p className="text-xs text-gray-500">Hoja membretada, marcas de agua de seguridad y estructura de firmas</p>
+                <h2 className="text-sm font-bold text-gray-900">Plantillas Oficiales de Formatos y PDF</h2>
+                <p className="text-xs text-gray-500">Configuración separada de documentos PDF, imágenes, orden de bloques y membretes</p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <select
-                value={selectedFormularioId}
-                onChange={(e) => setSelectedFormularioId(e.target.value as any)}
-                aria-label="Seleccionar plantilla oficial"
-                className="px-3.5 py-2 text-xs font-semibold bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-gray-900 shadow-2xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-colors cursor-pointer"
+            {/* Segmented Control Estilo Apple Settings */}
+            <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200/60 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setPlantillaSubTab('compra')}
+                className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  plantillaSubTab === 'compra'
+                    ? 'bg-white text-emerald-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                <option value="solicitud_mantenimiento">Solicitud de Mantenimiento / Compra (Flota)</option>
-                <option value="solicitud_carnet" disabled>Solicitud de Carnets (Próximamente)</option>
-                <option value="reporte_emergencia" disabled>Informe de Emergencia (Próximamente)</option>
-              </select>
+                <ShoppingCart className="w-4 h-4 mr-2 text-emerald-600" />
+                1. Solicitud de Compra / Mantenimiento
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPlantillaSubTab('combustible')}
+                className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  plantillaSubTab === 'combustible'
+                    ? 'bg-white text-amber-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Fuel className="w-4 h-4 mr-2 text-amber-600" />
+                2. Solicitud de Vales de Combustible
+              </button>
             </div>
           </div>
 
-          {/* Panel Dividido: Controles a la Izquierda, Previsualización en Vivo a la Derecha */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            
-            {/* LADO IZQUIERDO: CONTROLES DE LA PLANTILLA (ESTILO APPLE SETTINGS) */}
-            <div className="lg:col-span-6 space-y-4">
-              
-              {/* 1. Encabezado y Membrete */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-7 h-7 rounded-lg bg-blue-500 text-white flex items-center justify-center shadow-xs">
-                      <FileText className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-semibold text-gray-900">Encabezado y Títulos</h3>
-                      <p className="text-3xs text-gray-500">Membrete oficial que se imprime al tope del documento</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 space-y-3 bg-slate-50/40">
-                  <div>
-                    <label className="block text-2xs font-medium text-gray-600 mb-1">Título Institucional Superior</label>
-                    <input
-                      type="text"
-                      value={config.solicitudes_pdf_titulo || ''}
-                      onChange={(e) => setConfig({ ...config, solicitudes_pdf_titulo: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-semibold uppercase bg-white border border-slate-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-2xs"
-                      placeholder="CRUZ VERDE SALVADOREÑA"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-2xs font-medium text-gray-600 mb-1">Departamento Emisor</label>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_departamento || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_departamento: e.target.value })}
-                        className="w-full px-3 py-2 text-xs uppercase bg-white border border-slate-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-2xs"
-                        placeholder="DEPARTAMENTO ADMINISTRATIVO."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-2xs font-medium text-gray-600 mb-1">Nombre de la Hoja / Subtítulo</label>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_subtitulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_subtitulo: e.target.value })}
-                        className="w-full px-3 py-2 text-xs font-semibold uppercase bg-white border border-slate-200 rounded-xl text-blue-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-2xs"
-                        placeholder="HOJA DE SOLICITUD DE COMPRA."
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. Marca de Agua Oficial */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-500 text-white flex items-center justify-center shadow-xs">
-                      <Eye className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-semibold text-gray-900">Marca de Agua de Seguridad</h3>
-                      <p className="text-3xs text-gray-500">Impresión diagonal translúcida de autenticidad</p>
-                    </div>
-                  </div>
-                  {/* Switch iOS */}
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.solicitudes_pdf_watermark !== false}
-                      onChange={(e) => setConfig({ ...config, solicitudes_pdf_watermark: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                  </label>
-                </div>
-
-                {config.solicitudes_pdf_watermark !== false && (
-                  <div className="p-4 bg-slate-50/40 grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in">
-                    <div className="sm:col-span-2">
-                      <label className="block text-2xs font-medium text-gray-600 mb-1">Texto de Seguridad</label>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_watermark_text || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_watermark_text: e.target.value })}
-                        className="w-full px-3 py-2 text-xs uppercase bg-white border border-slate-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-2xs"
-                        placeholder="CRUZ VERDE SALVADOREÑA"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-2xs font-medium text-gray-600 mb-1">Intensidad</label>
-                      <select
-                        value={config.solicitudes_pdf_watermark_opacity || '0.08'}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_watermark_opacity: e.target.value })}
-                        aria-label="Intensidad de la marca de agua"
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-2xs cursor-pointer"
-                      >
-                        <option value="0.04">Tenue (4%)</option>
-                        <option value="0.08">Estándar (8%)</option>
-                        <option value="0.14">Fuerte (14%)</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Accesorios y Campos Visibles en la Hoja */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-                      <Shield className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-semibold text-gray-900">Campos y Secciones a Imprimir</h3>
-                      <p className="text-3xs text-gray-500">Activa o desactiva elementos según el protocolo</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50/40 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {[
-                    { key: 'solicitudes_pdf_mostrar_urgencia', label: 'Nivel de Prioridad / Urgencia', desc: 'Indica urgencia en la cabecera' },
-                    { key: 'solicitudes_pdf_mostrar_vehiculo', label: 'Placa y Datos de Vehículo', desc: 'Unidad de flota involucrada' },
-                    { key: 'solicitudes_pdf_mostrar_costos', label: 'Monto Estimado ($ USD)', desc: 'Costo calculado para compra' },
-                    { key: 'solicitudes_pdf_mostrar_proveedor', label: 'Taller o Proveedor Sugerido', desc: 'Recomendación del técnico' },
-                    { key: 'solicitudes_pdf_mostrar_fechahora', label: 'Hora Oficial El Salvador', desc: 'Estampa temporal de emisión' },
-                    { key: 'solicitudes_pdf_mostrar_cotizacion', label: 'Líneas de Cotización', desc: 'Espacio para adjuntos/cotización' },
-                  ].map((field) => {
-                    const isChecked = (config as any)[field.key] !== false;
-                    return (
-                      <div
-                        key={field.key}
-                        onClick={() => setConfig({ ...config, [field.key]: !isChecked })}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                          isChecked
-                            ? 'bg-white border-slate-200/90 shadow-2xs'
-                            : 'bg-transparent border-transparent opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <div className="pr-2">
-                          <span className="text-xs font-medium text-gray-800 block">{field.label}</span>
-                          <span className="text-3xs text-gray-400 block">{field.desc}</span>
-                        </div>
-                        <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                          isChecked ? 'bg-emerald-500 text-white' : 'border border-slate-300 text-transparent'
-                        }`}>
-                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 4. Firmas y Autorizaciones */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-7 h-7 rounded-lg bg-violet-500 text-white flex items-center justify-center shadow-xs">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-semibold text-gray-900">Firmas y Pie del Documento</h3>
-                      <p className="text-3xs text-gray-500">Títulos de cargos para los 3 bloques de aprobación</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 space-y-3 bg-slate-50/40">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    {/* Firma 1 */}
-                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
-                      <span className="text-3xs font-semibold uppercase tracking-wider text-gray-400 block">Firma 1 (Emisor)</span>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma1_titulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma1_titulo: e.target.value })}
-                        placeholder="SOLICITANTE"
-                        className="w-full px-2 py-1 text-2xs font-semibold uppercase bg-slate-50 border border-slate-200 rounded-lg text-gray-800 focus:bg-white outline-none"
-                      />
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma1_subtitulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma1_subtitulo: e.target.value })}
-                        placeholder="Director Seccional"
-                        className="w-full px-2 py-1 text-3xs bg-slate-50 border border-slate-200 rounded-lg text-gray-500 focus:bg-white outline-none"
-                      />
-                    </div>
-
-                    {/* Firma 2 */}
-                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
-                      <span className="text-3xs font-semibold uppercase tracking-wider text-gray-400 block">Firma 2 (Revisor)</span>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma2_titulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma2_titulo: e.target.value })}
-                        placeholder="Vo.Bo. JEFATURA"
-                        className="w-full px-2 py-1 text-2xs font-semibold uppercase bg-slate-50 border border-slate-200 rounded-lg text-gray-800 focus:bg-white outline-none"
-                      />
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma2_subtitulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma2_subtitulo: e.target.value })}
-                        placeholder="Administración Central"
-                        className="w-full px-2 py-1 text-3xs bg-slate-50 border border-slate-200 rounded-lg text-gray-500 focus:bg-white outline-none"
-                      />
-                    </div>
-
-                    {/* Firma 3 */}
-                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
-                      <span className="text-3xs font-semibold uppercase tracking-wider text-gray-400 block">Firma 3 (Aprobador)</span>
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma3_titulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma3_titulo: e.target.value })}
-                        placeholder="AUTORIZADO"
-                        className="w-full px-2 py-1 text-2xs font-semibold uppercase bg-slate-50 border border-slate-200 rounded-lg text-gray-800 focus:bg-white outline-none"
-                      />
-                      <input
-                        type="text"
-                        value={config.solicitudes_pdf_firma3_subtitulo || ''}
-                        onChange={(e) => setConfig({ ...config, solicitudes_pdf_firma3_subtitulo: e.target.value })}
-                        placeholder="Presidencia"
-                        className="w-full px-2 py-1 text-3xs bg-slate-50 border border-slate-200 rounded-lg text-gray-500 focus:bg-white outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-2xs font-medium text-gray-600 mb-1">Nota Legal al Pie de la Hoja</label>
-                    <textarea
-                      rows={2}
-                      value={config.solicitudes_pdf_pie_pagina || ''}
-                      onChange={(e) => setConfig({ ...config, solicitudes_pdf_pie_pagina: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-gray-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-2xs"
-                      placeholder="Texto institucional o base legal que aparecerá centrado al pie..."
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Botón Guardar Plantilla - Barra Flotante Estilo Apple */}
-              <div className="sticky bottom-4 z-20 bg-white/90 backdrop-blur-md p-3.5 rounded-2xl border border-slate-200/90 shadow-md flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-semibold text-gray-900 block">Plantilla de Solicitud de Compra</span>
-                  <span className="text-3xs text-gray-500">Cambios visibles en tiempo real en la vista previa</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSavePlantilla}
-                  disabled={savingSection === 'plantilla'}
-                  className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5 mr-1.5" />
-                  {savingSection === 'plantilla' ? 'Guardando...' : 'Guardar Plantilla'}
-                </button>
-              </div>
-
+          {/* Renderizado de Configuración Separada por Tipo de Solicitud */}
+          {plantillaSubTab === 'compra' ? (
+            <div className="animate-in fade-in duration-200">
+              <CompraTemplateConfig
+                config={compraConfig}
+                onSave={handleSaveCompraConfig}
+                saving={savingCompraConfig}
+              />
             </div>
-
-            {/* LADO DERECHO: PREVISUALIZACIÓN EN VIVO (ESTILO MACOS DOCUMENT VIEWER) */}
-            <div className="lg:col-span-6 sticky top-6">
-              <div className="bg-slate-900/95 rounded-2xl shadow-xl border border-slate-800/80 overflow-hidden backdrop-blur-md">
-                
-                {/* macOS Titlebar */}
-                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <div className="flex items-center space-x-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80"></div>
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
-                    </div>
-                    <span className="text-2xs font-medium text-slate-300 ml-2">
-                      Vista Previa Carta (Letter)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-1.5 text-3xs font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>En Vivo</span>
-                  </div>
-                </div>
-
-                {/* Hoja de Carta Renderizada */}
-                <div className="p-4 sm:p-6 bg-slate-950/40">
-                  <div className="bg-white text-black p-6 md:p-8 rounded-lg shadow-xl relative font-serif text-2xs select-none overflow-hidden min-h-[660px] flex flex-col justify-between border border-slate-200">
-                    
-                    {/* Marca de Agua en Vivo */}
-                    {config.solicitudes_pdf_watermark !== false && (
-                      <div 
-                        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0 overflow-hidden"
-                        style={{ opacity: Number(config.solicitudes_pdf_watermark_opacity || 0.08) }}
-                      >
-                        <span className="text-3xl md:text-4xl font-black uppercase text-gray-900 transform -rotate-45 text-center leading-relaxed">
-                          {config.solicitudes_pdf_watermark_text || 'CRUZ VERDE SALVADOREÑA'}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="relative z-10 space-y-4">
-                      {/* Encabezado */}
-                      <div className="flex items-start justify-between border-b-2 border-black pb-3">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-11 h-11 rounded-full border-2 border-emerald-800 flex flex-col items-center justify-center text-center p-0.5 shrink-0">
-                            <span className="text-4xs font-bold text-emerald-900 leading-none">CRUZ VERDE</span>
-                            <span className="text-base font-black text-emerald-800 leading-none my-0.5">+</span>
-                            <span className="text-4xs font-bold text-emerald-900 leading-none">EL SALVADOR</span>
-                          </div>
-                          <div>
-                            <h4 className="text-xs md:text-sm font-black text-gray-900 uppercase font-sans tracking-wide">
-                              {config.solicitudes_pdf_titulo || 'CRUZ VERDE SALVADOREÑA'}
-                            </h4>
-                            <h5 className="text-3xs md:text-2xs font-bold text-gray-800 uppercase font-sans tracking-wider mt-0.5">
-                              {config.solicitudes_pdf_departamento || 'DEPARTAMENTO ADMINISTRATIVO.'}
-                            </h5>
-                            <span className="text-4xs text-gray-500 uppercase font-sans block mt-0.5">
-                              República de El Salvador • Fundada para servir
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right font-sans text-3xs">
-                          <span className="font-bold text-blue-900 block text-2xs">CVS-SOL-2026-0045</span>
-                          {config.solicitudes_pdf_mostrar_fechahora !== false && (
-                            <>
-                              <span className="text-gray-500 block">Hora Oficial (UTC-6)</span>
-                              <span className="text-gray-800 font-semibold block">10:45 AM</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Subtítulo */}
-                      <div className="text-center my-2">
-                        <span className="text-xs font-black tracking-widest text-black uppercase underline decoration-2 underline-offset-4">
-                          {config.solicitudes_pdf_subtitulo || 'HOJA DE SOLICITUD DE COMPRA.'}
-                        </span>
-                      </div>
-
-                      {/* Campos de Prueba */}
-                      <div className="space-y-2.5 font-sans text-3xs">
-                        <div className="flex items-baseline">
-                          <span className="font-bold text-gray-900 w-32 shrink-0">Lugar y fecha:</span>
-                          <span className="border-b border-black flex-1 font-semibold text-gray-800 pb-0.5">
-                            San Salvador, 9 de septiembre de 2026
-                          </span>
-                        </div>
-
-                        <div className="flex items-baseline">
-                          <span className="font-bold text-gray-900 w-32 shrink-0">Solicitado por:</span>
-                          <span className="border-b border-black flex-1 font-bold text-gray-800 pb-0.5">
-                            Lic. Roberto Gómez (Director Seccional)
-                          </span>
-                        </div>
-
-                        <div className="flex items-baseline">
-                          <span className="font-bold text-gray-900 w-32 shrink-0">Seccional o dependencia:</span>
-                          <span className="border-b border-black flex-1 font-bold text-gray-900 pb-0.5">
-                            Seccional Santa Ana
-                          </span>
-                        </div>
-
-                        {config.solicitudes_pdf_mostrar_vehiculo !== false && (
-                          <div className="flex items-baseline bg-blue-50/50 p-1 rounded">
-                            <span className="font-bold text-blue-950 w-32 shrink-0">Unidad Vehicular:</span>
-                            <span className="font-bold text-blue-900 flex-1">
-                              Placa CVS-014 — Toyota Land Cruiser HZJ78 (Ambulancia Tipo A)
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-2 gap-3 pt-1">
-                          <div className="flex items-baseline">
-                            <span className="font-bold text-gray-900 w-20 shrink-0">Rubro:</span>
-                            <span className="border-b border-gray-400 flex-1 text-gray-800 pb-0.5 font-semibold">
-                              Repuestos y Mantenimiento Mecánico
-                            </span>
-                          </div>
-                          {config.solicitudes_pdf_mostrar_costos !== false && (
-                            <div className="flex items-baseline">
-                              <span className="font-bold text-gray-900 w-24 shrink-0">Monto Est.:</span>
-                              <span className="border-b border-gray-400 flex-1 font-bold text-gray-900 pb-0.5">
-                                $ 245.50 USD
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {config.solicitudes_pdf_mostrar_urgencia !== false && (
-                          <div className="flex items-baseline">
-                            <span className="font-bold text-gray-900 w-32 shrink-0">Nivel de Prioridad:</span>
-                            <span className="text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                              🟡 Urgente (Mantenimiento preventivo programado)
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Descripción */}
-                        <div className="pt-2">
-                          <span className="font-bold text-gray-900 block mb-1">
-                            Descripción del servicio o producto a adquirir:
-                          </span>
-                          <div className="border border-gray-400 rounded p-2.5 bg-gray-50/30 text-gray-800 leading-relaxed font-sans min-h-[90px]">
-                            Repuestos eq 231-145: Pastillas de frenos delanteros y traseros, kit de empaquetadura de bomba auxiliar de embrague y líquido DOT 4 para ambulancia institucional.
-                            {config.solicitudes_pdf_mostrar_proveedor !== false && (
-                              <p className="mt-2 text-4xs text-gray-600 italic">
-                                Proveedor sugerido: Taller Central / Repuestos Los Andes
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Firmas en Vivo */}
-                    <div className="relative z-10 pt-8 pb-2">
-                      <div className="grid grid-cols-3 gap-3 text-center font-sans">
-                        
-                        <div className="flex flex-col items-center">
-                          <div className="w-full border-b border-black pb-1 mb-1">
-                            <span className="text-4xs font-bold text-gray-900 block">Lic. Roberto Gómez</span>
-                          </div>
-                          <span className="text-3xs font-black uppercase text-gray-900">
-                            {config.solicitudes_pdf_firma1_titulo || 'Firma: SOLICITANTE'}
-                          </span>
-                          <span className="text-4xs text-gray-500 uppercase mt-0.5">
-                            {config.solicitudes_pdf_firma1_subtitulo || 'Director Seccional'}
-                          </span>
-                        </div>
-
-                        <div className="flex flex-col items-center">
-                          <div className="w-10 h-10 rounded-full border border-dashed border-gray-400 flex items-center justify-center mb-1">
-                            <span className="text-4xs text-gray-400 uppercase">Sello</span>
-                          </div>
-                          <span className="text-3xs font-black uppercase text-gray-900">
-                            {config.solicitudes_pdf_firma2_titulo || 'Vo.Bo. Jefatura'}
-                          </span>
-                          <span className="text-4xs text-gray-500 uppercase mt-0.5">
-                            {config.solicitudes_pdf_firma2_subtitulo || 'Administración Central'}
-                          </span>
-                        </div>
-
-                        <div className="flex flex-col items-center">
-                          <div className="w-full border-b border-black pb-1 mb-1">
-                            <span className="text-4xs font-bold text-gray-400 italic">Espacio de Autorización</span>
-                          </div>
-                          <span className="text-3xs font-black uppercase text-gray-900">
-                            {config.solicitudes_pdf_firma3_titulo || 'Autorizado'}
-                          </span>
-                          <span className="text-4xs text-gray-500 uppercase mt-0.5">
-                            {config.solicitudes_pdf_firma3_subtitulo || 'Presidencia'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Nota al pie */}
-                      {config.solicitudes_pdf_pie_pagina && (
-                        <div className="mt-4 pt-2 border-t border-gray-200 text-center">
-                          <p className="text-4xs text-gray-500 italic">
-                            {config.solicitudes_pdf_pie_pagina}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                  </div>
-                </div>
-              </div>
+          ) : (
+            <div className="animate-in fade-in duration-200">
+              <CombustibleTemplateConfig
+                config={combustibleConfig}
+                onSave={handleSaveCombustibleConfig}
+                saving={savingCombustibleConfig}
+              />
             </div>
-
-          </div>
+          )}
 
         </div>
       )}
