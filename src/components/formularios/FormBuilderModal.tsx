@@ -82,7 +82,7 @@ export default function FormBuilderModal({
         newField = { id, tipo, label: 'Documento de Identidad (DUI)', placeholder: '00000000-0', required: true, width: '50%' };
         break;
       case 'seccional':
-        newField = { id, tipo, label: 'Seccional o Filial', placeholder: 'Seleccione su seccional', required: true, width: '50%' };
+        newField = { id, tipo, label: 'Seccional', placeholder: 'Seleccione su seccional', required: true, width: '50%' };
         break;
       case 'rango':
         newField = { 
@@ -336,7 +336,7 @@ export default function FormBuilderModal({
                   >
                     <MapPin className="w-5 h-5 text-emerald-700 group-hover:scale-110 transition-transform mb-1" />
                     <span className="text-xs font-semibold text-gray-800">Seccional</span>
-                    <span className="text-[10px] text-gray-400">Filiales oficiales</span>
+                    <span className="text-[10px] text-gray-400">Seccionales oficiales</span>
                   </button>
 
                   <button
@@ -918,7 +918,7 @@ export default function FormBuilderModal({
                         />
                       ) : campo.tipo === 'select' || campo.tipo === 'seccional' || campo.tipo === 'rango' ? (
                         <select className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs text-gray-900 focus:outline-hidden focus:border-emerald-500">
-                          <option value="">{campo.placeholder || 'Seleccione una opción...'}</option>
+                          <option value="">{(campo.placeholder || 'Seleccione una opción...').replace(/ o filial/gi, '').replace(/ \/ filial/gi, '')}</option>
                           {campo.tipo === 'seccional' && seccionalesList.length > 0
                             ? seccionalesList.map((sec, i) => <option key={i} value={sec}>{sec}</option>)
                             : campo.options?.map((op, i) => <option key={i} value={op}>{op}</option>)

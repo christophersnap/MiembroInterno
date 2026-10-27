@@ -180,16 +180,7 @@ export default function SolicitudCarnet() {
           .from('socorristas')
           .getPublicUrl(fileName);
         fotoUrl = publicUrl;
-
-        // Actualizar directamente la foto en el perfil del socorrista para que quede guardada de inmediato
-        try {
-          await supabase
-            .from('socorristas')
-            .update({ foto_url: fotoUrl })
-            .eq('id', socorrista.id);
-        } catch (socErr) {
-          console.warn('Error actualizando foto directamente en socorrista:', socErr);
-        }
+        // La foto queda asociada a la solicitud (solicitudes_carnet) para que el administrador la revise y apruebe en Generar Carnet
       }
 
       const solicitudPayload = {

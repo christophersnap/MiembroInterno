@@ -1156,7 +1156,7 @@ export default function Configuracion() {
                     { id: 'carnetId', label: 'Número de Carnet', desc: 'Código oficial (ej: CV-1024)' },
                     { id: 'cargoInstitucional', label: 'Rango / Cargo', desc: 'Socorrista, TEM, Rescatista' },
                     { id: 'cargoAdministrativo', label: 'Cargo Administrativo', desc: 'Jefatura, coordinador, etc.' },
-                    { id: 'seccional', label: 'Seccional o Filial', desc: 'Base o filial asignada' },
+                    { id: 'seccional', label: 'Seccional', desc: 'Seccional asignada' },
                     { id: 'estado', label: 'Estado de Membresía', desc: 'Insignia Activo o Inactivo' },
                   ].map(f => {
                     const isChecked = config.verificacion_fields?.[f.id] !== false;

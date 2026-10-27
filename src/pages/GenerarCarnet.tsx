@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye, Sliders, Shield } from 'lucide-react';
+import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye, Sliders, Shield, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import * as QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -15,7 +15,7 @@ export const VERIFICATION_FIELD_DEFINITIONS = [
   { id: 'nombre', label: 'Nombre Completo' },
   { id: 'cargoInstitucional', label: 'Cargo Institucional' },
   { id: 'cargoAdministrativo', label: 'Cargo Administrativo' },
-  { id: 'seccional', label: 'Seccional o Filial' },
+  { id: 'seccional', label: 'Seccional' },
   { id: 'estado', label: 'Estado de Membresía' },
   { id: 'dui', label: 'Documento DUI' },
   { id: 'telefono', label: 'Teléfono de Contacto' },
@@ -146,6 +146,10 @@ export default function GenerarCarnet() {
   // Presets, Templates, Fonts
   const [presets, setPresets] = useState<any[]>([]);
   const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
+  const [templatesExpanded, setTemplatesExpanded] = useState<boolean>(true);
+  const [previewSolicitudPhoto, setPreviewSolicitudPhoto] = useState<boolean>(false);
+  const [approvingPhoto, setApprovingPhoto] = useState<boolean>(false);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | number | null>(null);
   const [savedFonts, setSavedFonts] = useState<any[]>([]);
   const [presetName, setPresetName] = useState('');
   const [showPresetModal, setShowPresetModal] = useState(false);
@@ -171,12 +175,13 @@ export default function GenerarCarnet() {
         const { data: solData } = await supabase
           .from('solicitudes_carnet')
           .select('socorrista_id, fecha_solicitud, estado_solicitud, tipo_solicitud, foto_url, motivo')
+          .eq('estado_solicitud', 'Pendiente')
           .order('fecha_solicitud', { ascending: false });
         
         if (solData) {
           solData.forEach(sol => {
             if (!solicitudesMap[sol.socorrista_id]) {
-              solicitudesMap[sol.socorrista_id] = sol; // Get latest
+              solicitudesMap[sol.socorrista_id] = sol; // Get latest pendiente
             }
           });
         }
@@ -186,15 +191,15 @@ export default function GenerarCarnet() {
       try {
         const { data: backupSols } = await supabase
           .from('configuracion')
-          .select('valor')
+          .select('clave, valor')
           .like('clave', 'solicitud_carnet_%');
 
         if (backupSols) {
           backupSols.forEach(row => {
             try {
               const sol = JSON.parse(row.valor);
-              if (sol && sol.socorrista_id && !solicitudesMap[sol.socorrista_id]) {
-                solicitudesMap[sol.socorrista_id] = sol;
+              if (sol && sol.socorrista_id && sol.estado_solicitud === 'Pendiente' && !solicitudesMap[sol.socorrista_id]) {
+                solicitudesMap[sol.socorrista_id] = { ...sol, backup_key: row.clave };
               }
             } catch (err) {}
           });
@@ -216,6 +221,23 @@ export default function GenerarCarnet() {
           solicitud: solicitudesMap[s.id] || null
         };
       });
+
+      // Si algún socorrista no tiene foto_url en Supabase, verificar si SQLite la tiene
+      try {
+        const apiRes = await fetch(getApiUrl('/api/socorristas'));
+        if (apiRes.ok) {
+          const apiSocorristas = await apiRes.json();
+          if (Array.isArray(apiSocorristas)) {
+            const apiMap = new Map(apiSocorristas.map((as: any) => [as.id, as]));
+            mappedData.forEach(s => {
+              const match: any = apiMap.get(s.id);
+              if (match && !s.foto_url && match.foto_url) {
+                s.foto_url = match.foto_url;
+              }
+            });
+          }
+        }
+      } catch (apiErr) {}
       
       // Check if carnet_generado_url is missing from the first record (meaning column doesn't exist)
       if (mappedData.length > 0 && mappedData[0].carnet_generado_url === undefined) {
@@ -505,6 +527,7 @@ export default function GenerarCarnet() {
   // Al seleccionar un socorrista, cargar todos los ajustes que se realizaron previamente a su carnet
   const handleSelectSocorrista = async (socorrista: any) => {
     setSelectedSocorrista(socorrista);
+    setPreviewSolicitudPhoto(false);
     setLoadedSocorristaAjustes(false);
 
     let loadedConfig: any = null;
@@ -681,7 +704,133 @@ export default function GenerarCarnet() {
     img.crossOrigin = "anonymous";
     img.onload = () => setTemplateImage(img);
     img.src = url;
-    setShowTemplateModal(false);
+  };
+
+  const deleteSavedTemplate = async (templateId: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('¿Deseas eliminar esta plantilla guardada del mosaico?')) return;
+    setDeletingTemplateId(templateId);
+    try {
+      const { error } = await supabase.from('templates').delete().eq('id', templateId);
+      if (error) throw error;
+      setSavedTemplates(prev => prev.filter(t => t.id !== templateId));
+    } catch (err: any) {
+      console.warn('Error eliminando plantilla:', err);
+      setSavedTemplates(prev => prev.filter(t => t.id !== templateId));
+    } finally {
+      setDeletingTemplateId(null);
+    }
+  };
+
+  const handleAprobarFotoSolicitud = async () => {
+    if (!selectedSocorrista || !selectedSocorrista.solicitud?.foto_url) return;
+    const newFoto = selectedSocorrista.solicitud.foto_url;
+    
+    if (!confirm(`¿Aprobar e incorporar esta nueva fotografía al perfil y carnet de ${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido}?`)) return;
+
+    setApprovingPhoto(true);
+    try {
+      // 1. Actualizar foto_url en socorristas (Supabase)
+      const { error: supaErr } = await supabase
+        .from('socorristas')
+        .update({ foto_url: newFoto })
+        .eq('id', selectedSocorrista.id);
+
+      if (supaErr) console.warn('Aviso actualizando foto en Supabase:', supaErr);
+
+      // 2. Actualizar foto_url en backend SQLite
+      try {
+        await fetch(getApiUrl(`/api/socorristas/${selectedSocorrista.id}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ foto_url: newFoto })
+        });
+      } catch (e) {}
+
+      // 3. Marcar solicitud como 'Aprobada' en solicitudes_carnet
+      try {
+        await supabase
+          .from('solicitudes_carnet')
+          .update({ estado_solicitud: 'Aprobada' })
+          .eq('socorrista_id', selectedSocorrista.id);
+      } catch (e) {}
+
+      // 4. Actualizar respaldo en configuracion si existe
+      if (selectedSocorrista.solicitud.backup_key) {
+        try {
+          await supabase
+            .from('configuracion')
+            .delete()
+            .eq('clave', selectedSocorrista.solicitud.backup_key);
+        } catch (e) {}
+      }
+
+      // 5. Actualizar estado local inmediatamente
+      const updatedSoc = {
+        ...selectedSocorrista,
+        foto_url: newFoto,
+        solicitud: null
+      };
+
+      setSelectedSocorrista(updatedSoc);
+      setPreviewSolicitudPhoto(false);
+
+      // Actualizar en la lista de socorristas
+      setSocorristas(prev => prev.map(s => s.id === updatedSoc.id ? { ...s, foto_url: newFoto, solicitud: null } : s));
+
+      // Registrar actividad
+      await logActivity('Aprobó fotografía de solicitud de carnet', 'Socorrista', selectedSocorrista.id, {
+        socorrista: `${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido}`,
+        carnet: selectedSocorrista.carnet
+      });
+
+      alert('¡Fotografía aprobada exitosamente! Se ha asignado al perfil y carnet del socorrista.');
+    } catch (err: any) {
+      console.error('Error aprobando fotografía:', err);
+      alert('Error al aprobar la fotografía: ' + (err.message || 'Error de conexión'));
+    } finally {
+      setApprovingPhoto(false);
+    }
+  };
+
+  const handleRechazarSolicitudFoto = async () => {
+    if (!selectedSocorrista || !selectedSocorrista.solicitud) return;
+    if (!confirm('¿Deseas rechazar esta solicitud de carnet y descartar la fotografía enviada?')) return;
+
+    try {
+      // 1. Marcar como Rechazada en Supabase
+      try {
+        await supabase
+          .from('solicitudes_carnet')
+          .update({ estado_solicitud: 'Rechazada' })
+          .eq('socorrista_id', selectedSocorrista.id);
+      } catch (e) {}
+
+      // 2. Eliminar respaldo en configuracion
+      if (selectedSocorrista.solicitud.backup_key) {
+        try {
+          await supabase
+            .from('configuracion')
+            .delete()
+            .eq('clave', selectedSocorrista.solicitud.backup_key);
+        } catch (e) {}
+      }
+
+      // 3. Actualizar estado local
+      const updatedSoc = {
+        ...selectedSocorrista,
+        solicitud: null
+      };
+
+      setSelectedSocorrista(updatedSoc);
+      setPreviewSolicitudPhoto(false);
+      setSocorristas(prev => prev.map(s => s.id === updatedSoc.id ? { ...s, solicitud: null } : s));
+
+      alert('La solicitud ha sido rechazada. Se mantendrá la fotografía oficial previa del socorrista.');
+    } catch (err) {
+      console.error('Error rechazando solicitud:', err);
+      alert('Error al rechazar solicitud.');
+    }
   };
 
   const loadSavedFont = async (font: any) => {
@@ -701,7 +850,7 @@ export default function GenerarCarnet() {
       drawCarnet().catch(e => console.error('Error drawing carnet:', e));
     }
   }, [
-    templateImage, selectedSocorrista, customFontName, 
+    templateImage, selectedSocorrista, previewSolicitudPhoto, customFontName, 
     fontSizeNames, fontColorNames, posNamesX, posNamesY,
     fontSizeLastNames, fontColorLastNames, posLastNamesX, posLastNamesY,
     fontSizeCargo, fontColorCargo, bgColorCargo, borderRadiusCargo, posCargoX, posCargoY, showBgCargo, bgCargoWidth, bgCargoHeight,
@@ -728,8 +877,11 @@ export default function GenerarCarnet() {
     // Draw background
     ctx.drawImage(templateImage, 0, 0);
 
-    // Draw photo (prioritize new photo from solicitud if present, otherwise profile photo)
-    const effectivePhotoUrl = selectedSocorrista.solicitud?.foto_url || selectedSocorrista.foto_url;
+    // Draw photo: Usar estrictamente la foto oficial del perfil del socorrista.
+    // Solo si el administrador activó expresamente la vista previa de la foto solicitada, se previsualiza esa en el carnet.
+    const effectivePhotoUrl = (previewSolicitudPhoto && selectedSocorrista.solicitud?.foto_url)
+      ? selectedSocorrista.solicitud.foto_url
+      : (selectedSocorrista.foto_url || null);
     if (effectivePhotoUrl) {
       try {
         const photo = new Image();
@@ -1219,23 +1371,115 @@ export default function GenerarCarnet() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Controles con scroll independiente */}
         <div className="lg:col-span-5 space-y-6 max-h-[calc(100vh-100px)] overflow-y-auto pr-2 custom-scrollbar">
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">1. Plantilla de Fondo</h2>
-            <div className="flex space-x-2 mb-4">
-              <button 
-                onClick={() => setShowTemplateModal(true)}
-                className="flex-1 inline-flex items-center justify-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+          <div className="bg-white shadow rounded-lg p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">1. Plantilla de Fondo</h2>
+                <p className="text-2xs text-gray-500">Elige el diseño oficial o sube un nuevo fondo para el carnet</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTemplatesExpanded(!templatesExpanded)}
+                className="inline-flex items-center text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
               >
-                <ImageIcon className="-ml-1 mr-2 h-5 w-5 text-gray-400" />
-                Usar Guardada
+                <ImageIcon className="w-3.5 h-3.5 mr-1.5" />
+                <span>{templatesExpanded ? 'Ocultar Mosaico' : `Ver Mosaico (${savedTemplates.length})`}</span>
+                {templatesExpanded ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
               </button>
-              <label className="flex-1 inline-flex items-center justify-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-primary-hover cursor-pointer">
-                <Plus className="-ml-1 mr-2 h-5 w-5" />
-                Subir Nueva
+            </div>
+
+            {/* Barra de acciones rápidas */}
+            <div className="flex items-center gap-2 mb-3">
+              <label className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-dashed border-emerald-400 bg-emerald-50/50 hover:bg-emerald-100/60 rounded-xl text-xs font-bold text-emerald-800 transition-all cursor-pointer shadow-2xs">
+                <Plus className="w-4 h-4 mr-1.5 text-emerald-600" />
+                Subir Nueva Plantilla
                 <input type="file" className="sr-only" accept="image/*" onChange={handleTemplateUpload} />
               </label>
+
+              {templateImage && (
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-2xs text-slate-600 font-mono flex items-center shrink-0">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span>
+                  {templateImage.width}×{templateImage.height}px
+                </div>
+              )}
             </div>
-            {templateImage && <p className="mt-2 text-sm text-green-600 font-medium text-center">Plantilla cargada</p>}
+
+            {/* Vista Mosaico Expandible */}
+            {templatesExpanded && (
+              <div className="mt-2 pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-2xs font-bold uppercase tracking-wider text-gray-400">
+                    Mosaico de Plantillas ({savedTemplates.length})
+                  </span>
+                  <span className="text-3xs text-gray-400">Haz clic para seleccionar</span>
+                </div>
+
+                {savedTemplates.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                    {savedTemplates.map((t) => {
+                      const isSelected = currentTemplateUrl === t.url;
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => loadSavedTemplate(t.url)}
+                          className={`group relative rounded-xl border-2 transition-all cursor-pointer overflow-hidden flex flex-col bg-white shadow-2xs ${
+                            isSelected
+                              ? 'border-emerald-600 ring-2 ring-emerald-500/30 bg-emerald-50/20'
+                              : 'border-gray-200 hover:border-emerald-400 hover:shadow-xs'
+                          }`}
+                        >
+                          <div className="w-full h-28 bg-slate-100/80 flex items-center justify-center p-1.5 relative overflow-hidden">
+                            <img
+                              src={t.url}
+                              alt={t.nombre}
+                              className="max-w-full max-h-full object-contain drop-shadow-xs"
+                              crossOrigin="anonymous"
+                              referrerPolicy="no-referrer"
+                            />
+                            {isSelected && (
+                              <div className="absolute top-1.5 right-1.5 bg-emerald-600 text-white rounded-full p-1 shadow-md">
+                                <Check className="w-3 h-3 stroke-[3]" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="p-2 bg-white flex items-center justify-between border-t border-gray-100">
+                            <p className="text-2xs font-semibold text-gray-800 truncate flex-1" title={t.nombre}>
+                              {t.nombre}
+                            </p>
+                            <div className="flex items-center space-x-1 shrink-0 ml-1">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setPreviewTemplate(t.url); }}
+                                className="p-1 text-gray-400 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors"
+                                title="Ver en tamaño completo"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => deleteSavedTemplate(t.id, e)}
+                                disabled={deletingTemplateId === t.id}
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Eliminar plantilla"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                    <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-gray-600">No hay plantillas guardadas</p>
+                    <p className="text-2xs text-gray-400 mt-0.5">Usa el botón "Subir Nueva Plantilla" para agregar una.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-white shadow rounded-lg p-6">
@@ -1357,41 +1601,111 @@ export default function GenerarCarnet() {
           </div>
 
           {selectedSocorrista?.solicitud && selectedSocorrista.solicitud.estado_solicitud === 'Pendiente' && (
-            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 shadow rounded-lg">
-              <h3 className="text-sm font-medium text-yellow-800 mb-2 border-b border-yellow-200 pb-2">
-                Solicitud en Proceso: {selectedSocorrista.solicitud.tipo_solicitud}
-              </h3>
-              <p className="text-xs text-yellow-700 mb-2">Fecha: {new Date(selectedSocorrista.solicitud.fecha_solicitud).toLocaleDateString()}</p>
+            <div className="bg-amber-50/90 border-2 border-amber-300 p-4 shadow-sm rounded-2xl">
+              <div className="flex items-center justify-between pb-2 border-b border-amber-200/80 mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                    Solicitud de Carnet: {selectedSocorrista.solicitud.tipo_solicitud}
+                  </h3>
+                </div>
+                <span className="text-3xs text-amber-700 font-mono bg-amber-100/70 px-2 py-0.5 rounded">
+                  {new Date(selectedSocorrista.solicitud.fecha_solicitud).toLocaleDateString()}
+                </span>
+              </div>
+
               {selectedSocorrista.solicitud.motivo && (
-                <p className="text-xs text-yellow-700 mb-3">Motivo: {selectedSocorrista.solicitud.motivo}</p>
+                <p className="text-xs text-amber-800 mb-3 bg-white/80 p-2.5 rounded-xl border border-amber-200">
+                  <strong className="font-semibold text-amber-900">Motivo:</strong> {selectedSocorrista.solicitud.motivo}
+                </p>
               )}
-              {selectedSocorrista.solicitud.foto_url && (
-                <div className="mt-3">
-                  <p className="text-xs font-semibold text-yellow-800 mb-2">Nueva Fotografía Solicitada:</p>
-                  <div className="flex items-center space-x-4">
-                    <img src={selectedSocorrista.solicitud.foto_url} alt="Recortada" className="h-16 w-16 rounded-full object-cover border border-yellow-300" />
+
+              {selectedSocorrista.solicitud.foto_url ? (
+                <div className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-gray-900 block">Fotografía Solicitada</span>
+                      <span className="text-3xs text-gray-500">Revisa la foto antes de aprobarla o asignarla</span>
+                    </div>
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (confirm('¿Aplicar esta nueva fotografía al perfil del socorrista?')) {
-                          try {
-                            const { error } = await supabase
-                              .from('socorristas')
-                              .update({ foto_url: selectedSocorrista.solicitud.foto_url })
-                              .eq('id', selectedSocorrista.id);
-                            if (error) throw error;
-                            alert('Fotografía actualizada. Por favor vuelva a seleccionar el socorrista para actualizar la previsualización.');
-                            fetchData();
-                          } catch (e) {
-                            alert('Error al actualizar fotografía.');
-                          }
-                        }
-                      }}
-                      className="text-xs font-medium text-white bg-yellow-600 hover:bg-yellow-700 px-3 py-1.5 rounded"
+                      onClick={() => setPreviewSolicitudPhoto(!previewSolicitudPhoto)}
+                      className={`text-2xs font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                        previewSolicitudPhoto
+                          ? 'bg-amber-500 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
                     >
-                      Aprobar Fotografía
+                      <Eye className="w-3.5 h-3.5" />
+                      {previewSolicitudPhoto ? 'Viendo Solicitada en Carnet' : 'Ver Solicitada en Carnet'}
                     </button>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className={`p-2.5 rounded-xl border flex flex-col items-center transition-all ${
+                      !previewSolicitudPhoto ? 'bg-emerald-50/50 border-emerald-300 ring-2 ring-emerald-500/20' : 'bg-gray-50 border-gray-200'
+                    }`}>
+                      <span className="text-3xs font-bold uppercase text-gray-600 mb-1.5">Foto Actual de Perfil</span>
+                      {selectedSocorrista.foto_url ? (
+                        <img
+                          src={selectedSocorrista.foto_url}
+                          alt="Foto actual oficial"
+                          className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 shadow-xs"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-3xs font-bold">
+                          Sin foto
+                        </div>
+                      )}
+                      <span className="text-3xs text-emerald-700 font-semibold mt-1">
+                        {!previewSolicitudPhoto ? '● En uso oficial' : 'Oficial'}
+                      </span>
+                    </div>
+
+                    <div className={`p-2.5 rounded-xl border flex flex-col items-center transition-all ${
+                      previewSolicitudPhoto ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-500/20' : 'bg-gray-50 border-gray-200'
+                    }`}>
+                      <span className="text-3xs font-bold uppercase text-amber-800 mb-1.5">Nueva Foto Solicitada</span>
+                      <img
+                        src={selectedSocorrista.solicitud.foto_url}
+                        alt="Nueva foto solicitada"
+                        className="w-16 h-16 rounded-full object-cover border-2 border-amber-500 shadow-xs"
+                      />
+                      <span className="text-3xs text-amber-700 font-semibold mt-1">
+                        {previewSolicitudPhoto ? '● Previsualizando' : 'Pendiente de aprobar'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={approvingPhoto}
+                      onClick={handleAprobarFotoSolicitud}
+                      className="flex-1 inline-flex items-center justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-3.5 h-3.5 mr-1.5" />
+                      {approvingPhoto ? 'Aprobando...' : 'Aprobar Foto y Asignar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRechazarSolicitudFoto}
+                      className="px-3 py-2 bg-white hover:bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-amber-800">Solicitud sin nueva fotografía</span>
+                  <button
+                    type="button"
+                    onClick={handleRechazarSolicitudFoto}
+                    className="text-xs text-red-600 hover:underline font-semibold"
+                  >
+                    Marcar como procesada
+                  </button>
                 </div>
               )}
             </div>
@@ -2074,50 +2388,6 @@ export default function GenerarCarnet() {
         </div>
       )}
 
-      {showTemplateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h3 className="text-lg font-medium text-gray-900">Plantillas Guardadas</h3>
-              <button onClick={() => setShowTemplateModal(false)} className="text-gray-400 hover:text-gray-500">
-                <XCircle className="h-6 w-6" />
-              </button>
-            </div>
-            <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-              {savedTemplates.length > 0 ? savedTemplates.map(t => (
-                <div 
-                  key={t.id} 
-                  className="group relative border border-gray-200 rounded-lg overflow-hidden hover:border-primary transition-colors cursor-pointer"
-                  onClick={() => loadSavedTemplate(t.url)}
-                >
-                  <div className="w-full h-32 bg-gray-100 flex items-center justify-center p-2 rounded-t-lg">
-                    <img 
-                      src={t.url} 
-                      alt={t.nombre} 
-                      className="max-w-full max-h-full object-contain drop-shadow-md bg-white" 
-                      crossOrigin="anonymous"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div className="p-2 bg-white border-t border-gray-200 flex justify-between items-center">
-                    <p className="text-xs font-medium text-gray-900 truncate flex-1">{t.nombre}</p>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setPreviewTemplate(t.url); }}
-                      className="ml-2 text-gray-400 hover:text-primary"
-                      title="Previsualizar"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-5 transition-opacity pointer-events-none"></div>
-                </div>
-              )) : (
-                <div className="col-span-full py-10 text-center text-gray-500">No hay plantillas guardadas</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {previewTemplate && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-75 p-4" onClick={() => setPreviewTemplate(null)}>

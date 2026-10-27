@@ -516,7 +516,9 @@ export default function PublicFormulario() {
                         hasError ? 'border-red-300 bg-red-50/20' : 'border-gray-300'
                       }`}
                     >
-                      <option value="">{campo.placeholder || 'Seleccione su seccional o filial...'}</option>
+                      <option value="">
+                        {(campo.placeholder || 'Seleccione su seccional...').replace(/ o filial/gi, '').replace(/ \/ filial/gi, '').replace(/filial/gi, 'seccional')}
+                      </option>
                       {seccionales.map((sec, i) => (
                         <option key={i} value={sec}>{sec}</option>
                       ))}
