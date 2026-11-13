@@ -13,6 +13,9 @@ import {
   ShieldCheck,
   Maximize2,
   RefreshCw,
+  Video,
+  VideoOff,
+  KeyRound,
 } from 'lucide-react';
 import getCroppedImg from '../../utils/cropImage';
 
@@ -49,6 +52,9 @@ const PHOTO_RULES = [
   },
 ];
 
+type CameraPermissionState = 'prompt' | 'granted' | 'denied' | 'unsupported';
+type CameraErrorKind = 'no-device' | 'permission-denied' | 'in-use' | 'unsupported' | 'other' | null;
+
 export default function CarnetPhotoCaptureModal({
   isOpen,
   onClose,
@@ -59,12 +65,21 @@ export default function CarnetPhotoCaptureModal({
   const [step, setStep] = useState<'guidelines' | 'camera' | 'crop'>(initialStep);
   const [zoomGuideModal, setZoomGuideModal] = useState(false);
 
+  // Hardware & Permission detection state
+  const [checkingHardware, setCheckingHardware] = useState(false);
+  const [hasCameraHardware, setHasCameraHardware] = useState<boolean | null>(null);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [permissionState, setPermissionState] = useState<CameraPermissionState>('prompt');
+
   // Camera state
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraErrorKind, setCameraErrorKind] = useState<CameraErrorKind>(null);
   const [cameraReady, setCameraReady] = useState(false);
+  const [requestingCamera, setRequestingCamera] = useState(false);
 
   // Cropper state
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -72,8 +87,63 @@ export default function CarnetPhotoCaptureModal({
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
   const [processingCrop, setProcessingCrop] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const detectCameraHardwareAndPermissions = useCallback(async () => {
+    setCheckingHardware(true);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setHasCameraHardware(false);
+        setPermissionState('unsupported');
+        setVideoDevices([]);
+        return { hasHardware: false, devices: [] as MediaDeviceInfo[] };
+      }
+
+      if (navigator.permissions && navigator.permissions.query) {
+        try {
+          const permStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+          if (permStatus.state === 'granted' || permStatus.state === 'denied' || permStatus.state === 'prompt') {
+            setPermissionState(permStatus.state);
+          }
+          permStatus.onchange = () => {
+            if (
+              permStatus.state === 'granted' ||
+              permStatus.state === 'denied' ||
+              permStatus.state === 'prompt'
+            ) {
+              setPermissionState(permStatus.state);
+            }
+          };
+        } catch {
+          // Safari/Firefox may not support permissions.query({ name: 'camera' })
+        }
+      }
+
+      let inputs: MediaDeviceInfo[] = [];
+      if (navigator.mediaDevices.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        inputs = devices.filter((d) => d.kind === 'videoinput');
+        setVideoDevices(inputs);
+        setHasCameraHardware(inputs.length > 0);
+        if (inputs.length > 0 && !selectedDeviceId) {
+          const firstWithId = inputs.find((d) => d.deviceId);
+          if (firstWithId) setSelectedDeviceId(firstWithId.deviceId);
+        }
+      } else {
+        setHasCameraHardware(true);
+      }
+
+      return { hasHardware: inputs.length > 0 || !navigator.mediaDevices.enumerateDevices, devices: inputs };
+    } catch (err) {
+      console.warn('Error verificando hardware de cámara:', err);
+      setHasCameraHardware(null);
+      return { hasHardware: true, devices: [] as MediaDeviceInfo[] };
+    } finally {
+      setCheckingHardware(false);
+    }
+  }, [selectedDeviceId]);
 
   const stopCameraStream = useCallback(() => {
     if (streamRef.current) {
@@ -91,28 +161,72 @@ export default function CarnetPhotoCaptureModal({
   }, []);
 
   const startCamera = useCallback(
-    async (mode: 'user' | 'environment') => {
+    async (mode: 'user' | 'environment', explicitDeviceId?: string) => {
       stopCameraStream();
       setCameraError(null);
+      setCameraErrorKind(null);
       setCameraReady(false);
+      setRequestingCamera(true);
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraErrorKind('unsupported');
         setCameraError(
-          'Tu navegador o entorno no permite acceso directo a la cámara. Puedes subir una fotografía desde archivo.'
+          'Tu navegador o contexto actual no permite acceso directo a la cámara (requiere HTTPS o navegador compatible). Puedes subir una fotografía desde archivo.'
         );
+        setRequestingCamera(false);
         return;
       }
 
       try {
+        // Verify hardware first when enumerateDevices is supported
+        if (navigator.mediaDevices.enumerateDevices) {
+          const allDevs = await navigator.mediaDevices.enumerateDevices();
+          const videoDevs = allDevs.filter((d) => d.kind === 'videoinput');
+          setVideoDevices(videoDevs);
+          setHasCameraHardware(videoDevs.length > 0);
+          if (videoDevs.length === 0) {
+            setCameraErrorKind('no-device');
+            setCameraError(
+              'No se detectó ninguna cámara física conectada en este dispositivo. Conecta una cámara web o sube una fotografía desde tu equipo.'
+            );
+            setRequestingCamera(false);
+            return;
+          }
+        }
+
+        const videoConstraints: MediaTrackConstraints = explicitDeviceId
+          ? {
+              deviceId: { exact: explicitDeviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 960 },
+            }
+          : {
+              facingMode: mode,
+              width: { ideal: 1280 },
+              height: { ideal: 960 },
+            };
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: mode,
-            width: { ideal: 1280 },
-            height: { ideal: 960 },
-          },
+          video: videoConstraints,
           audio: false,
         });
+
         streamRef.current = stream;
+        setPermissionState('granted');
+        setHasCameraHardware(true);
+
+        // Refresh device labels & active deviceId now that permission is granted
+        if (navigator.mediaDevices.enumerateDevices) {
+          const updatedDevs = await navigator.mediaDevices.enumerateDevices();
+          const updatedVideoDevs = updatedDevs.filter((d) => d.kind === 'videoinput');
+          setVideoDevices(updatedVideoDevs);
+          const activeTrack = stream.getVideoTracks()[0];
+          const activeSettings = activeTrack?.getSettings?.();
+          if (activeSettings?.deviceId) {
+            setSelectedDeviceId(activeSettings.deviceId);
+          }
+        }
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -122,9 +236,32 @@ export default function CarnetPhotoCaptureModal({
         }
       } catch (err: any) {
         console.error('Camera error:', err);
-        setCameraError(
-          'No se pudo acceder a la cámara. Verifica los permisos del navegador o sube una fotografía desde tu dispositivo.'
-        );
+        const errName = err?.name || '';
+        if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError' || errName === 'OverconstrainedError') {
+          setHasCameraHardware(false);
+          setCameraErrorKind('no-device');
+          setCameraError(
+            'No se encontró una cámara disponible o compatible en tu dispositivo. Verifica que esté conectada o sube una fotografía desde archivo.'
+          );
+        } else if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError' || errName === 'SecurityError') {
+          setPermissionState('denied');
+          setCameraErrorKind('permission-denied');
+          setCameraError(
+            'Permiso de cámara denegado por el navegador o sistema. Haz clic en el icono de candado/cámara en la barra de direcciones para permitir el acceso y presiona "Solicitar Permisos".'
+          );
+        } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || errName === 'AbortError') {
+          setCameraErrorKind('in-use');
+          setCameraError(
+            'La cámara está siendo utilizada por otra aplicación o pestaña. Cierra el otro programa e intenta nuevamente.'
+          );
+        } else {
+          setCameraErrorKind('other');
+          setCameraError(
+            'No se pudo inicializar la cámara. Verifica los permisos del navegador o sube una fotografía desde tu dispositivo.'
+          );
+        }
+      } finally {
+        setRequestingCamera(false);
       }
     },
     [stopCameraStream]
@@ -136,9 +273,13 @@ export default function CarnetPhotoCaptureModal({
       setStep(initialStep);
       setImageSrc(null);
       setCameraError(null);
+      setCameraErrorKind(null);
+      setModalError(null);
       setZoomGuideModal(false);
     } else {
       setStep(initialStep);
+      setModalError(null);
+      detectCameraHardwareAndPermissions();
       if (initialStep === 'camera') {
         startCamera(facingMode);
       }
@@ -148,15 +289,33 @@ export default function CarnetPhotoCaptureModal({
     };
   }, [isOpen, initialStep]);
 
+  useEffect(() => {
+    if (!isOpen || !navigator.mediaDevices?.addEventListener) return;
+    const handleDeviceChange = () => {
+      detectCameraHardwareAndPermissions();
+    };
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [isOpen, detectCameraHardwareAndPermissions]);
+
   const handleOpenCamera = () => {
+    setModalError(null);
     setStep('camera');
-    startCamera(facingMode);
+    startCamera(facingMode, selectedDeviceId || undefined);
   };
 
   const handleToggleCamera = () => {
     const nextMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(nextMode);
+    setSelectedDeviceId('');
     startCamera(nextMode);
+  };
+
+  const handleDeviceSelect = (devId: string) => {
+    setSelectedDeviceId(devId);
+    startCamera(facingMode, devId || undefined);
   };
 
   const handleCaptureFromCamera = () => {
@@ -169,7 +328,7 @@ export default function CarnetPhotoCaptureModal({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (facingMode === 'user') {
+    if (facingMode === 'user' && !selectedDeviceId) {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
     }
@@ -186,8 +345,10 @@ export default function CarnetPhotoCaptureModal({
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setModalError(null);
     if (file.size > 10 * 1024 * 1024) {
-      alert('La imagen no debe superar los 10MB.');
+      setModalError('La imagen seleccionada supera el límite máximo permitido de 10 MB.');
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -208,6 +369,7 @@ export default function CarnetPhotoCaptureModal({
   const handleApplyCrop = async () => {
     if (!imageSrc || !croppedAreaPixels) return;
     setProcessingCrop(true);
+    setModalError(null);
     try {
       const croppedUrl = await getCroppedImg(imageSrc, croppedAreaPixels);
       if (croppedUrl) {
@@ -220,7 +382,7 @@ export default function CarnetPhotoCaptureModal({
       }
     } catch (err) {
       console.error('Error cropping photo:', err);
-      alert('No se pudo recortar la fotografía. Intente de nuevo.');
+      setModalError('No se pudo recortar la fotografía. Intente nuevamente.');
     } finally {
       setProcessingCrop(false);
     }
@@ -271,6 +433,18 @@ export default function CarnetPhotoCaptureModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto bg-slate-50/70 p-4 sm:p-6">
+          {modalError && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+              <button type="button" onClick={() => setModalError(null)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* STEP 1: LINEAMIENTOS Y MÉTODO */}
           {step === 'guidelines' && (
             <div className="space-y-5">
@@ -334,19 +508,83 @@ export default function CarnetPhotoCaptureModal({
                 </div>
               </div>
 
+              {/* Camera Hardware & Permission Diagnostic Bar */}
+              <div className="bg-white rounded-2xl border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2.5">
+                  {checkingHardware ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 text-slate-400 animate-spin" />
+                      <span className="text-slate-600">Detectando hardware de cámara disponible...</span>
+                    </>
+                  ) : hasCameraHardware === false ? (
+                    <>
+                      <VideoOff className="w-4 h-4 text-rose-500 shrink-0" />
+                      <div>
+                        <span className="font-bold text-rose-700">No se detectó cámara física en este dispositivo</span>
+                        <span className="text-slate-500 ml-1.5">
+                          (Puedes conectar una cámara o usar &quot;Subir Fotografía desde Archivo&quot;)
+                        </span>
+                      </div>
+                    </>
+                  ) : permissionState === 'denied' ? (
+                    <>
+                      <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+                      <div>
+                        <span className="font-bold text-amber-800">Permiso de cámara bloqueado por el navegador</span>
+                        <span className="text-slate-500 ml-1.5">
+                          Al pulsar &quot;Tomar Foto&quot; te guiaremos para habilitarlo.
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold text-slate-800">
+                          {videoDevices.length > 0
+                            ? `${videoDevices.length} ${videoDevices.length === 1 ? 'cámara detectada' : 'cámaras detectadas'}`
+                            : 'Cámara compatible detectada'}
+                        </span>
+                        <span className="text-slate-500 ml-1.5">
+                          • {permissionState === 'granted' ? 'Permiso concedido' : 'Se solicitará permiso al abrir'}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={detectCameraHardwareAndPermissions}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${checkingHardware ? 'animate-spin' : ''}`} />
+                  Re-detectar
+                </button>
+              </div>
+
               {/* Action Buttons */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={handleOpenCamera}
-                  className="flex items-center justify-center gap-3 p-4 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white shadow-md transition-all cursor-pointer group"
+                  className={`flex items-center justify-center gap-3 p-4 rounded-2xl shadow-md transition-all cursor-pointer group ${
+                    hasCameraHardware === false
+                      ? 'bg-slate-700 hover:bg-slate-800 text-white'
+                      : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                  }`}
                 >
                   <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center group-hover:scale-105 transition-transform">
                     <Camera className="w-5 h-5" />
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-bold">Tomar Foto con Cámara</p>
-                    <p className="text-[11px] text-emerald-100">Incluye máscara guía tipo pasaporte / ID</p>
+                    <p className="text-sm font-bold">
+                      {hasCameraHardware === false ? 'Verificar y Usar Cámara' : 'Tomar Foto con Cámara'}
+                    </p>
+                    <p className="text-[11px] text-emerald-100">
+                      {permissionState === 'granted'
+                        ? 'Cámara lista con máscara pasaporte / ID'
+                        : 'Solicitará permiso de cámara y abrirá máscara guía'}
+                    </p>
                   </div>
                 </button>
 
@@ -383,7 +621,21 @@ export default function CarnetPhotoCaptureModal({
                   Ver Lineamientos
                 </button>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center flex-wrap gap-2">
+                  {videoDevices.length > 1 && videoDevices.some((d) => d.label) && (
+                    <select
+                      value={selectedDeviceId}
+                      onChange={(e) => handleDeviceSelect(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 max-w-[200px]"
+                    >
+                      {videoDevices.map((dev, i) => (
+                        <option key={dev.deviceId || i} value={dev.deviceId}>
+                          {dev.label || `Cámara ${i + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleToggleCamera}
@@ -408,24 +660,36 @@ export default function CarnetPhotoCaptureModal({
 
               {cameraError ? (
                 <div className="bg-white rounded-2xl border border-rose-200 p-8 text-center space-y-4">
-                  <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+                  {cameraErrorKind === 'permission-denied' ? (
+                    <KeyRound className="w-12 h-12 text-amber-500 mx-auto" />
+                  ) : (
+                    <VideoOff className="w-12 h-12 text-rose-500 mx-auto" />
+                  )}
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900">Cámara no disponible</h4>
-                    <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">{cameraError}</p>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      {cameraErrorKind === 'no-device' && 'No se detectó cámara en el dispositivo'}
+                      {cameraErrorKind === 'permission-denied' && 'Permiso de cámara requerido'}
+                      {cameraErrorKind === 'in-use' && 'Cámara ocupada por otra aplicación'}
+                      {(cameraErrorKind === 'unsupported' || cameraErrorKind === 'other' || !cameraErrorKind) &&
+                        'Cámara no disponible'}
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto leading-relaxed">{cameraError}</p>
                   </div>
-                  <div className="flex justify-center gap-3">
+                  <div className="flex flex-wrap justify-center gap-3">
                     <button
                       type="button"
-                      onClick={() => startCamera(facingMode)}
-                      className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-800 cursor-pointer"
+                      onClick={() => startCamera(facingMode, selectedDeviceId || undefined)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-800 cursor-pointer"
                     >
-                      Reintentar Cámara
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {cameraErrorKind === 'permission-denied' ? 'Solicitar Permisos Nuevamente' : 'Reintentar Detección'}
                     </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-xs font-semibold text-white cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-xs font-semibold text-white cursor-pointer"
                     >
+                      <Upload className="w-3.5 h-3.5" />
                       Subir Fotografía desde Archivo
                     </button>
                   </div>
@@ -437,7 +701,7 @@ export default function CarnetPhotoCaptureModal({
                     autoPlay
                     playsInline
                     muted
-                    className={`w-full h-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`}
+                    className={`w-full h-full object-cover ${facingMode === 'user' && !selectedDeviceId ? '-scale-x-100' : ''}`}
                   />
 
                   {/* SVG PASSPORT / ID SILHOUETTE MASK */}
@@ -525,8 +789,13 @@ export default function CarnetPhotoCaptureModal({
                   </div>
 
                   {!cameraReady && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 text-white text-xs font-medium">
-                      Iniciando cámara...
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-950/75 text-white text-xs font-medium px-4 text-center">
+                      <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
+                      <span>
+                        {requestingCamera
+                          ? 'Solicitando acceso a la cámara al dispositivo...'
+                          : 'Iniciando vista previa de cámara...'}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -649,3 +918,4 @@ export default function CarnetPhotoCaptureModal({
     </div>
   );
 }
+

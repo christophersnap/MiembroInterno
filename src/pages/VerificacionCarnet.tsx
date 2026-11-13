@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ShieldCheck, ShieldAlert, Loader2, Clock, Phone, PhoneCall } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { generateSecureQrToken } from '../utils/qrSecurity';
+import { parseCargosSecundarios } from '../utils/cargosCatalog';
 
 export default function VerificacionCarnet() {
   const { carnetId } = useParams<{ carnetId: string }>();
@@ -176,8 +177,23 @@ export default function VerificacionCarnet() {
           } catch (e) {}
         }
 
+        let cargosSecundarios = parseCargosSecundarios(data.cargos_secundarios);
+        if (cargosSecundarios.length === 0) {
+          try {
+            const { data: cargoRow } = await supabase
+              .from('configuracion')
+              .select('valor')
+              .eq('clave', `socorrista_cargos_${data.id}`)
+              .maybeSingle();
+            if (cargoRow?.valor) {
+              cargosSecundarios = parseCargosSecundarios(cargoRow.valor);
+            }
+          } catch (e) {}
+        }
+
         setSocorrista({
           ...data,
+          cargos_secundarios: cargosSecundarios,
           contacto_emergencia_nombre: contactoNombre,
           contacto_emergencia_telefono: contactoTelefono,
           contacto_emergencia_nombre_2: contactoNombre2,
@@ -334,9 +350,16 @@ export default function VerificacionCarnet() {
               </h2>
             )}
             {allowedFields.cargoInstitucional !== false && (
-              <p className="text-sm font-medium text-primary mt-1">
-                {socorrista.cargo_institucional || 'SOCORRISTA'}
-              </p>
+              <div className="mt-1">
+                <p className="text-sm font-bold text-primary">
+                  {socorrista.cargo_institucional || 'SOCORRISTA'}
+                </p>
+                {parseCargosSecundarios(socorrista.cargos_secundarios).length > 0 && (
+                  <p className="text-xs font-medium text-emerald-700 mt-0.5">
+                    {parseCargosSecundarios(socorrista.cargos_secundarios).join(' | ')}
+                  </p>
+                )}
+              </div>
             )}
             {allowedFields.cargoAdministrativo !== false && socorrista.cargo_administrativo && (
               <p className="text-xs font-medium text-gray-500 mt-1">

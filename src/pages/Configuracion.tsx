@@ -14,6 +14,7 @@ import ModalDisenadorCorreos from '../components/configuracion/ModalDisenadorCor
 import PersonalizacionColores from '../components/configuracion/PersonalizacionColores';
 import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
+import ConfiguracionCargos from '../components/configuracion/ConfiguracionCargos';
 import { CompraConfig, DEFAULT_COMPRA_CONFIG, DEFAULT_COMPRA_BLOCKS } from '../types/compra';
 import { CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, DEFAULT_COMBUSTIBLE_BLOCKS } from '../types/combustible';
 
@@ -52,13 +53,13 @@ export default function Configuracion() {
   const urlTab = searchParams.get('tab') as any;
   
   // Categoría activa seleccionada
-  const [activeCategory, setActiveCategory] = useState<'plantillas' | 'correo' | 'flota' | 'verificacion' | 'colores' | 'identidad'>(
-    urlTab && ['plantillas', 'correo', 'flota', 'verificacion', 'colores', 'identidad'].includes(urlTab) ? urlTab : 'colores'
+  const [activeCategory, setActiveCategory] = useState<'plantillas' | 'correo' | 'flota' | 'cargos' | 'verificacion' | 'colores' | 'identidad'>(
+    urlTab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad'].includes(urlTab) ? urlTab : 'colores'
   );
 
   useEffect(() => {
     const tab = searchParams.get('tab') as any;
-    if (tab && ['plantillas', 'correo', 'flota', 'verificacion', 'colores', 'identidad'].includes(tab)) {
+    if (tab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad'].includes(tab)) {
       setActiveCategory(tab);
     }
   }, [searchParams]);
@@ -805,6 +806,12 @@ export default function Configuracion() {
       iconColor: 'bg-amber-500 text-white'
     },
     { 
+      id: 'cargos', 
+      label: 'Cargos y Rangos', 
+      icon: Shield, 
+      iconColor: 'bg-teal-600 text-white'
+    },
+    { 
       id: 'verificacion', 
       label: 'Verificación QR', 
       icon: Info, 
@@ -1019,6 +1026,13 @@ export default function Configuracion() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3B. MÓDULO: CATÁLOGO DE CARGOS INSTITUCIONALES Y ADMINISTRATIVOS           */}
+      {/* ========================================================================= */}
+      {activeCategory === 'cargos' && (
+        <ConfiguracionCargos onSuccess={showSuccessAlert} />
       )}
 
       {/* ========================================================================= */}

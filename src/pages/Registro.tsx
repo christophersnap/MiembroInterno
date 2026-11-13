@@ -34,9 +34,9 @@ export default function Registro() {
   const [carnet, setCarnet] = useState('');
   const [motivo, setMotivo] = useState('');
 
-  // Máscara que solo acepte letras y espacios
+  // Máscara que solo acepte letras y espacios y convierte a MAYÚSCULAS automáticamente
   const soloTexto = (val: string) => {
-    return val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '');
+    return val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '').toUpperCase();
   };
 
   // Auxiliary state
@@ -444,8 +444,8 @@ export default function Registro() {
                       required
                       value={primerNombre}
                       onChange={(e) => setPrimerNombre(soloTexto(e.target.value))}
-                      className="focus:ring-primary focus:border-primary block w-full pl-9 sm:text-sm border-gray-300 rounded-lg py-2.5 border"
-                      placeholder="Ej. Juan"
+                      className="focus:ring-primary focus:border-primary block w-full pl-9 sm:text-sm border-gray-300 rounded-lg py-2.5 border uppercase"
+                      placeholder="Ej. JUAN"
                     />
                   </div>
                 </div>
@@ -460,8 +460,8 @@ export default function Registro() {
                     type="text"
                     value={segundoNombre}
                     onChange={(e) => setSegundoNombre(soloTexto(e.target.value))}
-                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border"
-                    placeholder="Ej. Carlos"
+                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border uppercase"
+                    placeholder="Ej. CARLOS"
                   />
                 </div>
 
@@ -475,8 +475,8 @@ export default function Registro() {
                     type="text"
                     value={tercerNombre}
                     onChange={(e) => setTercerNombre(soloTexto(e.target.value))}
-                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border"
-                    placeholder="Opcional"
+                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border uppercase"
+                    placeholder="OPCIONAL"
                   />
                 </div>
               </div>
@@ -503,8 +503,8 @@ export default function Registro() {
                       required
                       value={primerApellido}
                       onChange={(e) => setPrimerApellido(soloTexto(e.target.value))}
-                      className="focus:ring-primary focus:border-primary block w-full pl-9 sm:text-sm border-gray-300 rounded-lg py-2.5 border"
-                      placeholder="Ej. Ramírez"
+                      className="focus:ring-primary focus:border-primary block w-full pl-9 sm:text-sm border-gray-300 rounded-lg py-2.5 border uppercase"
+                      placeholder="Ej. RAMÍREZ"
                     />
                   </div>
                 </div>
@@ -519,8 +519,8 @@ export default function Registro() {
                     type="text"
                     value={segundoApellido}
                     onChange={(e) => setSegundoApellido(soloTexto(e.target.value))}
-                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border"
-                    placeholder="Ej. Pérez"
+                    className="focus:ring-primary focus:border-primary block w-full px-3 sm:text-sm border-gray-300 rounded-lg py-2.5 border uppercase"
+                    placeholder="Ej. PÉREZ"
                   />
                 </div>
               </div>

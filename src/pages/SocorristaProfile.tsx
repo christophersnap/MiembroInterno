@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, FileText, Phone } from 'lucide-react';
+import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
@@ -10,15 +10,22 @@ import WatermarkImage from '../components/WatermarkImage';
 import DateInput from '../components/DateInput';
 import DocumentosSocorristaCard from '../components/socorristas/DocumentosSocorristaCard';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
+import CargosSelector from '../components/socorristas/CargosSelector';
+import {
+  normalizeDocumentForCompare,
+  parseCargosSecundarios,
+  saveSocorristaCargosSecundariosFallback,
+} from '../utils/cargosCatalog';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { role, permissions, watermarkEnabled, userName, canAccessSeccionalSocorristas } = useAuth();
+  const { role, permissions, watermarkEnabled, userName, canAccessSeccionalSocorristas, getAllowedSocorristaSeccionalIds } = useAuth();
   const [socorrista, setSocorrista] = useState<any>(null);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [meritosList, setMeritosList] = useState<any[]>([]);
   const [loadingMeritos, setLoadingMeritos] = useState<boolean>(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const downloadImageWithWatermark = async (format: 'png' | 'jpeg') => {
     if (!carnetGeneradoUrl) return;
@@ -133,15 +140,26 @@ export default function SocorristaProfile() {
 
   const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     let { name, value } = e.target;
-    
+
+    if (
+      name === 'primer_nombre' ||
+      name === 'segundo_nombre' ||
+      name === 'primer_apellido' ||
+      name === 'segundo_apellido'
+    ) {
+      value = value.toUpperCase();
+    }
+
     if (name === 'dui' || name === 'licencia_vehiculo_numero' || name === 'licencia_moto_numero') {
       value = formatDUI(value);
     }
-    
+
     if (name === 'telefono') {
       const currentCountry = countries.find(c => c.code === countryCode) || countries[0];
       value = formatPhone(value, currentCountry.mask);
     }
+
+    setFormError(null);
 
     if (name === 'seccional_id') {
       const isDifferent = String(value) !== String(socorrista?.seccional_id);
@@ -237,14 +255,30 @@ export default function SocorristaProfile() {
         }
       }
 
+      // Cargar cargos secundarios (columna cargos_secundarios o respaldo configuracion)
+      let cargosSecundariosArr = parseCargosSecundarios(socData.cargos_secundarios);
+      if (cargosSecundariosArr.length === 0) {
+        try {
+          const { data: cargoConf } = await supabase
+            .from('configuracion')
+            .select('valor')
+            .eq('clave', `socorrista_cargos_${id}`)
+            .maybeSingle();
+          if (cargoConf?.valor) {
+            cargosSecundariosArr = parseCargosSecundarios(cargoConf.valor);
+          }
+        } catch {}
+      }
+
       const formattedSocorrista = {
         ...socData,
+        cargos_secundarios: cargosSecundariosArr,
         contacto_emergencia_nombre: contactoNombre,
         contacto_emergencia_telefono: contactoTelefono,
         contacto_emergencia_nombre_2: contactoNombre2,
         contacto_emergencia_telefono_2: contactoTelefono2,
-        seccional_nombre: Array.isArray(socData.seccionales) 
-          ? (socData.seccionales[0]?.nombre || 'N/A') 
+        seccional_nombre: Array.isArray(socData.seccionales)
+          ? (socData.seccionales[0]?.nombre || 'N/A')
           : (socData.seccionales?.nombre || 'N/A'),
         cursos: (cursosData || []).map(c => ({
           ...c,
@@ -444,27 +478,47 @@ export default function SocorristaProfile() {
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     setLoading(true);
 
     try {
-      // Check for duplicate DUI if it has changed
-      if (editForm.dui !== socorrista?.dui) {
-        const { data: existingDui, error: duiError } = await supabase
+      // Normalized duplicate check for DUI across ALL seccionales
+      const rawDui = (editForm.dui || '').trim();
+      const normDui = normalizeDocumentForCompare(rawDui);
+      if (rawDui && rawDui.toLowerCase() !== 'menor de edad' && normDui && normDui !== normalizeDocumentForCompare(socorrista?.dui || '')) {
+        const digitsOnly = rawDui.replace(/\D/g, '');
+        let duiQuery = supabase
           .from('socorristas')
-          .select('id')
-          .eq('dui', editForm.dui)
+          .select('id, primer_nombre, primer_apellido, carnet, dui, seccionales(nombre)')
           .neq('id', id)
-          .limit(1);
+          .limit(50);
+
+        if (digitsOnly.length >= 5) {
+          duiQuery = duiQuery.ilike('dui', `%${digitsOnly.slice(0, 6)}%`);
+        } else {
+          duiQuery = duiQuery.ilike('dui', `%${rawDui}%`);
+        }
+
+        const { data: existingDuiRows, error: duiError } = await duiQuery;
 
         if (duiError) {
           console.error('Error checking DUI:', duiError);
-          alert('Error al verificar el número de identidad.');
+          setFormError('Error al verificar el número de identidad en la base de datos.');
           setLoading(false);
           return;
         }
 
-        if (existingDui && existingDui.length > 0) {
-          alert('Numero de identidad ya ingresado.');
+        const matchedDui = (existingDuiRows || []).find(
+          (row: any) => normalizeDocumentForCompare(row.dui) === normDui
+        );
+
+        if (matchedDui) {
+          const secNom = Array.isArray((matchedDui as any).seccionales)
+            ? (matchedDui as any).seccionales[0]?.nombre
+            : (matchedDui as any).seccionales?.nombre;
+          setFormError(
+            `El documento ${rawDui} ya pertenece al elemento ${matchedDui.primer_nombre} ${matchedDui.primer_apellido} (Carnet: ${matchedDui.carnet || 'N/A'}${secNom ? `, Seccional: ${secNom}` : ''}).`
+          );
           setLoading(false);
           return;
         }
@@ -505,7 +559,7 @@ export default function SocorristaProfile() {
         }
 
         if (conflictName) {
-          alert(`La plaza de "${editForm.segundo_cargo_administrativo}" en esta seccional ya está ocupada por ${conflictName}. Solo se permite un cupo activo por seccional.`);
+          setFormError(`La plaza de "${editForm.segundo_cargo_administrativo}" en esta seccional ya está ocupada por ${conflictName}. Solo se permite un cupo activo por seccional.`);
           setLoading(false);
           return;
         }
@@ -526,15 +580,21 @@ export default function SocorristaProfile() {
         const { data: { publicUrl } } = supabase.storage
           .from('socorristas')
           .getPublicUrl(filePath);
-        
+
         foto_url = publicUrl;
       }
 
+      const cleanPrimerNombre = (editForm.primer_nombre || '').trim().toUpperCase();
+      const cleanSegundoNombre = (editForm.segundo_nombre || '').trim().toUpperCase();
+      const cleanPrimerApellido = (editForm.primer_apellido || '').trim().toUpperCase();
+      const cleanSegundoApellido = (editForm.segundo_apellido || '').trim().toUpperCase();
+      const cleanCargosSecundarios = Array.isArray(editForm.cargos_secundarios) ? editForm.cargos_secundarios : [];
+
       const updatePayload: any = {
-        primer_nombre: editForm.primer_nombre,
-        segundo_nombre: editForm.segundo_nombre,
-        primer_apellido: editForm.primer_apellido,
-        segundo_apellido: editForm.segundo_apellido,
+        primer_nombre: cleanPrimerNombre,
+        segundo_nombre: cleanSegundoNombre,
+        primer_apellido: cleanPrimerApellido,
+        segundo_apellido: cleanSegundoApellido,
         fecha_nacimiento: editForm.fecha_nacimiento,
         sexo: editForm.sexo,
         telefono: editForm.telefono,
@@ -543,6 +603,7 @@ export default function SocorristaProfile() {
         seccional_id: targetSeccionalId,
         fecha_ingreso: editForm.fecha_ingreso,
         cargo_institucional: editForm.cargo_institucional,
+        cargos_secundarios: cleanCargosSecundarios,
         cargo_administrativo: editForm.cargo_administrativo,
         segundo_cargo_administrativo: editForm.segundo_cargo_administrativo || null,
         tipo_sangre: editForm.tipo_sangre,
@@ -559,6 +620,10 @@ export default function SocorristaProfile() {
         contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || null,
         contacto_emergencia_telefono_2: editForm.contacto_emergencia_telefono_2 || null
       };
+
+      if (id) {
+        await saveSocorristaCargosSecundariosFallback(id, cleanCargosSecundarios);
+      }
 
       // Guardar también siempre en configuracion como respaldo garantizado
       try {
@@ -595,14 +660,21 @@ export default function SocorristaProfile() {
         .eq('id', id);
 
       if (error) {
-        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo') || error.message?.includes('contacto_emergencia')) {
-          const { 
-            segundo_cargo_administrativo, 
+        if (
+          error.code === '42703' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('segundo_cargo_administrativo') ||
+          error.message?.includes('contacto_emergencia') ||
+          error.message?.includes('cargos_secundarios')
+        ) {
+          const {
+            segundo_cargo_administrativo,
             contacto_emergencia_nombre,
             contacto_emergencia_telefono,
             contacto_emergencia_nombre_2,
             contacto_emergencia_telefono_2,
-            ...fallbackPayload 
+            cargos_secundarios: _ignoredSec,
+            ...fallbackPayload
           } = updatePayload;
           const { error: retryError } = await supabase
             .from('socorristas')
@@ -614,11 +686,9 @@ export default function SocorristaProfile() {
         }
       }
 
-      // Sincronizar seccionales:
-      // Si cambió de seccional, liberar el cargo en la seccional previa
       const prevSeccionalId = socorrista?.seccional_id;
       const seccionalChanged = String(prevSeccionalId) !== String(targetSeccionalId);
-      const fullName = `${editForm.primer_nombre} ${editForm.primer_apellido}`.trim();
+      const fullName = `${cleanPrimerNombre} ${cleanPrimerApellido}`.trim();
 
       try {
         if (seccionalChanged && prevSeccionalId) {
@@ -629,13 +699,11 @@ export default function SocorristaProfile() {
           }
         }
 
-        // Asignar en la nueva seccional si corresponde
         if (editForm.segundo_cargo_administrativo === 'Director de Seccional') {
           await supabase.from('seccionales').update({ director: fullName }).eq('id', targetSeccionalId);
         } else if (editForm.segundo_cargo_administrativo === 'Subdirector de Seccional') {
           await supabase.from('seccionales').update({ subdirector: fullName }).eq('id', targetSeccionalId);
         } else if (socorrista?.segundo_cargo_administrativo && !editForm.segundo_cargo_administrativo) {
-          // Si el usuario removió el segundo cargo
           if (socorrista.segundo_cargo_administrativo === 'Director de Seccional') {
             await supabase.from('seccionales').update({ director: null }).eq('id', targetSeccionalId);
           } else if (socorrista.segundo_cargo_administrativo === 'Subdirector de Seccional') {
@@ -647,8 +715,8 @@ export default function SocorristaProfile() {
       }
 
       const changes: any = {};
-      if (socorrista.primer_nombre !== editForm.primer_nombre || socorrista.primer_apellido !== editForm.primer_apellido) {
-        changes.nombre = `${editForm.primer_nombre} ${editForm.primer_apellido}`;
+      if (socorrista.primer_nombre !== cleanPrimerNombre || socorrista.primer_apellido !== cleanPrimerApellido) {
+        changes.nombre = `${cleanPrimerNombre} ${cleanPrimerApellido}`;
       }
       if (fotoFile) {
         changes.foto = 'Cambió fotografía';
@@ -663,7 +731,7 @@ export default function SocorristaProfile() {
       fetchProfile();
     } catch (error: any) {
       console.error(error);
-      alert('Error al actualizar el perfil: ' + (error.message || 'Error desconocido'));
+      setFormError('Error al actualizar el perfil: ' + (error.message || 'Error desconocido'));
     } finally {
       setLoading(false);
     }
@@ -821,6 +889,17 @@ export default function SocorristaProfile() {
 
       {isEditing ? (
         <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+          {formError && (
+            <div className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-sm flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <p className="text-xs sm:text-sm font-medium">{formError}</p>
+              </div>
+              <button type="button" onClick={() => setFormError(null)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           <form className="space-y-8 divide-y divide-gray-200">
             <div className="space-y-8 divide-y divide-gray-200">
               <div>
@@ -875,28 +954,28 @@ export default function SocorristaProfile() {
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Primer Nombre</label>
                     <div className="mt-1">
-                      <input type="text" required value={editForm.primer_nombre || ''} name="primer_nombre" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border" />
+                      <input type="text" required value={editForm.primer_nombre || ''} name="primer_nombre" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border uppercase" />
                     </div>
                   </div>
 
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Segundo Nombre</label>
                     <div className="mt-1">
-                      <input type="text" value={editForm.segundo_nombre || ''} name="segundo_nombre" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border" />
+                      <input type="text" value={editForm.segundo_nombre || ''} name="segundo_nombre" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border uppercase" />
                     </div>
                   </div>
 
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Primer Apellido</label>
                     <div className="mt-1">
-                      <input type="text" required value={editForm.primer_apellido || ''} name="primer_apellido" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border" />
+                      <input type="text" required value={editForm.primer_apellido || ''} name="primer_apellido" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border uppercase" />
                     </div>
                   </div>
 
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Segundo Apellido</label>
                     <div className="mt-1">
-                      <input type="text" value={editForm.segundo_apellido || ''} name="segundo_apellido" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border" />
+                      <input type="text" value={editForm.segundo_apellido || ''} name="segundo_apellido" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border uppercase" />
                     </div>
                   </div>
 
@@ -1169,12 +1248,38 @@ export default function SocorristaProfile() {
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Seccional</label>
                     <div className="mt-1">
-                      <select disabled={role !== 'admin' && !permissions.ver_todas_seccionales} required value={editForm.seccional_id || ''} name="seccional_id" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500">
-                        <option value="">Seleccione...</option>
-                        {seccionales.map(s => (
-                          <option key={s.id} value={s.id}>{s.nombre}</option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const allowedIds = getAllowedSocorristaSeccionalIds();
+                        const visibleSecs =
+                          allowedIds === 'all'
+                            ? seccionales
+                            : seccionales.filter(
+                                (s) =>
+                                  allowedIds.includes(Number(s.id)) ||
+                                  Number(s.id) === Number(socorrista?.seccional_id)
+                              );
+                        const canChangeSec =
+                          role === 'admin' ||
+                          permissions.ver_todas_seccionales ||
+                          (allowedIds !== 'all' && allowedIds.length > 1);
+                        return (
+                          <select
+                            disabled={!canChangeSec}
+                            required
+                            value={editForm.seccional_id || ''}
+                            name="seccional_id"
+                            onChange={handleEditChange}
+                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500"
+                          >
+                            <option value="">Seleccione...</option>
+                            {visibleSecs.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -1185,19 +1290,16 @@ export default function SocorristaProfile() {
                     </div>
                   </div>
 
-                  <div className="sm:col-span-3">
-                    <label className="block text-sm font-medium text-gray-700">Cargo Institucional</label>
-                    <div className="mt-1">
-                      <input disabled={!canEditThisSocorrista} type="text" value={editForm.cargo_institucional || ''} name="cargo_institucional" onChange={handleEditChange} placeholder="Ej. Socorrista, Jefe de Brigada..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
-                    </div>
-                  </div>
-
-                  <div className="sm:col-span-3">
-                    <label className="block text-sm font-medium text-gray-700">Cargo Administrativo</label>
-                    <div className="mt-1">
-                      <input disabled={!canEditThisSocorrista} type="text" value={editForm.cargo_administrativo || ''} name="cargo_administrativo" onChange={handleEditChange} placeholder="Ej. Tesorero, Secretario..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
-                    </div>
-                  </div>
+                  <CargosSelector
+                    layout="grid"
+                    cargoPrincipal={editForm.cargo_institucional || ''}
+                    cargosSecundarios={Array.isArray(editForm.cargos_secundarios) ? editForm.cargos_secundarios : []}
+                    cargoAdministrativo={editForm.cargo_administrativo || ''}
+                    onChangePrincipal={(val) => setEditForm((prev: any) => ({ ...prev, cargo_institucional: val }))}
+                    onChangeSecundarios={(vals) => setEditForm((prev: any) => ({ ...prev, cargos_secundarios: vals }))}
+                    onChangeAdministrativo={(val) => setEditForm((prev: any) => ({ ...prev, cargo_administrativo: val }))}
+                    disabledAll={!canEditThisSocorrista}
+                  />
 
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Segundo Cargo Administrativo</label>
@@ -1443,7 +1545,22 @@ export default function SocorristaProfile() {
               </div>
               <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
                 <dt className="text-sm font-medium text-gray-500">Cargo Institucional</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{socorrista.cargo_institucional || 'N/A'}</dd>
+                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2 space-y-2">
+                  <div className="font-semibold text-gray-900">{socorrista.cargo_institucional || 'N/A'}</div>
+                  {Array.isArray(socorrista.cargos_secundarios) && socorrista.cargos_secundarios.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-gray-500 mr-1">Especialidades / Secundarios:</span>
+                      {socorrista.cargos_secundarios.map((c: string, idx: number) => (
+                        <span
+                          key={`${c}-${idx}`}
+                          className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200"
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </dd>
               </div>
               <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
                 <dt className="text-sm font-medium text-gray-500">Cargo Administrativo</dt>

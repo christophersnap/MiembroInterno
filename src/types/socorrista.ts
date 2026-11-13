@@ -12,6 +12,13 @@ export interface DocumentoSocorrista {
   observaciones?: string;
 }
 
+export interface SocorristaCargosData {
+  cargo_institucional: string;
+  cargos_secundarios?: string[];
+  cargo_administrativo?: string;
+  segundo_cargo_administrativo?: string | null;
+}
+
 export const TIPOS_DOCUMENTOS: {
   id: DocumentoSocorrista['tipo_documento'];
   titulo: string;

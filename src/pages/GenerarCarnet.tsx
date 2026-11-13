@@ -8,6 +8,7 @@ import { generateSecureQrToken } from '../utils/qrSecurity';
 import { getApiUrl } from '../lib/api';
 
 import WatermarkImage from '../components/WatermarkImage';
+import { parseCargosSecundarios } from '../utils/cargosCatalog';
 
 export const VERIFICATION_FIELD_DEFINITIONS = [
   { id: 'foto', label: 'Fotografía Oficial' },
@@ -95,6 +96,11 @@ export default function GenerarCarnet() {
   const [showBgCargo, setShowBgCargo] = useState<boolean>(true);
   const [bgCargoWidth, setBgCargoWidth] = useState<number>(75);
   const [bgCargoHeight, setBgCargoHeight] = useState<number>(80);
+  const [showCargoSecundario, setShowCargoSecundario] = useState<boolean>(true);
+  const [fontSizeCargoSecundario, setFontSizeCargoSecundario] = useState<number>(26);
+  const [fontColorCargoSecundario, setFontColorCargoSecundario] = useState<string>('#E2E8F0');
+  const [cargoSecundarioSeparator, setCargoSecundarioSeparator] = useState<string>(' | ');
+  const [cargoSecundarioGap, setCargoSecundarioGap] = useState<number>(6);
   
   const [showBgCargoAdmin, setShowBgCargoAdmin] = useState<boolean>(true);
   const [bgCargoAdminWidth, setBgCargoAdminWidth] = useState<number>(55);
@@ -206,6 +212,24 @@ export default function GenerarCarnet() {
         }
       } catch (backupErr) {}
       
+      // Consultar cargos secundarios de respaldo en configuracion
+      const cargosBackupMap: Record<number, string[]> = {};
+      try {
+        const { data: cargosBackupRows } = await supabase
+          .from('configuracion')
+          .select('clave, valor')
+          .like('clave', 'socorrista_cargos_%');
+        if (cargosBackupRows) {
+          cargosBackupRows.forEach(row => {
+            const idStr = row.clave.replace('socorrista_cargos_', '');
+            const idNum = Number(idStr);
+            if (!Number.isNaN(idNum) && row.valor) {
+              cargosBackupMap[idNum] = parseCargosSecundarios(row.valor);
+            }
+          });
+        }
+      } catch (e) {}
+
       const mappedData = (data || []).map(s => {
         let seccional_nombre = 'N/A';
         if (s.seccionales) {
@@ -215,9 +239,11 @@ export default function GenerarCarnet() {
             seccional_nombre = (s.seccionales as any).nombre || 'N/A';
           }
         }
+        const directSecundarios = parseCargosSecundarios(s.cargos_secundarios);
         return {
           ...s,
           seccional_nombre,
+          cargos_secundarios: directSecundarios.length > 0 ? directSecundarios : (cargosBackupMap[s.id] || []),
           solicitud: solicitudesMap[s.id] || null
         };
       });
@@ -348,6 +374,7 @@ export default function GenerarCarnet() {
       fontSizeNames, fontColorNames, posNamesX, posNamesY,
       fontSizeLastNames, fontColorLastNames, posLastNamesX, posLastNamesY,
       fontSizeCargo, fontColorCargo, bgColorCargo, borderRadiusCargo, posCargoX, posCargoY, showBgCargo, bgCargoWidth, bgCargoHeight,
+      showCargoSecundario, fontSizeCargoSecundario, fontColorCargoSecundario, cargoSecundarioSeparator, cargoSecundarioGap,
       fontSizeCargoAdmin, fontColorCargoAdmin, bgColorCargoAdmin, borderRadiusCargoAdmin, posCargoAdminX, posCargoAdminY, showBgCargoAdmin, bgCargoAdminWidth, bgCargoAdminHeight,
       fontSizeSeccional, fontColorSeccional, posSeccionalX, posSeccionalY,
       fontSizeDui, fontColorDui, posDuiX, posDuiY,
@@ -404,6 +431,11 @@ export default function GenerarCarnet() {
     setShowBgCargo(config.showBgCargo);
     setBgCargoWidth(config.bgCargoWidth || 75);
     setBgCargoHeight(config.bgCargoHeight || 80);
+    setShowCargoSecundario(config.showCargoSecundario !== undefined ? config.showCargoSecundario : true);
+    setFontSizeCargoSecundario(config.fontSizeCargoSecundario || 26);
+    setFontColorCargoSecundario(config.fontColorCargoSecundario || '#E2E8F0');
+    setCargoSecundarioSeparator(config.cargoSecundarioSeparator || ' | ');
+    setCargoSecundarioGap(config.cargoSecundarioGap !== undefined ? config.cargoSecundarioGap : 6);
     setFontSizeCargoAdmin(config.fontSizeCargoAdmin);
     setFontColorCargoAdmin(config.fontColorCargoAdmin);
     setBgColorCargoAdmin(config.bgColorCargoAdmin);
@@ -467,6 +499,11 @@ export default function GenerarCarnet() {
     if (config.showBgCargo !== undefined) setShowBgCargo(config.showBgCargo);
     if (config.bgCargoWidth !== undefined) setBgCargoWidth(config.bgCargoWidth);
     if (config.bgCargoHeight !== undefined) setBgCargoHeight(config.bgCargoHeight);
+    if (config.showCargoSecundario !== undefined) setShowCargoSecundario(config.showCargoSecundario);
+    if (config.fontSizeCargoSecundario !== undefined) setFontSizeCargoSecundario(config.fontSizeCargoSecundario);
+    if (config.fontColorCargoSecundario) setFontColorCargoSecundario(config.fontColorCargoSecundario);
+    if (config.cargoSecundarioSeparator !== undefined) setCargoSecundarioSeparator(config.cargoSecundarioSeparator);
+    if (config.cargoSecundarioGap !== undefined) setCargoSecundarioGap(config.cargoSecundarioGap);
 
     if (config.fontSizeCargoAdmin !== undefined) setFontSizeCargoAdmin(config.fontSizeCargoAdmin);
     if (config.fontColorCargoAdmin) setFontColorCargoAdmin(config.fontColorCargoAdmin);
@@ -854,6 +891,7 @@ export default function GenerarCarnet() {
     fontSizeNames, fontColorNames, posNamesX, posNamesY,
     fontSizeLastNames, fontColorLastNames, posLastNamesX, posLastNamesY,
     fontSizeCargo, fontColorCargo, bgColorCargo, borderRadiusCargo, posCargoX, posCargoY, showBgCargo, bgCargoWidth, bgCargoHeight,
+    showCargoSecundario, fontSizeCargoSecundario, fontColorCargoSecundario, cargoSecundarioSeparator, cargoSecundarioGap,
     fontSizeCargoAdmin, fontColorCargoAdmin, bgColorCargoAdmin, borderRadiusCargoAdmin, posCargoAdminX, posCargoAdminY, showBgCargoAdmin, bgCargoAdminWidth, bgCargoAdminHeight,
     fontSizeSeccional, fontColorSeccional, posSeccionalX, posSeccionalY,
     fontSizeDui, fontColorDui, posDuiX, posDuiY,
@@ -940,14 +978,15 @@ export default function GenerarCarnet() {
     const apellidos = `${selectedSocorrista.primer_apellido} ${selectedSocorrista.segundo_apellido || ''}`.trim();
     ctx.fillText(apellidos.toUpperCase(), canvas.width * (posLastNamesX / 100), canvas.height * (posLastNamesY / 100));
 
-    // Cargo Institucional
+    // Cargo Institucional (Jerarquía: Principal en grande + Cargos Secundarios / Especialidades debajo)
     const isMinor = selectedSocorrista.cargo_institucional === 'Aspirante a Socorrista' || selectedSocorrista.dui === 'Menor de edad';
     
     if (!isMinor) {
-      ctx.fillStyle = fontColorCargo;
-      ctx.font = `bold ${fontSizeCargo}px "${customFontName}"`;
       const cargo = (selectedSocorrista.cargo_institucional || 'SOCORRISTA').toUpperCase();
-      
+      const secCargos = parseCargosSecundarios(selectedSocorrista.cargos_secundarios);
+      const hasSecCargos = showCargoSecundario && secCargos.length > 0;
+      const secText = secCargos.map(c => c.toUpperCase()).join(cargoSecundarioSeparator);
+
       const boxWidth = canvas.width * (bgCargoWidth / 100);
       const boxHeight = bgCargoHeight;
       const boxY = canvas.height * (posCargoY / 100);
@@ -960,9 +999,25 @@ export default function GenerarCarnet() {
         ctx.fill();
       }
       
-      ctx.fillStyle = fontColorCargo;
       ctx.textBaseline = 'middle';
-      ctx.fillText(cargo, boxX, boxY + boxHeight / 2);
+      if (hasSecCargos) {
+        const totalStackH = fontSizeCargo + cargoSecundarioGap + fontSizeCargoSecundario;
+        const topY = boxY + (boxHeight - totalStackH) / 2;
+        const principalCenterY = topY + fontSizeCargo / 2;
+        const secCenterY = topY + fontSizeCargo + cargoSecundarioGap + fontSizeCargoSecundario / 2;
+
+        ctx.fillStyle = fontColorCargo;
+        ctx.font = `bold ${fontSizeCargo}px "${customFontName}"`;
+        ctx.fillText(cargo, boxX, principalCenterY, boxWidth * 0.94);
+
+        ctx.fillStyle = fontColorCargoSecundario;
+        ctx.font = `600 ${fontSizeCargoSecundario}px "${customFontName}"`;
+        ctx.fillText(secText, boxX, secCenterY, boxWidth * 0.94);
+      } else {
+        ctx.fillStyle = fontColorCargo;
+        ctx.font = `bold ${fontSizeCargo}px "${customFontName}"`;
+        ctx.fillText(cargo, boxX, boxY + boxHeight / 2, boxWidth * 0.94);
+      }
       ctx.textBaseline = 'alphabetic'; // reset
     }
 
@@ -1286,6 +1341,7 @@ export default function GenerarCarnet() {
         fontSizeNames, fontColorNames, posNamesX, posNamesY,
         fontSizeLastNames, fontColorLastNames, posLastNamesX, posLastNamesY,
         fontSizeCargo, fontColorCargo, bgColorCargo, borderRadiusCargo, posCargoX, posCargoY, showBgCargo, bgCargoWidth, bgCargoHeight,
+        showCargoSecundario, fontSizeCargoSecundario, fontColorCargoSecundario, cargoSecundarioSeparator, cargoSecundarioGap,
         fontSizeCargoAdmin, fontColorCargoAdmin, bgColorCargoAdmin, borderRadiusCargoAdmin, posCargoAdminX, posCargoAdminY, showBgCargoAdmin, bgCargoAdminWidth, bgCargoAdminHeight,
         fontSizeSeccional, fontColorSeccional, posSeccionalX, posSeccionalY,
         fontSizeDui, fontColorDui, posDuiX, posDuiY,
@@ -2032,6 +2088,53 @@ export default function GenerarCarnet() {
                     <label className="block text-xs text-gray-500">Posición Y (%)</label>
                     <input type="number" value={posCargoY} onChange={e => setPosCargoY(Number(e.target.value))} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm" />
                   </div>
+                </div>
+
+                {/* Cargos Secundarios / Especialidades debajo del Cargo Principal */}
+                <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-800">Cargos Secundarios / Especialidades</h4>
+                      <p className="text-[11px] text-gray-500">
+                        {selectedSocorrista && parseCargosSecundarios(selectedSocorrista.cargos_secundarios).length > 0
+                          ? `Asignados: ${parseCargosSecundarios(selectedSocorrista.cargos_secundarios).join(cargoSecundarioSeparator)}`
+                          : 'Se muestran en línea secundaria debajo del cargo principal'}
+                      </p>
+                    </div>
+                    <label className="flex items-center cursor-pointer">
+                      <span className="mr-2 text-xs text-gray-500">Mostrar</span>
+                      <div className="relative">
+                        <input type="checkbox" className="sr-only" checked={showCargoSecundario} onChange={e => setShowCargoSecundario(e.target.checked)} />
+                        <div className={`block w-8 h-5 rounded-full ${showCargoSecundario ? 'bg-primary' : 'bg-gray-300'}`}></div>
+                        <div className={`dot absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition ${showCargoSecundario ? 'transform translate-x-3' : ''}`}></div>
+                      </div>
+                    </label>
+                  </div>
+                  {showCargoSecundario && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-500">Tamaño Sec.</label>
+                        <input type="number" value={fontSizeCargoSecundario} onChange={e => setFontSizeCargoSecundario(Number(e.target.value))} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-xs" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500">Color Sec.</label>
+                        <input type="color" value={fontColorCargoSecundario} onChange={e => setFontColorCargoSecundario(e.target.value)} className="mt-1 block w-full h-7 border-gray-300 rounded-md shadow-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500">Separador</label>
+                        <select value={cargoSecundarioSeparator} onChange={e => setCargoSecundarioSeparator(e.target.value)} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-xs">
+                          <option value=" | ">Barra ( | )</option>
+                          <option value=" • ">Punto ( • )</option>
+                          <option value=" - ">Guion ( - )</option>
+                          <option value=" / ">Diagonal ( / )</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500">Espacio Y (px)</label>
+                        <input type="number" value={cargoSecundarioGap} onChange={e => setCargoSecundarioGap(Number(e.target.value))} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-xs" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

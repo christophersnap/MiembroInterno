@@ -557,16 +557,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         finalMergedPerms.ver_todas_seccionales = true;
       } else if (parsedSecAccess.mode === 'custom') {
         const entries = Object.values(parsedSecAccess.seccionales);
-        const hasAnyAccess = entries.some(e => e?.view || e?.add || e?.edit);
-        if (hasAnyAccess) {
-          finalMergedPerms.view_socorristas = true;
-        }
-        if (entries.some(e => e?.add)) {
-          finalMergedPerms.add_socorristas = true;
-        }
-        if (entries.some(e => e?.edit)) {
-          finalMergedPerms.edit_socorristas = true;
-        }
+        const hasAnyAccess = entries.some(e => Boolean(e?.view || e?.add || e?.edit));
+        const hasAnyAdd = entries.some(e => Boolean(e?.add));
+        const hasAnyEdit = entries.some(e => Boolean(e?.edit));
+        finalMergedPerms.view_socorristas = hasAnyAccess;
+        finalMergedPerms.add_socorristas = hasAnyAdd;
+        finalMergedPerms.edit_socorristas = hasAnyEdit;
       }
 
       // Resolve module scopes

@@ -1,20 +1,43 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Save, ArrowLeft, Upload, X, Check, PhoneCall, Camera } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Save, ArrowLeft, X, Check, PhoneCall, Camera, AlertCircle, AlertTriangle, ShieldAlert, Lock, Building2, ExternalLink } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
 import DateInput from '../components/DateInput';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
+import CargosSelector from '../components/socorristas/CargosSelector';
+import {
+  normalizeDocumentForCompare,
+  normalizeTextForCompare,
+  saveSocorristaCargosSecundariosFallback,
+} from '../utils/cargosCatalog';
 
 export default function NewSocorrista() {
   const navigate = useNavigate();
-  const { role, directorSeccionalId, permissions, getAddAllowedSocorristaSeccionalIds } = useAuth();
+  const {
+    role,
+    loading: authLoading,
+    directorSeccionalId,
+    userSeccionalId,
+    permissions,
+    seccionalesSocorristasAccess,
+    canAddAnySocorrista,
+    getAddAllowedSocorristaSeccionalIds,
+  } = useAuth();
   const [seccionales, setSeccionales] = useState<any[]>([]);
+  const [seccionalesLoaded, setSeccionalesLoaded] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [cargosSecundarios, setCargosSecundarios] = useState<string[]>([]);
+  const [duiDuplicates, setDuiDuplicates] = useState<any[]>([]);
+  const [checkingDui, setCheckingDui] = useState(false);
+  const [nameDuplicates, setNameDuplicates] = useState<any[]>([]);
+  const [checkingNames, setCheckingNames] = useState(false);
+  const [confirmHomonym, setConfirmHomonym] = useState(false);
   const [formData, setFormData] = useState({
     primer_nombre: '',
     segundo_nombre: '',
@@ -81,6 +104,7 @@ export default function NewSocorrista() {
   const maxDateStr = `${maxYear}-12-31`;
 
   useEffect(() => {
+    if (authLoading) return;
     const fetchSeccionales = async () => {
       try {
         const { data, error } = await supabase
@@ -88,22 +112,136 @@ export default function NewSocorrista() {
           .select('*')
           .eq('estado', 'Activa')
           .order('nombre');
-        
+
         if (data) {
           const allowedIds = getAddAllowedSocorristaSeccionalIds();
-          const filtered = allowedIds === 'all' ? data : data.filter((s: any) => allowedIds.includes(Number(s.id)));
+          const filtered =
+            allowedIds === 'all'
+              ? data
+              : data.filter((s: any) => allowedIds.includes(Number(s.id)));
           setSeccionales(filtered);
-          if (filtered.length === 1) {
-            setFormData(prev => ({ ...prev, seccional_id: String(filtered[0].id) }));
-          }
+
+          setFormData((prev) => {
+            if (filtered.length === 1) {
+              return { ...prev, seccional_id: String(filtered[0].id) };
+            }
+            if (
+              prev.seccional_id &&
+              filtered.some((s: any) => String(s.id) === String(prev.seccional_id))
+            ) {
+              return prev;
+            }
+            return { ...prev, seccional_id: '' };
+          });
         }
         if (error) console.error(error);
       } catch (err) {
         console.error('Error fetching seccionales:', err);
+      } finally {
+        setSeccionalesLoaded(true);
       }
     };
     fetchSeccionales();
-  }, []);
+  }, [authLoading, role, directorSeccionalId, userSeccionalId, permissions, seccionalesSocorristasAccess]);
+
+  // Real-time duplicate check for DUI / Carnet de Minoridad across ALL seccionales
+  useEffect(() => {
+    const rawDui = formData.dui?.trim() || '';
+    const normDui = normalizeDocumentForCompare(rawDui);
+    if (!rawDui || rawDui.toLowerCase() === 'menor de edad' || normDui.length < 5) {
+      setDuiDuplicates([]);
+      setCheckingDui(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCheckingDui(true);
+    const timer = setTimeout(async () => {
+      try {
+        const digitsOnly = rawDui.replace(/\D/g, '');
+        let query = supabase
+          .from('socorristas')
+          .select('id, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, carnet, dui, estado, seccional_id, seccionales(nombre)')
+          .limit(30);
+
+        if (digitsOnly.length >= 5) {
+          query = query.ilike('dui', `%${digitsOnly.slice(0, 6)}%`);
+        } else {
+          query = query.ilike('dui', `%${rawDui}%`);
+        }
+
+        const { data } = await query;
+        if (cancelled) return;
+        const matches = (data || []).filter(
+          (row: any) => normalizeDocumentForCompare(row.dui) === normDui
+        );
+        setDuiDuplicates(matches);
+      } catch (err) {
+        if (!cancelled) setDuiDuplicates([]);
+      } finally {
+        if (!cancelled) setCheckingDui(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formData.dui]);
+
+  // Real-time duplicate check for Nombres + Apellidos across ALL seccionales
+  useEffect(() => {
+    const pn = normalizeTextForCompare(formData.primer_nombre);
+    const pa = normalizeTextForCompare(formData.primer_apellido);
+    const sn = normalizeTextForCompare(formData.segundo_nombre);
+    const sa = normalizeTextForCompare(formData.segundo_apellido);
+
+    setConfirmHomonym(false);
+
+    if (pn.length < 2 || pa.length < 2) {
+      setNameDuplicates([]);
+      setCheckingNames(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCheckingNames(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await supabase
+          .from('socorristas')
+          .select('id, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, carnet, dui, estado, fecha_nacimiento, seccional_id, seccionales(nombre)')
+          .ilike('primer_nombre', `%${pn}%`)
+          .ilike('primer_apellido', `%${pa}%`)
+          .limit(25);
+
+        if (cancelled) return;
+        const matches = (data || []).filter((row: any) => {
+          const rPn = normalizeTextForCompare(row.primer_nombre);
+          const rPa = normalizeTextForCompare(row.primer_apellido);
+          const rSn = normalizeTextForCompare(row.segundo_nombre || '');
+          const rSa = normalizeTextForCompare(row.segundo_apellido || '');
+
+          const baseMatch = rPn === pn && rPa === pa;
+          if (!baseMatch) return false;
+          if (sn && rSn && sn !== rSn) return false;
+          if (sa && rSa && sa !== rSa) return false;
+          return true;
+        });
+
+        setNameDuplicates(matches);
+      } catch {
+        if (!cancelled) setNameDuplicates([]);
+      } finally {
+        if (!cancelled) setCheckingNames(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formData.primer_nombre, formData.segundo_nombre, formData.primer_apellido, formData.segundo_apellido]);
 
   const formatDUI = (value: string) => {
     const digits = value.replace(/\D/g, '');
@@ -154,16 +292,26 @@ export default function NewSocorrista() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     let { name, value } = e.target;
-    
+
+    if (
+      name === 'primer_nombre' ||
+      name === 'segundo_nombre' ||
+      name === 'primer_apellido' ||
+      name === 'segundo_apellido'
+    ) {
+      value = value.toUpperCase();
+    }
+
     if (name === 'dui' || name === 'licencia_vehiculo_numero' || name === 'licencia_moto_numero') {
       value = formatDUI(value);
     }
-    
+
     if (name === 'telefono') {
       const currentCountry = countries.find(c => c.code === countryCode) || countries[0];
       value = formatPhone(value, currentCountry.mask);
     }
 
+    setFormError(null);
     setFormData({ ...formData, [name]: value });
   };
 
@@ -324,48 +472,77 @@ export default function NewSocorrista() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('--- INICIO SUBMIT ---');
-    console.log('Datos del formulario:', formData);
-    
-    // Validation
+    setFormError(null);
+
     const requiredFields = ['primer_nombre', 'primer_apellido', 'fecha_nacimiento', 'sexo', 'dui', 'seccional_id', 'cargo_institucional'];
     const missingFields = requiredFields.filter(field => !formData[field as keyof typeof formData]);
-    
+
     if (missingFields.length > 0) {
-      console.warn('Validación fallida. Campos faltantes:', missingFields);
-      alert(`ATENCIÓN: Faltan campos obligatorios:\n${missingFields.map(f => `- ${f}`).join('\n')}`);
+      setFormError(`Faltan campos obligatorios por completar: ${missingFields.join(', ')}.`);
+      return;
+    }
+
+    const seccionalId = parseInt(formData.seccional_id, 10);
+    if (isNaN(seccionalId)) {
+      setFormError('La seccional seleccionada no es válida.');
+      return;
+    }
+
+    // Strict check: user can only add into their permitted seccional(es)
+    const allowedIds = getAddAllowedSocorristaSeccionalIds();
+    if (allowedIds !== 'all' && !allowedIds.includes(seccionalId)) {
+      setFormError('No tienes permisos para registrar elementos en la seccional seleccionada.');
+      return;
+    }
+
+    if (nameDuplicates.length > 0 && !confirmHomonym) {
+      setFormError('Se detectaron posibles coincidencias por nombre y apellido en la base de datos. Verifica el listado y marca la casilla de confirmación si es una persona distinta.');
       return;
     }
 
     setLoading(true);
-    console.log('Estado: Cargando...');
 
     try {
-      // Check for duplicate DUI
-      const { data: existingDui, error: duiError } = await supabase
-        .from('socorristas')
-        .select('id')
-        .eq('dui', formData.dui)
-        .limit(1);
+      // Normalized duplicate check for DUI / Carnet de Minoridad across ALL seccionales
+      const rawDui = formData.dui.trim();
+      const normDui = normalizeDocumentForCompare(rawDui);
+      if (rawDui.toLowerCase() !== 'menor de edad' && normDui) {
+        const digitsOnly = rawDui.replace(/\D/g, '');
+        let duiQuery = supabase
+          .from('socorristas')
+          .select('id, primer_nombre, primer_apellido, carnet, dui, seccionales(nombre)')
+          .limit(50);
 
-      if (duiError) {
-        console.error('Error checking DUI:', duiError);
-        alert('Error al verificar el número de identidad.');
-        setLoading(false);
-        return;
-      }
+        if (digitsOnly.length >= 5) {
+          duiQuery = duiQuery.ilike('dui', `%${digitsOnly.slice(0, 6)}%`);
+        } else {
+          duiQuery = duiQuery.ilike('dui', `%${rawDui}%`);
+        }
 
-      if (existingDui && existingDui.length > 0) {
-        alert('Numero de identidad ya ingresado.');
-        setLoading(false);
-        return;
-      }
+        const { data: existingDuiRows, error: duiError } = await duiQuery;
 
-      // Validar cupo de segundo cargo administrativo (1 Director y 1 Subdirector por seccional)
-      const seccionalId = parseInt(formData.seccional_id, 10);
-      if (isNaN(seccionalId)) {
-        console.error('ID de seccional inválido:', formData.seccional_id);
-        throw new Error('La seccional seleccionada no es válida (ID no numérico).');
+        if (duiError) {
+          console.error('Error checking DUI:', duiError);
+          setFormError('Error al verificar el número de identidad en la base de datos.');
+          setLoading(false);
+          return;
+        }
+
+        const matchedDui = (existingDuiRows || []).find(
+          (row: any) => normalizeDocumentForCompare(row.dui) === normDui
+        );
+
+        if (matchedDui) {
+          const secNom = Array.isArray((matchedDui as any).seccionales)
+            ? (matchedDui as any).seccionales[0]?.nombre
+            : (matchedDui as any).seccionales?.nombre;
+          setDuiDuplicates([matchedDui]);
+          setFormError(
+            `El documento ${rawDui} ya pertenece al elemento ${matchedDui.primer_nombre} ${matchedDui.primer_apellido} (Carnet: ${matchedDui.carnet || 'N/A'}${secNom ? `, Seccional: ${secNom}` : ''}). No se permiten registros duplicados.`
+          );
+          setLoading(false);
+          return;
+        }
       }
 
       if (formData.segundo_cargo_administrativo) {
@@ -398,7 +575,7 @@ export default function NewSocorrista() {
         }
 
         if (conflictName) {
-          alert(`La plaza de "${formData.segundo_cargo_administrativo}" en esta seccional ya está ocupada por ${conflictName}. Solo se permite un cupo activo por seccional.`);
+          setFormError(`La plaza de "${formData.segundo_cargo_administrativo}" en esta seccional ya está ocupada por ${conflictName}. Solo se permite un cupo activo por seccional.`);
           setLoading(false);
           return;
         }
@@ -406,7 +583,6 @@ export default function NewSocorrista() {
 
       let foto_url = null;
       if (foto) {
-        console.log('Iniciando subida de foto...');
         const fileName = `${Date.now()}_photo.jpg`;
         const filePath = `${fileName}`;
 
@@ -415,29 +591,29 @@ export default function NewSocorrista() {
           .upload(filePath, foto);
 
         if (uploadError) {
-          console.error('Error en upload de storage:', uploadError);
           throw new Error(`Error al subir la foto: ${uploadError.message}`);
         }
 
         const { data: { publicUrl } } = supabase.storage
           .from('socorristas')
           .getPublicUrl(filePath);
-        
+
         foto_url = publicUrl;
-        console.log('Foto subida con éxito. URL:', foto_url);
       }
 
-      console.log('Consultando último carnet para generar el siguiente...');
-      const carnet = await generateCarnet(formData.primer_nombre, formData.primer_apellido);
-      console.log('Nuevo carnet generado:', carnet);
+      const cleanPrimerNombre = formData.primer_nombre.trim().toUpperCase();
+      const cleanSegundoNombre = formData.segundo_nombre.trim().toUpperCase();
+      const cleanPrimerApellido = formData.primer_apellido.trim().toUpperCase();
+      const cleanSegundoApellido = formData.segundo_apellido.trim().toUpperCase();
 
-      // Fetch max ID to avoid sequence out of sync errors
+      const carnet = await generateCarnet(cleanPrimerNombre, cleanPrimerApellido);
+
       const { data: maxIdData } = await supabase
         .from('socorristas')
         .select('id')
         .order('id', { ascending: false })
         .limit(1);
-        
+
       let nextId = undefined;
       if (maxIdData && maxIdData.length > 0 && typeof maxIdData[0].id === 'number') {
         nextId = maxIdData[0].id + 1;
@@ -448,6 +624,11 @@ export default function NewSocorrista() {
       const insertData = {
         ...(nextId ? { id: nextId } : {}),
         ...restFormData,
+        primer_nombre: cleanPrimerNombre,
+        segundo_nombre: cleanSegundoNombre,
+        primer_apellido: cleanPrimerApellido,
+        segundo_apellido: cleanSegundoApellido,
+        cargos_secundarios: cargosSecundarios,
         licencia_vehiculo_numero: tiene_licencia_vehiculo ? restFormData.licencia_vehiculo_numero : null,
         licencia_vehiculo_clase: tiene_licencia_vehiculo ? restFormData.licencia_vehiculo_clase : null,
         licencia_vehiculo_vencimiento: tiene_licencia_vehiculo && restFormData.licencia_vehiculo_vencimiento ? restFormData.licencia_vehiculo_vencimiento : null,
@@ -460,8 +641,6 @@ export default function NewSocorrista() {
         estado: 'Activo'
       };
 
-      console.log('Intentando insertar en Supabase...', insertData);
-
       let insertedRecord: any = null;
       const { data, error } = await supabase
         .from('socorristas')
@@ -469,36 +648,41 @@ export default function NewSocorrista() {
         .select();
 
       if (error) {
-        if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('segundo_cargo_administrativo') || error.message?.includes('contacto_emergencia')) {
-          // La columna aún no existe en Supabase, reintentar sin ella para no romper el registro
-          const { 
-            segundo_cargo_administrativo, 
+        if (
+          error.code === '42703' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('segundo_cargo_administrativo') ||
+          error.message?.includes('contacto_emergencia') ||
+          error.message?.includes('cargos_secundarios')
+        ) {
+          const {
+            segundo_cargo_administrativo,
             contacto_emergencia_nombre,
             contacto_emergencia_telefono,
             contacto_emergencia_nombre_2,
             contacto_emergencia_telefono_2,
-            ...fallbackData 
+            cargos_secundarios: _ignoredSec,
+            ...fallbackData
           } = insertData;
           const { data: retryData, error: retryError } = await supabase
             .from('socorristas')
             .insert([fallbackData])
             .select();
           if (retryError) {
-            console.error('Error al reintentar sin columnas nuevas:', retryError);
             throw new Error(`Error de base de datos: ${retryError.message} (Código: ${retryError.code})`);
           }
           insertedRecord = retryData?.[0];
         } else {
-          console.error('Error de Supabase al insertar:', error);
           throw new Error(`Error de base de datos: ${error.message} (Código: ${error.code})`);
         }
       } else if (data && data.length > 0) {
         insertedRecord = data[0];
       }
 
-      console.log('Respuesta de Supabase exitosa:', insertedRecord);
+      if (insertedRecord && cargosSecundarios.length > 0) {
+        await saveSocorristaCargosSecundariosFallback(insertedRecord.id, cargosSecundarios);
+      }
 
-      // Guardar también siempre los contactos de emergencia en configuracion para disponibilidad inmediata
       if (insertedRecord && (formData.contacto_emergencia_telefono || formData.contacto_emergencia_telefono_2)) {
         try {
           const emergenciaData = {
@@ -517,9 +701,8 @@ export default function NewSocorrista() {
       }
 
       if (insertedRecord) {
-        // Sincronizar con la tabla seccionales si se le asignó Director o Subdirector
         try {
-          const fullName = `${formData.primer_nombre} ${formData.primer_apellido}`.trim();
+          const fullName = `${cleanPrimerNombre} ${cleanPrimerApellido}`.trim();
           if (formData.segundo_cargo_administrativo === 'Director de Seccional') {
             await supabase.from('seccionales').update({ director: fullName }).eq('id', seccionalId);
           } else if (formData.segundo_cargo_administrativo === 'Subdirector de Seccional') {
@@ -529,29 +712,51 @@ export default function NewSocorrista() {
           console.warn('Error actualizando seccionales:', seccErr);
         }
 
-        console.log('Elemento guardado correctamente. Redirigiendo...');
         setSuccessMessage('Elemento agregado con éxito');
-        
+
         await logActivity('Creó socorrista', 'Socorrista', insertedRecord.id, {
-          nombre: `${formData.primer_nombre} ${formData.primer_apellido}`,
+          nombre: `${cleanPrimerNombre} ${cleanPrimerApellido}`,
           carnet: carnet
         });
 
         setTimeout(() => {
           navigate(`/socorristas/${insertedRecord.id}`);
-        }, 2000);
+        }, 1600);
       } else {
-        console.warn('Inserción completada pero no se devolvieron datos.');
         throw new Error('La base de datos no devolvió el registro creado. Verifique si se guardó correctamente.');
       }
     } catch (error: any) {
       console.error('ERROR CRÍTICO EN SUBMIT:', error);
-      alert('ERROR AL GUARDAR:\n\n' + (error.message || 'Error desconocido. Revise la consola del navegador para más detalles.'));
+      setFormError(error.message || 'Error al guardar el registro. Intente nuevamente.');
     } finally {
       setLoading(false);
-      console.log('--- FIN SUBMIT ---');
     }
   };
+
+  const allowedAddIds = getAddAllowedSocorristaSeccionalIds();
+  const isSingleLockedSeccional = allowedAddIds !== 'all' && seccionales.length === 1;
+
+  if (!authLoading && seccionalesLoaded && (!canAddAnySocorrista || seccionales.length === 0)) {
+    return (
+      <div className="max-w-xl mx-auto mt-10 bg-white rounded-2xl border border-rose-200 shadow-sm p-8 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+          <Lock className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900">Sin permisos para agregar elementos</h2>
+        <p className="text-sm text-slate-600">
+          Tu perfil actual no cuenta con seccionales habilitadas para registrar nuevos elementos. Solicita a un administrador habilitar la seccional correspondiente en Accesos.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/socorristas')}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Volver al listado de Personal
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -627,6 +832,21 @@ export default function NewSocorrista() {
       </div>
 
       <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+        {formError && (
+          <div className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-sm flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Revisa los datos antes de continuar</p>
+                <p className="text-xs text-rose-800 mt-0.5">{formError}</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setFormError(null)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-8 divide-y divide-gray-200">
           <div className="space-y-6 sm:space-y-5">
             <div>
@@ -689,16 +909,82 @@ export default function NewSocorrista() {
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Nombres <span className="text-red-500">*</span></label>
                 <div className="mt-1 sm:mt-0 sm:col-span-2 grid grid-cols-2 gap-4">
-                  <input type="text" name="primer_nombre" required value={formData.primer_nombre} onChange={handleChange} placeholder="Primer Nombre" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
-                  <input type="text" name="segundo_nombre" value={formData.segundo_nombre} onChange={handleChange} placeholder="Segundo Nombre" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
+                  <input type="text" name="primer_nombre" required value={formData.primer_nombre} onChange={handleChange} placeholder="PRIMER NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                  <input type="text" name="segundo_nombre" value={formData.segundo_nombre} onChange={handleChange} placeholder="SEGUNDO NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
                 </div>
               </div>
 
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Apellidos <span className="text-red-500">*</span></label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2 grid grid-cols-2 gap-4">
-                  <input type="text" name="primer_apellido" required value={formData.primer_apellido} onChange={handleChange} placeholder="Primer Apellido" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
-                  <input type="text" name="segundo_apellido" value={formData.segundo_apellido} onChange={handleChange} placeholder="Segundo Apellido" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <input type="text" name="primer_apellido" required value={formData.primer_apellido} onChange={handleChange} placeholder="PRIMER APELLIDO" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                    <input type="text" name="segundo_apellido" value={formData.segundo_apellido} onChange={handleChange} placeholder="SEGUNDO APELLIDO" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                  </div>
+
+                  {checkingNames && (
+                    <p className="text-xs text-slate-500">Verificando coincidencias de nombre en todas las seccionales...</p>
+                  )}
+
+                  {nameDuplicates.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5 max-w-xl">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-amber-900">
+                            Posible elemento duplicado encontrado ({nameDuplicates.length} {nameDuplicates.length === 1 ? 'coincidencia' : 'coincidencias'} en el sistema)
+                          </p>
+                          <p className="text-[11px] text-amber-800">
+                            Verifica que no esté registrado previamente en otra o la misma seccional:
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                        {nameDuplicates.map((m: any) => {
+                          const secName = Array.isArray(m.seccionales)
+                            ? m.seccionales[0]?.nombre
+                            : m.seccionales?.nombre;
+                          return (
+                            <div
+                              key={m.id}
+                              className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-lg border border-amber-200 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-900 truncate">
+                                  {[m.primer_nombre, m.segundo_nombre, m.primer_apellido, m.segundo_apellido]
+                                    .filter(Boolean)
+                                    .join(' ')}
+                                </p>
+                                <p className="text-[11px] text-slate-600">
+                                  Carnet: <span className="font-mono font-semibold">{m.carnet || 'N/A'}</span> • DUI: {m.dui || 'N/A'} • Seccional: <strong>{secName || 'N/A'}</strong> ({m.estado})
+                                </p>
+                              </div>
+                              <Link
+                                to={`/socorristas/${m.id}`}
+                                target="_blank"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold text-[11px] shrink-0"
+                              >
+                                Ver ficha <ExternalLink className="w-3 h-3" />
+                              </Link>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={confirmHomonym}
+                          onChange={(e) => setConfirmHomonym(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 text-amber-600 border-amber-400 rounded focus:ring-amber-500"
+                        />
+                        <span className="text-xs font-semibold text-amber-950">
+                          Confirmo que revisé el listado y se trata de una persona distinta (homónimo).
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -913,7 +1199,7 @@ export default function NewSocorrista() {
 
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">DUI / Carnet Minoridad <span className="text-red-500">*</span></label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2">
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-2.5">
                   <input
                     type="text"
                     name="dui"
@@ -923,8 +1209,57 @@ export default function NewSocorrista() {
                     placeholder={esMayorDeEdad ? "00000000-0" : "Ingrese carnet o 'Menor de edad'"}
                     maxLength={esMayorDeEdad ? 10 : 50}
                     disabled={!esMayorDeEdad && !tieneCarnetMinoridad}
-                    className={`max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 ${(!esMayorDeEdad && !tieneCarnetMinoridad) ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    className={`max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 ${(!esMayorDeEdad && !tieneCarnetMinoridad) ? 'bg-gray-100 cursor-not-allowed' : ''} ${duiDuplicates.length > 0 ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/40' : ''}`}
                   />
+
+                  {checkingDui && (
+                    <p className="text-xs text-slate-500">Verificando documento en todas las seccionales...</p>
+                  )}
+
+                  {duiDuplicates.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 space-y-2 max-w-xl">
+                      <div className="flex items-start gap-2">
+                        <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-rose-900">
+                            Documento ya registrado en la institución (registro bloqueado)
+                          </p>
+                          <p className="text-[11px] text-rose-800">
+                            Este número de DUI o carnet de minoridad ya pertenece a un elemento existente:
+                          </p>
+                        </div>
+                      </div>
+                      {duiDuplicates.map((m: any) => {
+                        const secName = Array.isArray(m.seccionales)
+                          ? m.seccionales[0]?.nombre
+                          : m.seccionales?.nombre;
+                        return (
+                          <div
+                            key={m.id}
+                            className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-lg border border-rose-200 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 truncate">
+                                {[m.primer_nombre, m.segundo_nombre, m.primer_apellido, m.segundo_apellido]
+                                  .filter(Boolean)
+                                  .join(' ')}
+                              </p>
+                              <p className="text-[11px] text-slate-600">
+                                Carnet: <span className="font-mono font-semibold">{m.carnet || 'N/A'}</span> • Seccional: <strong>{secName || 'N/A'}</strong> • Estado: {m.estado}
+                              </p>
+                            </div>
+                            <Link
+                              to={`/socorristas/${m.id}`}
+                              target="_blank"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-rose-100 hover:bg-rose-200 text-rose-900 font-semibold text-[11px] shrink-0"
+                            >
+                              Ver ficha <ExternalLink className="w-3 h-3" />
+                            </Link>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1009,38 +1344,45 @@ export default function NewSocorrista() {
 
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Seccional <span className="text-red-500">*</span></label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2">
-                  <select disabled={seccionales.length === 1 && role !== 'admin'} name="seccional_id" required value={formData.seccional_id} onChange={handleChange} className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 disabled:bg-gray-100 disabled:text-gray-500">
-                    <option value="">Seleccione una seccional</option>
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-1.5">
+                  <select
+                    disabled={isSingleLockedSeccional}
+                    name="seccional_id"
+                    required
+                    value={formData.seccional_id}
+                    onChange={handleChange}
+                    className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
+                  >
+                    {!isSingleLockedSeccional && <option value="">Seleccione una seccional</option>}
                     {seccionales.map(s => (
                       <option key={s.id} value={s.id}>{s.nombre}</option>
                     ))}
                   </select>
+                  {isSingleLockedSeccional ? (
+                    <p className="text-xs text-emerald-700 flex items-center gap-1 font-medium">
+                      <Lock className="w-3.5 h-3.5 shrink-0" />
+                      Asignada automáticamente según tu seccional autorizada en Accesos.
+                    </p>
+                  ) : allowedAddIds !== 'all' && seccionales.length > 1 ? (
+                    <p className="text-xs text-slate-500 flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5 shrink-0" />
+                      Mostrando únicamente las {seccionales.length} seccionales donde tienes permiso para registrar elementos.
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
-                <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Cargo Institucional <span className="text-red-500">*</span></label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2">
-                  <input
-                    type="text"
-                    name="cargo_institucional"
-                    required
-                    value={formData.cargo_institucional}
-                    onChange={handleChange}
-                    disabled={!esMayorDeEdad}
-                    placeholder="Ej. Socorrista, Jefe de Brigada..."
-                    className={`max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 ${!esMayorDeEdad ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                  />
-                </div>
-              </div>
-
-              <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
-                <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Cargo Administrativo</label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2">
-                  <input type="text" name="cargo_administrativo" value={formData.cargo_administrativo} onChange={handleChange} placeholder="Ej. Tesorero, Secretario, etc." className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
-                </div>
-              </div>
+              <CargosSelector
+                layout="horizontal-rows"
+                cargoPrincipal={formData.cargo_institucional}
+                cargosSecundarios={cargosSecundarios}
+                cargoAdministrativo={formData.cargo_administrativo}
+                onChangePrincipal={(val) => setFormData((prev) => ({ ...prev, cargo_institucional: val }))}
+                onChangeSecundarios={setCargosSecundarios}
+                onChangeAdministrativo={(val) => setFormData((prev) => ({ ...prev, cargo_administrativo: val }))}
+                disabledPrincipal={!esMayorDeEdad}
+                minorNotice={!esMayorDeEdad ? 'Asignado automáticamente para menores de edad' : undefined}
+              />
 
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <div>

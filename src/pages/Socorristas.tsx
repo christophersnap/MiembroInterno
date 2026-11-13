@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import WatermarkImage from '../components/WatermarkImage';
 import { useAuth } from '../contexts/AuthContext';
+import { parseCargosSecundarios } from '../utils/cargosCatalog';
 
 const SteeringWheelIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-label="Licencia de Vehículo">
@@ -117,10 +118,31 @@ export default function Socorristas() {
       
       if (error) throw error;
       
-      const formattedData = data.map(s => ({
-        ...s,
-        seccional_nombre: s.seccionales?.nombre || 'N/A'
-      }));
+      const cargosBackupMap: Record<number, string[]> = {};
+      try {
+        const { data: cargosBackupRows } = await supabase
+          .from('configuracion')
+          .select('clave, valor')
+          .like('clave', 'socorrista_cargos_%');
+        if (cargosBackupRows) {
+          cargosBackupRows.forEach(row => {
+            const idStr = row.clave.replace('socorrista_cargos_', '');
+            const idNum = Number(idStr);
+            if (!Number.isNaN(idNum) && row.valor) {
+              cargosBackupMap[idNum] = parseCargosSecundarios(row.valor);
+            }
+          });
+        }
+      } catch (e) {}
+
+      const formattedData = data.map(s => {
+        const directSecundarios = parseCargosSecundarios(s.cargos_secundarios);
+        return {
+          ...s,
+          seccional_nombre: s.seccionales?.nombre || 'N/A',
+          cargos_secundarios: directSecundarios.length > 0 ? directSecundarios : (cargosBackupMap[s.id] || [])
+        };
+      });
       
       setSocorristas(formattedData);
     } catch (err: any) {
@@ -144,6 +166,7 @@ export default function Socorristas() {
         Seccional: s.seccional_nombre,
         Estado: s.estado,
         'Cargo Institucional': s.cargo_institucional || 'N/A',
+        'Cargos Secundarios': parseCargosSecundarios(s.cargos_secundarios).join(' | ') || 'N/A',
         'Cargo Administrativo': s.cargo_administrativo || 'N/A',
         'Segundo Cargo Administrativo': s.segundo_cargo_administrativo || 'N/A',
         Teléfono: s.telefono,
@@ -240,7 +263,10 @@ export default function Socorristas() {
   };
 
   const uniqueSeccionales = Array.from(new Set(socorristas.map(s => s.seccional_nombre).filter(Boolean))).sort((a, b) => (a as string).localeCompare(b as string));
-  const uniqueCargosInst = Array.from(new Set(socorristas.map(s => s.cargo_institucional).filter(Boolean))).sort((a, b) => (a as string).localeCompare(b as string));
+  const uniqueCargosInst = Array.from(new Set([
+    ...socorristas.map(s => s.cargo_institucional),
+    ...socorristas.flatMap(s => parseCargosSecundarios(s.cargos_secundarios))
+  ].filter(Boolean))).sort((a, b) => (a as string).localeCompare(b as string));
   const uniqueCargosAdmin = Array.from(new Set([
     ...socorristas.map(s => s.cargo_administrativo),
     ...socorristas.map(s => s.segundo_cargo_administrativo)
@@ -255,7 +281,9 @@ export default function Socorristas() {
     const matchesEstado = filterEstado === 'Todos' || s.estado === filterEstado;
     const matchesAllowed = allowedSeccionalIds === 'all' || allowedSeccionalIds.includes(Number(s.seccional_id));
     const matchesSeccional = matchesAllowed && (filterSeccional === 'Todas' || s.seccional_nombre === filterSeccional);
-    const matchesCargoInst = filterCargoInst === 'Todos' || s.cargo_institucional === filterCargoInst;
+    const matchesCargoInst = filterCargoInst === 'Todos'
+      || s.cargo_institucional === filterCargoInst
+      || parseCargosSecundarios(s.cargos_secundarios).includes(filterCargoInst);
     const matchesCargoAdmin = filterCargoAdmin === 'Todos' || s.cargo_administrativo === filterCargoAdmin || s.segundo_cargo_administrativo === filterCargoAdmin;
     const matchesCarnetGenerado = filterCarnetGenerado === 'Todos' || 
                                   (filterCarnetGenerado === 'Generado' ? !!s.carnet_generado_url : !s.carnet_generado_url);
@@ -699,9 +727,20 @@ export default function Socorristas() {
                           {visibleColumns.cargoInstitucional && (
                             <td className="px-6 py-4 whitespace-nowrap">
                               {person.cargo_institucional ? (
-                                <div className="flex items-center text-sm text-gray-900">
-                                  <Shield className="w-4 h-4 mr-1.5 text-primary" />
-                                  {person.cargo_institucional}
+                                <div className="flex flex-col space-y-1">
+                                  <div className="flex items-center text-sm font-medium text-gray-900">
+                                    <Shield className="w-4 h-4 mr-1.5 text-primary shrink-0" />
+                                    {person.cargo_institucional}
+                                  </div>
+                                  {parseCargosSecundarios(person.cargos_secundarios).length > 0 && (
+                                    <div className="flex flex-wrap gap-1 pl-5">
+                                      {parseCargosSecundarios(person.cargos_secundarios).map((sec: string) => (
+                                        <span key={sec} className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                          {sec}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ) : (
                                 <span className="text-sm text-gray-400 italic">N/A</span>
