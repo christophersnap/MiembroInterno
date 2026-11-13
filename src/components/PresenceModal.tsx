@@ -128,7 +128,10 @@ export default function PresenceModal({
                       </div>
                       <div className="truncate">
                         <p className="text-xs font-semibold text-gray-900 truncate">{u.name}</p>
-                        <p className="text-[10px] text-gray-400 capitalize">{u.role || 'Usuario'}</p>
+                        <p className="text-[10px] text-gray-400 capitalize">
+                          {u.role || 'Usuario'}
+                          {u.device ? ` • ${u.device}` : ''}
+                        </p>
                       </div>
                     </div>
                     <span className="inline-flex items-center space-x-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
@@ -150,7 +153,7 @@ export default function PresenceModal({
         <div className="px-6 py-3.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between">
           <span className="text-[11px] text-gray-400 font-medium flex items-center">
             <Globe className="w-3 h-3 mr-1" />
-            Latido cada 25 segundos
+            Sincronización en vivo por dispositivo
           </span>
           <button
             onClick={onClose}

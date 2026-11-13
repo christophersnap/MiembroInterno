@@ -647,8 +647,10 @@ async function startServer() {
   // --- Sistema de Concurrencia y Presencia en Vivo (Usuarios Conectados) ---
   interface ActiveUserSession {
     id: string;
+    userId?: string;
     name: string;
     role?: string;
+    device?: string;
     lastSeen: number;
     path?: string;
   }
@@ -666,12 +668,14 @@ async function startServer() {
 
   app.post('/api/presence/ping', (req, res) => {
     try {
-      const { id = `anon_${Date.now()}`, name = 'Usuario', role = 'usuario', path = '/' } = req.body || {};
+      const { id = `anon_${Date.now()}`, userId, name = 'Usuario', role = 'usuario', device, path = '/' } = req.body || {};
       const now = Date.now();
       activeUsersMap.set(id, {
         id,
+        userId,
         name,
         role,
+        device,
         lastSeen: now,
         path
       });
@@ -687,7 +691,7 @@ async function startServer() {
       res.json({
         success: true,
         onlineCount: Math.max(activeList.length, 1),
-        activeUsers: activeList.map(u => ({ id: u.id, name: u.name, role: u.role }))
+        activeUsers: activeList.map(u => ({ id: u.id, userId: u.userId, name: u.name, role: u.role, device: u.device, path: u.path }))
       });
     } catch (e: any) {
       res.json({ success: true, onlineCount: 1, activeUsers: [] });
@@ -706,7 +710,7 @@ async function startServer() {
       }
       res.json({
         onlineCount: Math.max(activeList.length, 1),
-        activeUsers: activeList.map(u => ({ id: u.id, name: u.name, role: u.role }))
+        activeUsers: activeList.map(u => ({ id: u.id, userId: u.userId, name: u.name, role: u.role, device: u.device, path: u.path }))
       });
     } catch (e: any) {
       res.json({ onlineCount: 1, activeUsers: [] });
