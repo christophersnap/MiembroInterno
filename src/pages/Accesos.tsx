@@ -1094,6 +1094,8 @@ NOTIFY pgrst, 'reload schema';`;
     view_anuncios: 'Ver y Acceder a Anuncios Institucionales',
     crear_anuncios: 'Crear y Publicar Anuncios',
     edit_anuncios: 'Crear y Editar Anuncios Institucionales',
+    view_noticias_ajustes: 'Ver Pestaña de Noticias y Ajustes del Banner Slide',
+    edit_noticias_banner: 'Editar, Subir y Configurar Slides del Banner de Noticias',
     view_formularios: 'Ver Pestaña de Formularios y Respuestas',
     crear_formularios: 'Crear Formularios (Fluent Forms)',
     edit_formularios: 'Editar Formularios y Respuestas (Sin eliminar)',

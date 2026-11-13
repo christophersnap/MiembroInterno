@@ -363,6 +363,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           view_anuncios: canViewAnuncios,
           crear_anuncios: canCreateAnuncios,
           edit_anuncios: permData.permissions.edit_anuncios ?? canCreateAnuncios,
+          view_noticias_ajustes: permData.permissions.view_noticias_ajustes ?? (currentRole === 'admin'),
+          edit_noticias_banner: permData.permissions.edit_noticias_banner ?? permData.permissions.view_noticias_ajustes ?? (currentRole === 'admin'),
           view_formularios: canViewFormularios,
           crear_formularios: canCreateFormularios,
           edit_formularios: permData.permissions.edit_formularios ?? canCreateFormularios,
@@ -388,6 +390,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_solicitudes_carnet: true, edit_solicitudes_carnet: true,
             view_archivos: true, subir_archivos: true, edit_archivos: true,
             view_anuncios: true, crear_anuncios: true, edit_anuncios: true,
+            view_noticias_ajustes: true, edit_noticias_banner: true,
             view_formularios: true, crear_formularios: true, edit_formularios: true, ver_todos_formularios: true,
             view_meritos: true, edit_meritos: true,
             personalizar_colores: true
@@ -408,6 +411,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_solicitudes_carnet: false, edit_solicitudes_carnet: false,
             view_archivos: true, subir_archivos: canUploadFiles, edit_archivos: canUploadFiles,
             view_anuncios: true, crear_anuncios: false, edit_anuncios: false,
+            view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
             personalizar_colores: false
@@ -428,6 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_solicitudes_carnet: false, edit_solicitudes_carnet: false,
             view_archivos: true, subir_archivos: canUploadFiles, edit_archivos: canUploadFiles,
             view_anuncios: true, crear_anuncios: false, edit_anuncios: false,
+            view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: true,
             personalizar_colores: false
@@ -447,6 +452,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_solicitudes_carnet: false, edit_solicitudes_carnet: false,
             view_archivos: true, subir_archivos: canUploadFiles, edit_archivos: canUploadFiles,
             view_anuncios: true, crear_anuncios: false, edit_anuncios: false,
+            view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
             personalizar_colores: false
@@ -488,6 +494,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (typeof userCustomPerms.edit_solicitudes_combustible === 'boolean' && typeof userCustomPerms.aprobar_solicitudes_combustible !== 'boolean') {
         finalMergedPerms.aprobar_solicitudes_combustible = userCustomPerms.edit_solicitudes_combustible;
+      }
+      if (typeof userCustomPerms.edit_noticias_banner === 'boolean' && userCustomPerms.edit_noticias_banner && typeof userCustomPerms.view_noticias_ajustes !== 'boolean') {
+        finalMergedPerms.view_noticias_ajustes = true;
+      } else if (typeof userCustomPerms.view_noticias_ajustes === 'boolean' && !userCustomPerms.view_noticias_ajustes && typeof userCustomPerms.edit_noticias_banner !== 'boolean') {
+        finalMergedPerms.edit_noticias_banner = false;
       }
 
       // Special check for can_upload_files column only when no explicit override denies it

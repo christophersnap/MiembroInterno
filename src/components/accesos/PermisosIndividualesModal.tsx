@@ -104,12 +104,14 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
     ],
   },
   comunicacion: {
-    label: 'Anuncios y Formularios',
+    label: 'Anuncios, Noticias y Formularios',
     icon: Megaphone,
     keys: [
       'view_anuncios',
       'crear_anuncios',
       'edit_anuncios',
+      'view_noticias_ajustes',
+      'edit_noticias_banner',
       'view_formularios',
       'crear_formularios',
       'edit_formularios',
@@ -186,6 +188,12 @@ const SIMPLE_VIEW_EDIT_MODULES: {
   viewKey: string;
   editKeys: string[];
 }[] = [
+  {
+    label: 'Noticias y Ajustes de Banner (Dashboard)',
+    desc: 'Ver la pestaña de Noticias y configurar slides, imágenes, editor y tiempos del banner.',
+    viewKey: 'view_noticias_ajustes',
+    editKeys: ['edit_noticias_banner'],
+  },
   {
     label: 'Anuncios Institucionales',
     desc: 'Publicar, editar o solo leer avisos y boletines.',

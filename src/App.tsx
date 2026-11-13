@@ -34,6 +34,8 @@ const ForcePasswordReset = React.lazy(() => import('./pages/ForcePasswordReset')
 const Registro = React.lazy(() => import('./pages/Registro'));
 const Archivos = React.lazy(() => import('./pages/Archivos'));
 const Anuncios = React.lazy(() => import('./pages/Anuncios'));
+const Noticias = React.lazy(() => import('./pages/Noticias'));
+const NoticiaLanding = React.lazy(() => import('./pages/NoticiaLanding'));
 const Formularios = React.lazy(() => import('./pages/Formularios'));
 const Meritos = React.lazy(() => import('./pages/Meritos'));
 const PublicFormulario = React.lazy(() => import('./pages/PublicFormulario'));
@@ -117,6 +119,8 @@ export default function App() {
               <Route path="actividad" element={<ProtectedRoute requiredPermission="view_activity"><ActivityLogs /></ProtectedRoute>} />
               <Route path="archivos" element={<ProtectedRoute requiredPermission="view_archivos"><Archivos /></ProtectedRoute>} />
               <Route path="anuncios" element={<ProtectedRoute requiredPermission="view_anuncios"><Anuncios /></ProtectedRoute>} />
+              <Route path="noticias" element={<ProtectedRoute anyPermission={['view_noticias_ajustes', 'edit_noticias_banner']}><Noticias /></ProtectedRoute>} />
+              <Route path="noticias/ver/:id" element={<NoticiaLanding />} />
               <Route path="accesos" element={<ProtectedRoute requiredPermission="view_accesos"><Accesos /></ProtectedRoute>} />
             </Route>
           </Routes>

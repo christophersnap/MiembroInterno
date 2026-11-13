@@ -16,6 +16,8 @@ const PERMISSION_DESCRIPTIONS: Record<string, { label: string; desc: string; cat
   subir_archivos: { label: 'Subir Archivos Institucionales', desc: 'Cargar nuevos documentos y circulares al repositorio.', category: 'Contenido' },
   view_anuncios: { label: 'Ver Anuncios Institucionales', desc: 'Acceso a consultar comunicados, boletines y noticias del sistema.', category: 'Comunicación' },
   crear_anuncios: { label: 'Publicar y Gestionar Anuncios', desc: 'Crear avisos, alertas urgentes y banners con archivos adjuntos.', category: 'Comunicación' },
+  view_noticias_ajustes: { label: 'Ver Ajustes de Noticias y Banner Slide', desc: 'Acceso a la pestaña Noticias para configurar el carrusel del Dashboard.', category: 'Comunicación' },
+  edit_noticias_banner: { label: 'Editar Banner Slide de Noticias', desc: 'Subir imágenes, redactar contenido con editor y agregar videos a las noticias.', category: 'Comunicación' },
   view_formularios: { label: 'Ver Formularios e Inscripciones', desc: 'Consultar formularios activos, enlaces y lista de respuestas.', category: 'Operaciones' },
   crear_formularios: { label: 'Crear Formularios (Fluent Forms)', desc: 'Diseñar formularios con campos institucionales y control de acceso.', category: 'Operaciones' },
   view_socorristas: { label: 'Padrón de Socorristas', desc: 'Consultar el listado de personal voluntario.', category: 'Socorristas' },

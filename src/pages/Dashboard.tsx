@@ -14,6 +14,13 @@ import { usePresence } from '../hooks/usePresence';
 import { useSettings } from '../contexts/SettingsContext';
 import PresenceModal from '../components/PresenceModal';
 import WatermarkImage from '../components/WatermarkImage';
+import NoticiasBannerSlider from '../components/dashboard/NoticiasBannerSlider';
+import {
+  DEFAULT_BANNER_CONFIG,
+  fetchNoticiasBannerData,
+  NoticiaBannerSlide,
+  NoticiasBannerConfig,
+} from '../lib/noticiasBanner';
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
@@ -40,6 +47,8 @@ export default function Dashboard() {
   const [isTickerPaused, setIsTickerPaused] = useState(false);
   const [selectedAnuncioModal, setSelectedAnuncioModal] = useState<any | null>(null);
   const [recentMeritos, setRecentMeritos] = useState<any[]>([]);
+  const [bannerSlides, setBannerSlides] = useState<NoticiaBannerSlide[]>([]);
+  const [bannerConfig, setBannerConfig] = useState<NoticiasBannerConfig>(DEFAULT_BANNER_CONFIG);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -238,8 +247,19 @@ export default function Dashboard() {
       }
     };
 
+    const fetchBanner = async () => {
+      try {
+        const res = await fetchNoticiasBannerData(false);
+        setBannerSlides(res.slides);
+        setBannerConfig(res.config);
+      } catch (e) {
+        console.warn('Error cargando banner de noticias:', e);
+      }
+    };
+
     fetchStats();
     fetchDashboardAnuncios();
+    fetchBanner();
   }, []);
 
   // Ticker interval para cambiar titulares automáticamente
@@ -506,6 +526,11 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 0. SECCIÓN: BANNER SLIDE DE NOTICIAS INSTITUCIONALES                      */}
+      {/* ========================================================================= */}
+      <NoticiasBannerSlider slides={bannerSlides} config={bannerConfig} />
 
       {/* ========================================================================= */}
       {/* 1. SECCIÓN: CUADRO DE NOTIFICACIÓN DE ANUNCIO (ESTILO WIDGET IOS CON X)   */}

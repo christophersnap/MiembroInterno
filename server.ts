@@ -241,6 +241,25 @@ db.exec(`
     fecha_revision DATETIME,
     notas_admin TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS noticias_banner (
+    id TEXT PRIMARY KEY,
+    titulo TEXT NOT NULL,
+    subtitulo TEXT,
+    categoria TEXT DEFAULT 'Noticia',
+    imagen_url TEXT NOT NULL,
+    contenido_html TEXT DEFAULT '',
+    videos TEXT DEFAULT '[]',
+    accion_click TEXT DEFAULT 'landing',
+    enlace_redireccion TEXT,
+    enlace_texto TEXT DEFAULT 'Más información',
+    activo INTEGER DEFAULT 1,
+    orden INTEGER DEFAULT 0,
+    autor_id TEXT,
+    autor_nombre TEXT DEFAULT 'Cruz Verde Salvadoreña',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 try {
@@ -301,7 +320,10 @@ try {
     ['smtp_secure', 'true'],
     ['smtp_user', 'notificaciones@cruzverdesv.org'],
     ['smtp_from', 'Cruz Verde Salvadoreña (No Responder) <notificaciones@cruzverdesv.org>'],
-    ['smtp_reply_to', 'noreply@cruzverdesv.org']
+    ['smtp_reply_to', 'noreply@cruzverdesv.org'],
+    ['noticias_banner_activo', 'true'],
+    ['noticias_banner_intervalo', '6'],
+    ['noticias_banner_autoplay', 'true']
   ];
   const insertStmt = db.prepare(`INSERT OR IGNORE INTO configuracion (clave, valor) VALUES (?, ?)`);
   for (const [k, v] of defaultConfigs) {
@@ -905,6 +927,167 @@ async function startServer() {
     try {
       db.prepare('DELETE FROM anuncios WHERE id = ?').run(req.params.id);
       res.json({ success: true, message: 'Anuncio eliminado' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Endpoints de Banner Slide de Noticias ---
+  app.get('/api/noticias-banner', (req, res) => {
+    try {
+      const includeInactive = req.query.all === 'true';
+      const query = includeInactive
+        ? 'SELECT * FROM noticias_banner ORDER BY orden ASC, created_at DESC'
+        : 'SELECT * FROM noticias_banner WHERE activo = 1 ORDER BY orden ASC, created_at DESC';
+      const rows = db.prepare(query).all().map((r: any) => ({
+        ...r,
+        activo: Boolean(r.activo),
+        videos: (() => {
+          try { return JSON.parse(r.videos || '[]'); } catch { return []; }
+        })()
+      }));
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/noticias-banner/:id', (req, res) => {
+    try {
+      const row = db.prepare('SELECT * FROM noticias_banner WHERE id = ?').get(req.params.id) as any;
+      if (!row) return res.status(404).json({ error: 'Noticia no encontrada' });
+      res.json({
+        ...row,
+        activo: Boolean(row.activo),
+        videos: (() => {
+          try { return JSON.parse(row.videos || '[]'); } catch { return []; }
+        })()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/noticias-banner', (req, res) => {
+    try {
+      const {
+        id = `not-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        titulo,
+        subtitulo = null,
+        categoria = 'Noticia',
+        imagen_url,
+        contenido_html = '',
+        videos = [],
+        accion_click = 'landing',
+        enlace_redireccion = null,
+        enlace_texto = 'Más información',
+        activo = true,
+        orden = 0,
+        autor_id = null,
+        autor_nombre = 'Cruz Verde Salvadoreña'
+      } = req.body;
+
+      if (!titulo || !imagen_url) {
+        return res.status(400).json({ error: 'Título e imagen destacada son obligatorios' });
+      }
+
+      db.prepare(`
+        INSERT INTO noticias_banner (
+          id, titulo, subtitulo, categoria, imagen_url, contenido_html, videos,
+          accion_click, enlace_redireccion, enlace_texto, activo, orden, autor_id, autor_nombre
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        titulo,
+        subtitulo,
+        categoria,
+        imagen_url,
+        contenido_html,
+        JSON.stringify(Array.isArray(videos) ? videos : []),
+        accion_click === 'url' ? 'url' : 'landing',
+        enlace_redireccion,
+        enlace_texto,
+        activo ? 1 : 0,
+        Number(orden || 0),
+        autor_id,
+        autor_nombre
+      );
+
+      const created = db.prepare('SELECT * FROM noticias_banner WHERE id = ?').get(id) as any;
+      res.json({
+        ...created,
+        activo: Boolean(created.activo),
+        videos: (() => { try { return JSON.parse(created.videos || '[]'); } catch { return []; } })()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/noticias-banner/:id', (req, res) => {
+    try {
+      const current = db.prepare('SELECT * FROM noticias_banner WHERE id = ?').get(req.params.id) as any;
+      if (!current) return res.status(404).json({ error: 'Slide no encontrado' });
+
+      const {
+        titulo,
+        subtitulo,
+        categoria,
+        imagen_url,
+        contenido_html,
+        videos,
+        accion_click,
+        enlace_redireccion,
+        enlace_texto,
+        activo,
+        orden
+      } = req.body;
+
+      db.prepare(`
+        UPDATE noticias_banner SET
+          titulo = COALESCE(?, titulo),
+          subtitulo = ?,
+          categoria = COALESCE(?, categoria),
+          imagen_url = COALESCE(?, imagen_url),
+          contenido_html = COALESCE(?, contenido_html),
+          videos = COALESCE(?, videos),
+          accion_click = COALESCE(?, accion_click),
+          enlace_redireccion = ?,
+          enlace_texto = COALESCE(?, enlace_texto),
+          activo = COALESCE(?, activo),
+          orden = COALESCE(?, orden),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        titulo !== undefined ? titulo : null,
+        subtitulo !== undefined ? subtitulo : current.subtitulo,
+        categoria !== undefined ? categoria : null,
+        imagen_url !== undefined ? imagen_url : null,
+        contenido_html !== undefined ? contenido_html : null,
+        videos !== undefined ? JSON.stringify(Array.isArray(videos) ? videos : []) : null,
+        accion_click !== undefined ? accion_click : null,
+        enlace_redireccion !== undefined ? enlace_redireccion : current.enlace_redireccion,
+        enlace_texto !== undefined ? enlace_texto : null,
+        activo !== undefined ? (activo ? 1 : 0) : null,
+        orden !== undefined ? Number(orden) : null,
+        req.params.id
+      );
+
+      const updated = db.prepare('SELECT * FROM noticias_banner WHERE id = ?').get(req.params.id) as any;
+      res.json({
+        ...updated,
+        activo: Boolean(updated.activo),
+        videos: (() => { try { return JSON.parse(updated.videos || '[]'); } catch { return []; } })()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/noticias-banner/:id', (req, res) => {
+    try {
+      db.prepare('DELETE FROM noticias_banner WHERE id = ?').run(req.params.id);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

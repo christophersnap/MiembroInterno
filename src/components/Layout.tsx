@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, BookOpen, MapPin, Settings, LogOut, Menu, X, 
   IdCard, ChevronLeft, ChevronRight, User as UserIcon, Activity, Shield, 
   PhoneCall, BadgeCheck, FileText, Truck, ClipboardList, Fuel, FolderDown, 
-  Megaphone, Sparkles, ChevronDown, Palette, FileSpreadsheet, Award
+  Megaphone, Newspaper, Sparkles, ChevronDown, Palette, FileSpreadsheet, Award
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -177,6 +177,7 @@ export default function Layout() {
     // Principal
     { name: 'Dashboard', href: '/', icon: LayoutDashboard, show: permissions.view_dashboard, category: 'principal' },
     { name: 'Mi Perfil', href: `/socorristas/${socorristaId}`, icon: UserIcon, show: !!socorristaId, category: 'principal' },
+    { name: 'Noticias', href: '/noticias', icon: Newspaper, show: Boolean(role === 'admin' || permissions.view_noticias_ajustes || permissions.edit_noticias_banner), category: 'principal' },
     { name: 'Anuncios', href: '/anuncios', icon: Megaphone, show: Boolean(role === 'admin' || permissions.view_anuncios), category: 'principal' },
     { name: 'Archivos', href: '/archivos', icon: FolderDown, show: permissions.view_archivos ?? true, category: 'principal' },
     
