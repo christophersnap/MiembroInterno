@@ -65,6 +65,7 @@ export default function Solicitudes() {
   const canViewCombustible = isAdmin || Boolean(permissions.view_solicitudes_combustible);
   const canViewLogistica = canViewCompra || canViewCombustible;
   const canViewCarnet = isAdmin || Boolean(permissions.view_solicitudes_carnet);
+  const canPreviewPdf = isAdmin || (permissions.ver_previsualizacion_pdf ?? true);
 
   const hasNivelNacional = isAdmin || (canViewCompra && compraScope === 'global') || (canViewCombustible && combustibleScope === 'global');
   const combinedAllowedSecIds = Array.from(new Set([
@@ -1239,14 +1240,16 @@ export default function Solicitudes() {
                         </button>
 
                         {/* Descargar / Ver PDF */}
-                        <button
-                          onClick={() => handleOpenPdf(item)}
-                          className="inline-flex items-center px-2.5 py-1 bg-gray-900 hover:bg-black text-white rounded-lg text-2xs font-bold transition shadow-2xs cursor-pointer"
-                          title="Abrir y descargar documento oficial en PDF"
-                        >
-                          <Download className="w-3 h-3 mr-1" />
-                          PDF
-                        </button>
+                        {canPreviewPdf && (
+                          <button
+                            onClick={() => handleOpenPdf(item)}
+                            className="inline-flex items-center px-2.5 py-1 bg-gray-900 hover:bg-black text-white rounded-lg text-2xs font-bold transition shadow-2xs cursor-pointer"
+                            title="Abrir y descargar documento oficial en PDF"
+                          >
+                            <Download className="w-3 h-3 mr-1" />
+                            PDF
+                          </button>
+                        )}
 
                       </td>
 
@@ -1494,16 +1497,18 @@ export default function Solicitudes() {
                   Cerrar
                 </button>
 
-                <button
-                  onClick={() => {
-                    handleOpenPdf(detailItem);
-                    setDetailItem(null);
-                  }}
-                  className="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  Descargar / Imprimir PDF
-                </button>
+                {canPreviewPdf && (
+                  <button
+                    onClick={() => {
+                      handleOpenPdf(detailItem);
+                      setDetailItem(null);
+                    }}
+                    className="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" />
+                    Descargar / Imprimir PDF
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1635,16 +1640,20 @@ export default function Solicitudes() {
             </div>
 
             <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-2xl">
-              <button
-                onClick={() => {
-                  handleOpenPdf(emailInfoItem);
-                  setEmailInfoItem(null);
-                }}
-                className="inline-flex items-center px-3.5 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                Descargar Copia de PDF
-              </button>
+              {canPreviewPdf ? (
+                <button
+                  onClick={() => {
+                    handleOpenPdf(emailInfoItem);
+                    setEmailInfoItem(null);
+                  }}
+                  className="inline-flex items-center px-3.5 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  Descargar Copia de PDF
+                </button>
+              ) : (
+                <div />
+              )}
 
               <button
                 onClick={() => setEmailInfoItem(null)}
@@ -1863,7 +1872,7 @@ export default function Solicitudes() {
       {/* ========================================================= */}
       {/* MODAL 3: PDF DE COMBUSTIBLE                               */}
       {/* ========================================================= */}
-      {pdfCombustibleItem && (
+      {canPreviewPdf && pdfCombustibleItem && (
         <CombustiblePdfModal
           solicitud={pdfCombustibleItem}
           config={combustibleConfig}
@@ -1874,7 +1883,7 @@ export default function Solicitudes() {
       {/* ========================================================= */}
       {/* MODAL 4: PDF DE COMPRA Y MANTENIMIENTO                    */}
       {/* ========================================================= */}
-      {pdfCompraItem && (
+      {canPreviewPdf && pdfCompraItem && (
         <CompraPdfPreviewModal
           solicitud={pdfCompraItem}
           config={compraConfig}

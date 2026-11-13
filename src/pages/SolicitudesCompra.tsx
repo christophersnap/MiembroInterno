@@ -76,16 +76,21 @@ const TIPOS_SOLICITUD = [
 
 export default function SolicitudesCompra() {
   const navigate = useNavigate();
-  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const compraScope = getModuleScope('solicitudes_compra');
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_compra');
+  const compraCreateScope = getCreateSolicitudScope('solicitudes_compra');
+  const compraCreateSeccionalId = getCreateSolicitudSeccionalId('solicitudes_compra');
+  const canSelectAnySeccionalOnCreate = isAdmin || compraCreateScope === 'global';
+  const canCreateCompra = isAdmin || (permissions.crear_solicitudes_compra ?? true);
   const hasNivelNacional = isAdmin || compraScope === 'global';
   const isSeccionalOnly = compraScope === 'seccional';
   const canApprove = isAdmin || permissions.edit_solicitudes_compra === true || permissions.aprobar_solicitudes_compra === true;
   const canViewHistorial = isAdmin || Boolean(permissions.view_compra_historial);
   const canViewPlantillas = isAdmin || Boolean(permissions.view_compra_plantillas);
+  const canPreviewPdf = isAdmin || (permissions.ver_previsualizacion_pdf ?? true);
 
   // Estados principales
   const [solicitudes, setSolicitudes] = useState<SolicitudCompra[]>([]);
@@ -119,10 +124,16 @@ export default function SolicitudesCompra() {
   const [loading, setLoading] = useState(true);
   const [dbTableMissing, setDbTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [feedbackBanner, setFeedbackBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showBanner = (type: 'success' | 'error', text: string) => {
+    setFeedbackBanner({ type, text });
+    setTimeout(() => setFeedbackBanner((prev) => (prev?.text === text ? null : prev)), 6000);
+  };
 
   // Navegación de vistas
   const [activeTab, setActiveTab] = useState<'lista' | 'nueva' | 'plantillas'>(
-    canViewHistorial && (isAdmin || hasNivelNacional) ? 'lista' : 'nueva'
+    canViewHistorial && (!canCreateCompra || isAdmin || hasNivelNacional) ? 'lista' : 'nueva'
   );
 
   // Sincronizar pestaña inicial una vez que el contexto de autenticación termina de cargar
@@ -130,21 +141,23 @@ export default function SolicitudesCompra() {
   useEffect(() => {
     if (!authLoading && !initialResolvedRef.current) {
       initialResolvedRef.current = true;
-      if (canViewHistorial && (isAdmin || hasNivelNacional)) {
+      if (canViewHistorial && (!canCreateCompra || isAdmin || hasNivelNacional)) {
         setActiveTab('lista');
       } else {
         setActiveTab('nueva');
       }
     }
-  }, [authLoading, isAdmin, hasNivelNacional, canViewHistorial]);
+  }, [authLoading, isAdmin, hasNivelNacional, canViewHistorial, canCreateCompra]);
 
   useEffect(() => {
-    if (activeTab === 'lista' && !canViewHistorial) {
+    if (activeTab === 'nueva' && !canCreateCompra && canViewHistorial) {
+      setActiveTab('lista');
+    } else if (activeTab === 'lista' && !canViewHistorial) {
       setActiveTab('nueva');
     } else if (activeTab === 'plantillas' && !canViewPlantillas) {
-      setActiveTab('nueva');
+      setActiveTab(canCreateCompra ? 'nueva' : 'lista');
     }
-  }, [activeTab, canViewHistorial, canViewPlantillas]);
+  }, [activeTab, canViewHistorial, canViewPlantillas, canCreateCompra]);
 
   // Configuración completa de plantillas y PDF
   const [compraConfig, setCompraConfig] = useState<CompraConfig>(() => {
@@ -747,7 +760,7 @@ NOTIFY pgrst, 'reload schema';`;
     }
 
     if (!formData.solicitado_por.trim()) {
-      alert('El nombre del solicitante (Director) es requerido.');
+      showBanner('error', 'El nombre del solicitante es requerido.');
       return;
     }
 
@@ -825,7 +838,7 @@ NOTIFY pgrst, 'reload schema';`;
           const updatedList = [newRecord, ...solicitudes];
           setSolicitudes(updatedList);
           sessionStorage.setItem('cruz_verde_solicitudes_compra', JSON.stringify(updatedList));
-          alert(`La solicitud ${folioGenerado} fue guardada localmente. La tabla en Supabase requiere ejecutar el script de actualización para guardar en la nube. Use el botón "Copiar Script SQL" en el banner superior.`);
+          showBanner('success', `La solicitud ${folioGenerado} fue guardada localmente.`);
         } else {
           await fetchData();
         }
@@ -886,11 +899,11 @@ NOTIFY pgrst, 'reload schema';`;
 
       setActiveTab('lista');
       window.dispatchEvent(new Event('solicitudes_updated'));
-      alert(`¡Solicitud ${folioGenerado} registrada con éxito! Puede imprimir el PDF o revisar el estado en el historial.`);
+      showBanner('success', `Solicitud ${folioGenerado} registrada correctamente.`);
 
     } catch (err: any) {
       console.error('Error guardando solicitud:', err);
-      alert(`Error al registrar la solicitud: ${err.message || 'Error desconocido'}`);
+      showBanner('error', `Error al registrar la solicitud: ${err.message || 'Error desconocido'}`);
     } finally {
       setSubmitting(false);
     }
@@ -1039,12 +1052,12 @@ NOTIFY pgrst, 'reload schema';`;
         }
       }
 
-      alert(`¡Solicitud ${folioGenerado} registrada con éxito! Ha sido enviada al Área Administrativa.`);
+      showBanner('success', `Solicitud ${folioGenerado} registrada y remitida al Área Administrativa.`);
       window.dispatchEvent(new Event('solicitudes_updated'));
       setActiveTab('lista');
     } catch (err: any) {
       console.error('Error guardando solicitud:', err);
-      alert(`Error al registrar la solicitud: ${err.message || 'Error desconocido'}`);
+      showBanner('error', `Error al registrar la solicitud: ${err.message || 'Error desconocido'}`);
     } finally {
       setSubmitting(false);
     }
@@ -1195,7 +1208,7 @@ Cruz Verde Salvadoreña`;
 
     } catch (err: any) {
       console.error('Error enviando correo:', err);
-      alert(`Error al enviar notificación: ${err.message || 'Error de red'}`);
+      showBanner('error', `Error al enviar notificación: ${err.message || 'Error de red'}`);
       setEmailForm(prev => ({ ...prev, enviando: false }));
     }
   };
@@ -1244,11 +1257,11 @@ Cruz Verde Salvadoreña`;
       window.dispatchEvent(new Event('solicitudes_updated'));
       setShowStatusModal(false);
       setShowDetailModal(false);
-      alert(`El estado de la solicitud ${selectedSolicitud.folio} se actualizó a: ${newStatus}`);
+      showBanner('success', `El estado de la solicitud ${selectedSolicitud.folio} se actualizó a ${newStatus}.`);
 
     } catch (err: any) {
       console.error('Error actualizando estado:', err);
-      alert(`Error al actualizar estado: ${err.message || 'Error desconocido'}`);
+      showBanner('error', `Error al actualizar estado: ${err.message || 'Error desconocido'}`);
     } finally {
       setUpdatingStatus(false);
     }
@@ -1357,60 +1370,65 @@ Cruz Verde Salvadoreña`;
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto pb-16">
       
-      {/* Encabezado Principal con Botón Regresar al Menú y Pestañas */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center space-x-3">
+      {/* Encabezado Principal Estilo Apple iOS */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex items-center gap-3.5 min-w-0">
           <button
+            type="button"
             onClick={() => navigate('/solicitudes')}
-            className="inline-flex items-center px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer mr-1"
+            className="inline-flex items-center px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80 rounded-2xl text-xs font-semibold transition shadow-2xs cursor-pointer shrink-0 whitespace-nowrap"
           >
             <ChevronLeft className="w-4 h-4 mr-1" />
-            Regresar al Menú
+            Menú
           </button>
 
-          <div className="p-2.5 bg-primary/10 rounded-xl text-primary">
-            <FileText className="w-8 h-8" />
+          <div className="w-11 h-11 rounded-2xl bg-emerald-500/12 text-emerald-700 flex items-center justify-center shrink-0">
+            <FileText className="w-5 h-5" />
           </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-                Solicitud de Compra y Mantenimiento
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">
+                Compra y Mantenimiento
               </h1>
               {isSeccionalOnly && userSeccionalNombre && (
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-                  {userSeccionalNombre}
+                <span className="text-xs font-semibold text-slate-500">
+                  · {userSeccionalNombre}
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-500">
-              Departamento Administrativo • Formulario oficial de requerimiento institucional
+            <p className="text-xs text-slate-500 truncate">
+              Departamento Administrativo · Requisiciones institucionales
             </p>
           </div>
         </div>
 
-        {/* Selector de pestañas y Acciones Principales */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center space-x-1.5 bg-gray-100 p-1 rounded-xl">
+        {/* Segmented Control iOS y Acciones */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-1 bg-slate-200/70 p-1 rounded-2xl border border-slate-200/80">
             {!hasNivelNacional ? (
               <>
-                <button
-                  onClick={() => setActiveTab('nueva')}
-                  className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'nueva'
-                      ? 'bg-primary text-white shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Formulario
-                </button>
+                {canCreateCompra && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('nueva')}
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      activeTab === 'nueva'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                    Formulario
+                  </button>
+                )}
                 {canViewHistorial && (
                   <button
+                    type="button"
                     onClick={() => setActiveTab('lista')}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
                       activeTab === 'lista'
-                        ? 'bg-white text-gray-900 shadow-xs'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     {isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
@@ -1418,15 +1436,16 @@ Cruz Verde Salvadoreña`;
                 )}
                 {canViewPlantillas && (
                   <button
+                    type="button"
                     onClick={() => setActiveTab('plantillas')}
-                    className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                       activeTab === 'plantillas'
-                        ? 'bg-emerald-700 text-white shadow-xs'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Sliders className="w-3.5 h-3.5 mr-1" />
-                    Plantillas y Configuración
+                    <Sliders className="w-3.5 h-3.5 mr-1 text-slate-500" />
+                    Plantillas
                   </button>
                 )}
               </>
@@ -1434,84 +1453,126 @@ Cruz Verde Salvadoreña`;
               <>
                 {canViewHistorial && (
                   <button
+                    type="button"
                     onClick={() => setActiveTab('lista')}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
                       activeTab === 'lista'
-                        ? 'bg-white text-gray-900 shadow-xs'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Historial y Dashboard ({solicitudes.length})
+                    Historial ({solicitudes.length})
                   </button>
                 )}
-                <button
-                  onClick={() => setActiveTab('nueva')}
-                  className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'nueva'
-                      ? 'bg-primary text-white shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Formulario
-                </button>
-                {canViewPlantillas && (
+                {canCreateCompra && (
                   <button
-                    onClick={() => setActiveTab('plantillas')}
-                    className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === 'plantillas'
-                        ? 'bg-emerald-700 text-white shadow-xs'
-                        : 'text-gray-600 hover:text-gray-900'
+                    type="button"
+                    onClick={() => setActiveTab('nueva')}
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      activeTab === 'nueva'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Sliders className="w-3.5 h-3.5 mr-1" />
-                    Plantillas y Configuración
+                    <Plus className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                    Formulario
+                  </button>
+                )}
+                {canViewPlantillas && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('plantillas')}
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      activeTab === 'plantillas'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5 mr-1 text-slate-500" />
+                    Plantillas
                   </button>
                 )}
               </>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const sol = selectedSolicitud || (solicitudes.length > 0 ? solicitudes[0] : null);
-              setPreviewPdfSolicitud(sol);
-              setShowPreviewPdfModal(true);
-            }}
-            className="inline-flex items-center px-3.5 py-2 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 rounded-xl text-xs font-bold transition shadow-2xs"
-            title="Previsualizar el formato oficial PDF con logotipo y bloques actuales"
-          >
-            <Eye className="w-3.5 h-3.5 mr-1.5 text-emerald-700" />
-            Previsualizar PDF
-          </button>
+          {canPreviewPdf && (
+            <button
+              type="button"
+              onClick={() => {
+                const sol = selectedSolicitud || (solicitudes.length > 0 ? solicitudes[0] : null);
+                setPreviewPdfSolicitud(sol);
+                setShowPreviewPdfModal(true);
+              }}
+              className="inline-flex items-center px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-semibold transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+              title="Previsualizar el formato oficial PDF con logotipo y bloques actuales"
+            >
+              <Eye className="w-3.5 h-3.5 mr-1.5" />
+              Previsualizar PDF
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* VISTA 1: FORMULARIO DE SOLICITUD SIMPLIFICADO (ESTILO COMBUSTIBLE)        */}
-      {/* ========================================================================= */}
-      {activeTab === 'nueva' && (
-        <CompraForm
-          seccionales={seccionales}
-          vehiculos={vehiculos}
-          isAdmin={isAdmin}
-          userSeccionalNombre={userSeccionalNombre}
-          userSeccionalId={userSeccionalId}
-          submitting={submitting}
-          onSubmit={handleCrearCompraFromForm}
-        />
+      {feedbackBanner && (
+        <div
+          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-xs font-medium animate-in fade-in ${
+            feedbackBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {feedbackBanner.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{feedbackBanner.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackBanner(null)}
+            className="p-1 rounded-full hover:bg-black/5 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
 
       {/* ========================================================================= */}
-      {/* VISTA 2: TABLA DE HISTORIAL Y SEGUIMIENTO (DASHBOARD O MIS SOLICITUDES)  */}
+      {/* VISTA 1: FORMULARIO ESTILO APPLE IOS                                      */}
+      {/* ========================================================================= */}
+      {activeTab === 'nueva' && canCreateCompra && (() => {
+        const lockedId = !canSelectAnySeccionalOnCreate
+          ? (compraCreateSeccionalId || effectiveSeccionalId)
+          : userSeccionalId;
+        const lockedObj = lockedId ? seccionales.find(s => Number(s.id) === Number(lockedId)) : null;
+        const resolvedSecNombre = lockedObj?.nombre || userSeccionalNombre;
+
+        return (
+          <CompraForm
+            seccionales={seccionales}
+            vehiculos={vehiculos}
+            isAdmin={isAdmin}
+            canSelectAnySeccional={canSelectAnySeccionalOnCreate}
+            userSeccionalNombre={resolvedSecNombre}
+            userSeccionalId={lockedId}
+            submitting={submitting}
+            onSubmit={handleCrearCompraFromForm}
+          />
+        );
+      })()}
+
+      {/* ========================================================================= */}
+      {/* VISTA 2: TABLA DE HISTORIAL Y SEGUIMIENTO                                 */}
       {/* ========================================================================= */}
       {canViewHistorial && activeTab === 'lista' && (
         <div className="space-y-4">
           
           {/* Banner de Ayuda Supabase si la tabla aún no existe (Solo Administrador) */}
           {dbTableMissing && isAdmin && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
               <div className="flex items-start space-x-3">
                 <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
                 <div>
@@ -1519,21 +1580,21 @@ Cruz Verde Salvadoreña`;
                     Tabla <code className="bg-amber-100 px-1 py-0.5 rounded">solicitudes_compra</code> pendiente de ejecutar en Supabase
                   </h4>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    Para sincronización permanente, ejecute el script <span className="font-semibold">15_solicitudes_compra_mantenimiento.sql</span> en el SQL Editor de Supabase. El sistema está operando en modo local para que pueda interactuar y probar la creación de solicitudes y generación de PDF de inmediato.
+                    Para sincronización permanente, ejecute el script <span className="font-semibold">15_solicitudes_compra_mantenimiento.sql</span> en el SQL Editor de Supabase.
                   </p>
                 </div>
               </div>
               <div className="flex items-center space-x-2 flex-shrink-0">
                 <button
                   onClick={handleCopySql}
-                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors shadow-2xs"
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-xl transition-colors cursor-pointer"
                 >
                   {copiedSql ? <Check className="w-3.5 h-3.5 mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
                   {copiedSql ? 'Copiado' : 'Copiar SQL'}
                 </button>
                 <button
                   onClick={fetchData}
-                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-amber-300 text-amber-800 bg-white hover:bg-amber-100 rounded-md transition-colors"
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-amber-300 text-amber-800 bg-white hover:bg-amber-100 rounded-xl transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5 mr-1" />
                   Reintentar
@@ -1544,46 +1605,46 @@ Cruz Verde Salvadoreña`;
 
           {/* Tarjetas de Métricas Rápidas */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-2xs">
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total Solicitudes</span>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</p>
-              <span className="text-xs text-gray-400">Registradas en sistema</span>
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total</span>
+              <p className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">{stats.total}</p>
+              <span className="text-[11px] text-slate-400">Registradas</span>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-2xs">
-              <span className="text-xs font-semibold uppercase tracking-wider text-amber-700">Pendientes</span>
-              <p className="text-2xl font-bold text-amber-700 mt-1">{stats.pendientes}</p>
-              <span className="text-xs text-amber-600">Por autorizar</span>
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-600">Pendientes</span>
+              <p className="text-2xl font-bold text-amber-600 mt-1 tabular-nums">{stats.pendientes}</p>
+              <span className="text-[11px] text-slate-400">Por autorizar</span>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-2xs">
-              <span className="text-xs font-semibold uppercase tracking-wider text-green-700">Aprobadas</span>
-              <p className="text-2xl font-bold text-green-700 mt-1">{stats.aprobadas}</p>
-              <span className="text-xs text-green-600">Con visto bueno</span>
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600">Aprobadas</span>
+              <p className="text-2xl font-bold text-emerald-600 mt-1 tabular-nums">{stats.aprobadas}</p>
+              <span className="text-[11px] text-slate-400">Con visto bueno</span>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-2xs">
-              <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">En Proceso</span>
-              <p className="text-2xl font-bold text-blue-700 mt-1">{stats.enProceso}</p>
-              <span className="text-xs text-blue-600">En compras / taller</span>
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-600">En Proceso</span>
+              <p className="text-2xl font-bold text-blue-600 mt-1 tabular-nums">{stats.enProceso}</p>
+              <span className="text-[11px] text-slate-400">Compras / taller</span>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-2xs">
-              <span className="text-xs font-semibold uppercase tracking-wider text-red-700">Rechazadas</span>
-              <p className="text-2xl font-bold text-red-700 mt-1">{stats.rechazadas}</p>
-              <span className="text-xs text-red-600">No procedentes</span>
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs col-span-2 md:col-span-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-600">Rechazadas</span>
+              <p className="text-2xl font-bold text-rose-600 mt-1 tabular-nums">{stats.rechazadas}</p>
+              <span className="text-[11px] text-slate-400">No procedentes</span>
             </div>
           </div>
 
           {/* Barra de Filtros */}
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-2xs">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-3.5 shadow-2xs">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
               
               {/* Búsqueda */}
               <div className="md:col-span-4 relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Buscar por folio, seccional, director o repuesto..."
+                  placeholder="Buscar por folio, seccional, repuesto..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
                 />
               </div>
 
@@ -1592,14 +1653,14 @@ Cruz Verde Salvadoreña`;
                 <select
                   value={filterEstado}
                   onChange={(e) => setFilterEstado(e.target.value)}
-                  className="w-full py-2 px-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
+                  className="w-full py-2 px-3 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none bg-slate-50 focus:bg-white font-medium text-slate-700"
                 >
                   <option value="Todos">Estado: Todos</option>
-                  <option value="Pendiente">🟡 Pendiente</option>
-                  <option value="Aprobada">🟢 Aprobada</option>
-                  <option value="En Proceso de Compra">🔵 En Proceso de Compra</option>
-                  <option value="Rechazada">🔴 Rechazada</option>
-                  <option value="Finalizada">⚪ Finalizada</option>
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="Aprobada">Aprobada</option>
+                  <option value="En Proceso de Compra">En Proceso de Compra</option>
+                  <option value="Rechazada">Rechazada</option>
+                  <option value="Finalizada">Finalizada</option>
                 </select>
               </div>
 
@@ -1609,7 +1670,7 @@ Cruz Verde Salvadoreña`;
                   <select
                     value={filterSeccional}
                     onChange={(e) => setFilterSeccional(e.target.value)}
-                    className="w-full py-2 px-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
+                    className="w-full py-2 px-3 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none bg-slate-50 focus:bg-white font-medium text-slate-700"
                   >
                     <option value="Todas">
                       {hasNivelNacional ? 'Seccional: Todas' : `Seccionales (${allowedSeccionalIds.length}): Todas`}
@@ -1622,13 +1683,13 @@ Cruz Verde Salvadoreña`;
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full py-2 px-3 text-xs bg-gray-100 border border-gray-300 rounded-lg flex items-center justify-between text-gray-700 font-medium">
+                  <div className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-slate-700 font-medium">
                     <span className="truncate">
                       {compraScope === 'seccional'
-                        ? `Seccional: ${seccionales.find(s => allowedSeccionalIds.includes(s.id))?.nombre || userSeccionalNombre || 'Asignada'}`
-                        : 'Alcance: Mis solicitudes'}
+                        ? `${seccionales.find(s => allowedSeccionalIds.includes(s.id))?.nombre || userSeccionalNombre || 'Asignada'}`
+                        : 'Mis solicitudes'}
                     </span>
-                    <span className="text-2xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                    <span className="text-[10px] font-semibold text-slate-500">
                       {compraScope === 'seccional' ? 'Seccional' : 'Usuario'}
                     </span>
                   </div>
@@ -1640,7 +1701,7 @@ Cruz Verde Salvadoreña`;
                 <select
                   value={filterTipo}
                   onChange={(e) => setFilterTipo(e.target.value)}
-                  className="w-full py-2 px-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
+                  className="w-full py-2 px-3 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none bg-slate-50 focus:bg-white font-medium text-slate-700"
                 >
                   <option value="Todos">Tipo: Todos</option>
                   {TIPOS_SOLICITUD.map(t => (
@@ -1652,7 +1713,7 @@ Cruz Verde Salvadoreña`;
           </div>
 
           {/* Tabla de Solicitudes */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-2xs overflow-hidden">
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-2xs overflow-hidden">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-16">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
@@ -1667,13 +1728,15 @@ Cruz Verde Salvadoreña`;
                     ? 'No se encontraron solicitudes con los filtros aplicados.'
                     : 'Aún no se han generado solicitudes de compra o mantenimiento para esta seccional.'}
                 </p>
-                <button
-                  onClick={() => setActiveTab('nueva')}
-                  className="mt-4 inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-blue-900 transition"
-                >
-                  <Plus className="w-4 h-4 mr-1.5" />
-                  Crear Primera Solicitud
-                </button>
+                {canCreateCompra && (
+                  <button
+                    onClick={() => setActiveTab('nueva')}
+                    className="mt-4 inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-blue-900 transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 mr-1.5" />
+                    Crear Primera Solicitud
+                  </button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1788,18 +1851,20 @@ Cruz Verde Salvadoreña`;
                           </button>
 
                           {/* Imprimir / Descargar PDF */}
-                          <button
-                            onClick={() => handleTriggerPrint(sol)}
-                            className="p-1.5 text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-md transition"
-                            title="Imprimir / Descargar PDF Oficial"
-                          >
-                            <Printer className="w-4 h-4" />
-                          </button>
+                          {canPreviewPdf && (
+                            <button
+                              onClick={() => handleTriggerPrint(sol)}
+                              className="p-1.5 text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-md transition cursor-pointer"
+                              title="Imprimir / Descargar PDF Oficial"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          )}
 
                           {/* Notificar por Correo */}
                           <button
                             onClick={() => handleOpenEmailModal(sol)}
-                            className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition"
+                            className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition cursor-pointer"
                             title="Enviar por Correo Electrónico"
                           >
                             <Mail className="w-4 h-4" />
@@ -1814,7 +1879,7 @@ Cruz Verde Salvadoreña`;
                                 setMotivoRechazo(sol.motivo_rechazo || '');
                                 setShowStatusModal(true);
                               }}
-                              className="p-1.5 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-md transition"
+                              className="p-1.5 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-md transition cursor-pointer"
                               title="Gestionar estado de autorización"
                             >
                               <Shield className="w-4 h-4" />
@@ -1839,6 +1904,7 @@ Cruz Verde Salvadoreña`;
           config={compraConfig}
           onSave={handleSaveCompraConfig}
           saving={savingCompraConfig}
+          canPreviewPdf={canPreviewPdf}
         />
       )}
 
@@ -1997,16 +2063,20 @@ Cruz Verde Salvadoreña`;
             </div>
 
             <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-              <button
-                onClick={() => {
-                  setShowDetailModal(false);
-                  handleTriggerPrint(selectedSolicitud);
-                }}
-                className="inline-flex items-center px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 text-xs font-semibold shadow-2xs"
-              >
-                <Printer className="w-4 h-4 mr-1.5 text-gray-600" />
-                Imprimir Documento
-              </button>
+              {canPreviewPdf ? (
+                <button
+                  onClick={() => {
+                    setShowDetailModal(false);
+                    handleTriggerPrint(selectedSolicitud);
+                  }}
+                  className="inline-flex items-center px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold shadow-2xs cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 mr-1.5 text-slate-600" />
+                  Imprimir Documento
+                </button>
+              ) : (
+                <div />
+              )}
 
               <div className="space-x-2">
                 {canApprove && (
@@ -2016,7 +2086,7 @@ Cruz Verde Salvadoreña`;
                       setMotivoRechazo(selectedSolicitud.motivo_rechazo || '');
                       setShowStatusModal(true);
                     }}
-                    className="inline-flex items-center px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-2xs"
+                    className="inline-flex items-center px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-2xs cursor-pointer"
                   >
                     <Shield className="w-4 h-4 mr-1.5" />
                     Cambiar Estado
@@ -2024,7 +2094,7 @@ Cruz Verde Salvadoreña`;
                 )}
                 <button
                   onClick={() => setShowDetailModal(false)}
-                  className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold cursor-pointer"
                 >
                   Cerrar
                 </button>
@@ -2037,7 +2107,7 @@ Cruz Verde Salvadoreña`;
       {/* ========================================================================= */}
       {/* MODAL 2: VISTA PREVIA E IMPRESIÓN OFICIAL PDF SEGÚN PLANTILLA Y BLOQUES    */}
       {/* ========================================================================= */}
-      {(showPrintModal || showPreviewPdfModal) && (
+      {canPreviewPdf && (showPrintModal || showPreviewPdfModal) && (
         <CompraPdfPreviewModal
           solicitud={selectedSolicitud || previewPdfSolicitud || {
             id: 999,

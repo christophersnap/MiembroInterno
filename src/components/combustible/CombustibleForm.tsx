@@ -5,6 +5,8 @@ import { SolicitudCombustible } from '../../types/combustible';
 interface CombustibleFormProps {
   seccionales: { id: number; nombre: string; director?: string; correo?: string }[];
   isAdmin: boolean;
+  canSelectAnySeccional?: boolean;
+  userSeccionalId?: number | null;
   userSeccionalNombre: string | null;
   defaultDirector: string;
   defaultEmail: string;
@@ -16,6 +18,8 @@ interface CombustibleFormProps {
 export default function CombustibleForm({
   seccionales,
   isAdmin,
+  canSelectAnySeccional,
+  userSeccionalId,
   userSeccionalNombre,
   defaultDirector,
   defaultEmail,
@@ -23,17 +27,32 @@ export default function CombustibleForm({
   submitting,
   onSubmit
 }: CombustibleFormProps) {
+  const allowSelectSeccional = canSelectAnySeccional ?? isAdmin;
   const [seccionalId, setSeccionalId] = useState<string>('');
 
-  // Sincronizar seccional si el usuario tiene seccional asignada o cuando se cargan las seccionales
+  // Sincronizar seccional asignada cuando cambian las seccionales o los permisos
   React.useEffect(() => {
-    if (userSeccionalNombre && seccionales.length > 0 && !seccionalId) {
-      const match = seccionales.find(s => s.nombre.toLowerCase().trim() === userSeccionalNombre.toLowerCase().trim());
-      if (match) {
-        setSeccionalId(String(match.id));
+    if (seccionales.length === 0) return;
+
+    const matchById = userSeccionalId
+      ? seccionales.find(s => Number(s.id) === Number(userSeccionalId))
+      : null;
+    const matchByName = userSeccionalNombre
+      ? seccionales.find(s => s.nombre.toLowerCase().trim() === userSeccionalNombre.toLowerCase().trim())
+      : null;
+    const resolved = matchById || matchByName || null;
+
+    if (!allowSelectSeccional) {
+      // Nivel seccional: seleccionar automáticamente y bloquear en esa única seccional
+      const target = resolved || seccionales[0];
+      if (target && String(seccionalId) !== String(target.id)) {
+        setSeccionalId(String(target.id));
       }
+    } else if (!seccionalId && resolved) {
+      // Nivel global: preseleccionar si aplica, manteniendo el selector habilitado
+      setSeccionalId(String(resolved.id));
     }
-  }, [userSeccionalNombre, seccionales, seccionalId]);
+  }, [allowSelectSeccional, userSeccionalId, userSeccionalNombre, seccionales, seccionalId]);
 
   const selectedSec = seccionales.find(s => 
     String(s.id) === String(seccionalId) || 
@@ -142,10 +161,10 @@ export default function CombustibleForm({
           <p className="text-xs md:text-sm text-gray-500 mt-1.5">
             Cruz Verde Salvadoreña • Control y Asignación de Dotación
           </p>
-          {userSeccionalNombre && !isAdmin && (
+          {!allowSelectSeccional && (selectedSec || userSeccionalNombre) && (
             <div className="mt-3 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
               <CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-              Seccional {userSeccionalNombre} vinculada automáticamente
+              Seccional {selectedSec?.nombre || userSeccionalNombre} vinculada automáticamente
             </div>
           )}
         </div>
@@ -177,7 +196,7 @@ export default function CombustibleForm({
               </div>
             </div>
 
-            {isAdmin ? (
+            {allowSelectSeccional ? (
               <select
                 value={seccionalId}
                 onChange={(e) => setSeccionalId(e.target.value)}
@@ -192,8 +211,12 @@ export default function CombustibleForm({
                 ))}
               </select>
             ) : (
-              <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-800">
-                {selectedSec ? selectedSec.nombre : (userSeccionalNombre || 'Seccional asignada')}
+              <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 flex items-center justify-between gap-2 cursor-not-allowed select-none">
+                <span>{selectedSec ? selectedSec.nombre : (userSeccionalNombre || 'Seccional asignada')}</span>
+                <span className="inline-flex items-center text-3xs font-semibold text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full shrink-0">
+                  <Lock className="w-2.5 h-2.5 mr-1 text-gray-400" />
+                  Asignada • No modificable
+                </span>
               </div>
             )}
           </div>

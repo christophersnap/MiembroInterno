@@ -12,12 +12,14 @@ interface CompraTemplateConfigProps {
   config: CompraConfig;
   onSave: (newConfig: CompraConfig) => Promise<void>;
   saving: boolean;
+  canPreviewPdf?: boolean;
 }
 
 export default function CompraTemplateConfig({
   config: initialConfig,
   onSave,
-  saving
+  saving,
+  canPreviewPdf = true
 }: CompraTemplateConfigProps) {
   const [currentConfig, setCurrentConfig] = useState<CompraConfig>(() => {
     // Asegurar que pdfBloquesOrden esté inicializado
@@ -197,16 +199,17 @@ export default function CompraTemplateConfig({
 
         {/* Acciones: Previsualizar, Reset, Guardar */}
         <div className="flex items-center space-x-2">
-          
-          <button
-            type="button"
-            onClick={() => setShowPreviewModal(true)}
-            className="inline-flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition cursor-pointer"
-            title="Previsualizar documento PDF en tamaño carta completo"
-          >
-            <Eye className="w-4 h-4 mr-1.5" />
-            Previsualizar PDF
-          </button>
+          {canPreviewPdf && (
+            <button
+              type="button"
+              onClick={() => setShowPreviewModal(true)}
+              className="inline-flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition cursor-pointer"
+              title="Previsualizar documento PDF en tamaño carta completo"
+            >
+              <Eye className="w-4 h-4 mr-1.5" />
+              Previsualizar PDF
+            </button>
+          )}
 
           <button
             type="button"
@@ -1151,7 +1154,7 @@ export default function CompraTemplateConfig({
       )}
 
       {/* Modal de Previsualización de PDF Completo */}
-      {showPreviewModal && (
+      {canPreviewPdf && showPreviewModal && (
         <CompraPdfPreviewModal
           config={currentConfig}
           onClose={() => setShowPreviewModal(false)}

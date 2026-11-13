@@ -1250,7 +1250,7 @@ export default function SocorristaProfile() {
           </form>
 
           {showCropper && imageSrc && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
               <div className="bg-white rounded-lg w-full max-w-2xl overflow-hidden flex flex-col h-[80vh]">
                 <div className="p-4 border-b border-gray-200 flex justify-between items-center">
                   <h3 className="text-lg font-medium text-gray-900">Recortar Fotografía</h3>

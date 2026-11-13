@@ -1060,6 +1060,9 @@ NOTIFY pgrst, 'reload schema';`;
     view_socorristas: 'Ver Lista de Socorristas',
     add_socorristas: 'Agregar Nuevos Socorristas',
     edit_socorristas: 'Editar / Modificar Socorristas',
+    subir_expediente_socorrista: 'Subir Expediente y Documentación Digital de Socorristas',
+    ver_expediente_socorrista: 'Previsualizar en Línea Expediente Digital de Socorristas',
+    descargar_expediente_socorrista: 'Descargar Expediente Digital de Socorristas',
     cambiar_estado_socorrista: 'Activar/Desactivar Socorristas',
     descargar_excel_socorristas: 'Descargar Excel de Socorristas',
     view_carnet: 'Generar Carnets',
@@ -1086,6 +1089,7 @@ NOTIFY pgrst, 'reload schema';`;
     aprobar_solicitudes_combustible: 'Aprobar/Rechazar Solicitudes de Combustible',
     view_combustible_historial: 'Ver Botón Historial en Solicitud de Combustible',
     view_combustible_plantillas: 'Ver Botón Plantillas y Configuraciones en Combustible',
+    ver_previsualizacion_pdf: 'Ver Previsualización del PDF en Solicitudes',
     view_solicitudes_carnet: 'Ver Solicitudes de Carnet en Gestión Logística',
     edit_solicitudes_carnet: 'Editar / Gestionar Solicitudes de Carnet (Sin eliminar)',
     view_archivos: 'Ver y Descargar Archivos',
@@ -1105,6 +1109,7 @@ NOTIFY pgrst, 'reload schema';`;
     personalizar_colores: 'Personalizar Colores del Sistema y Marca',
     view_config: 'Ajustes de Verificación',
     view_activity: 'Ver Registro de Actividad',
+    ver_personas_conectadas: 'Ver Lista de Personas Conectadas (Clic en En Línea)',
     view_accesos: 'Gestión de Accesos (Admin)'
   };
 

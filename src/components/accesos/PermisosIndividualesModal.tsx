@@ -30,6 +30,8 @@ import {
 import {
   ModuleScope,
   ScopedModuleKey,
+  CreateSolicitudModuleKey,
+  CreateSolicitudScope,
   SeccionalesSocorristasConfig,
 } from '../../contexts/AuthContext';
 
@@ -55,6 +57,9 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'view_socorristas',
       'add_socorristas',
       'edit_socorristas',
+      'subir_expediente_socorrista',
+      'ver_expediente_socorrista',
+      'descargar_expediente_socorrista',
       'cambiar_estado_socorrista',
       'descargar_excel_socorristas',
       'ver_imagenes_socorristas',
@@ -84,6 +89,7 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'aprobar_solicitudes_combustible',
       'view_combustible_historial',
       'view_combustible_plantillas',
+      'ver_previsualizacion_pdf',
       'view_solicitudes_carnet',
       'edit_solicitudes_carnet',
     ],
@@ -123,6 +129,7 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
     icon: Shield,
     keys: [
       'ver_todas_seccionales',
+      'ver_personas_conectadas',
       'personalizar_colores',
       'view_config',
       'view_activity',
@@ -141,6 +148,7 @@ const SCOPED_MODULES: {
   createKey?: string;
   historialKey?: string;
   plantillasKey?: string;
+  pdfPreviewKey?: string;
 }[] = [
   {
     key: 'formularios',
@@ -160,6 +168,7 @@ const SCOPED_MODULES: {
     createKey: 'crear_solicitudes_combustible',
     historialKey: 'view_combustible_historial',
     plantillasKey: 'view_combustible_plantillas',
+    pdfPreviewKey: 'ver_previsualizacion_pdf',
   },
   {
     key: 'solicitudes_compra',
@@ -171,6 +180,7 @@ const SCOPED_MODULES: {
     createKey: 'crear_solicitudes_compra',
     historialKey: 'view_compra_historial',
     plantillasKey: 'view_compra_plantillas',
+    pdfPreviewKey: 'ver_previsualizacion_pdf',
   },
   {
     key: 'solicitudes_carnet',
@@ -270,6 +280,11 @@ export default function PermisosIndividualesModal({
       crear_solicitudes_combustible: true,
       view_combustible_historial: true,
       view_combustible_plantillas: false,
+      ver_previsualizacion_pdf: true,
+      subir_expediente_socorrista: false,
+      ver_expediente_socorrista: false,
+      descargar_expediente_socorrista: false,
+      ver_personas_conectadas: false,
       view_meritos: true,
       view_anuncios: true,
       view_formularios: true,
@@ -313,6 +328,34 @@ export default function PermisosIndividualesModal({
       solicitudes_combustible: parseArr(rawModSeccs.solicitudes_combustible),
       solicitudes_compra: parseArr(rawModSeccs.solicitudes_compra),
       solicitudes_carnet: parseArr(rawModSeccs.solicitudes_carnet),
+    };
+  });
+
+  const [createScopes, setCreateScopes] = useState<Record<CreateSolicitudModuleKey, CreateSolicitudScope>>(() => {
+    const rawCreate = user.custom_permissions?._create_scopes || {};
+    const rawVisScopes = user.custom_permissions?._module_scopes || {};
+    const resolveInitial = (k: CreateSolicitudModuleKey): CreateSolicitudScope => {
+      if (rawCreate[k] === 'global' || rawCreate[k] === 'seccional') return rawCreate[k];
+      if (rawVisScopes[k] === 'global' || baseRolePermissions.ver_todas_seccionales) return 'global';
+      return 'seccional';
+    };
+    return {
+      solicitudes_combustible: resolveInitial('solicitudes_combustible'),
+      solicitudes_compra: resolveInitial('solicitudes_compra'),
+    };
+  });
+
+  const [createSeccionales, setCreateSeccionales] = useState<Record<CreateSolicitudModuleKey, number | null>>(() => {
+    const rawCreateSeccs = user.custom_permissions?._create_seccionales || {};
+    const resolveInitialSec = (k: CreateSolicitudModuleKey): number | null => {
+      const parsed = Number(rawCreateSeccs[k]);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+      if (userDefaultSeccionalId) return userDefaultSeccionalId;
+      return seccionales[0]?.id ?? null;
+    };
+    return {
+      solicitudes_combustible: resolveInitialSec('solicitudes_combustible'),
+      solicitudes_compra: resolveInitialSec('solicitudes_compra'),
     };
   });
 
@@ -478,6 +521,15 @@ export default function PermisosIndividualesModal({
         solicitudes_compra: fallbackArr,
         solicitudes_carnet: fallbackArr,
       });
+      const defaultCreateScope: CreateSolicitudScope = baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional';
+      setCreateScopes({
+        solicitudes_combustible: defaultCreateScope,
+        solicitudes_compra: defaultCreateScope,
+      });
+      setCreateSeccionales({
+        solicitudes_combustible: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
+        solicitudes_compra: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
+      });
     }
   };
 
@@ -564,6 +616,8 @@ export default function PermisosIndividualesModal({
         ...customOverrides,
         _module_scopes: moduleScopes,
         _module_seccionales: moduleSeccionales,
+        _create_scopes: createScopes,
+        _create_seccionales: createSeccionales,
         _seccionales_socorristas: secConfig,
       };
 
@@ -737,6 +791,7 @@ export default function PermisosIndividualesModal({
                   const canCreate = mod.createKey ? getPermissionStatus(mod.createKey).effectiveValue : null;
                   const canHistorial = mod.historialKey ? getPermissionStatus(mod.historialKey).effectiveValue : null;
                   const canPlantillas = mod.plantillasKey ? getPermissionStatus(mod.plantillasKey).effectiveValue : null;
+                  const canPreviewPdf = mod.pdfPreviewKey ? getPermissionStatus(mod.pdfPreviewKey).effectiveValue : null;
                   const visibleSeccionalesForScope = scopeSecSearch.trim()
                     ? seccionales.filter((s) => s.nombre.toLowerCase().includes(scopeSecSearch.trim().toLowerCase()))
                     : seccionales;
@@ -941,25 +996,119 @@ export default function PermisosIndividualesModal({
                         </div>
                       </div>
 
-                      {/* Opciones adicionales de módulo (Crear, Botón Historial, Botón Plantillas y Config.) */}
-                      {(mod.createKey || mod.historialKey || mod.plantillasKey) && (
+                      {/* Opciones adicionales de módulo (Crear, Botón Historial, Botón Plantillas, Previsualización PDF) */}
+                      {(mod.createKey || mod.historialKey || mod.plantillasKey || mod.pdfPreviewKey) && (
                         <div className="pt-2.5 border-t border-slate-100 space-y-2">
                           {mod.createKey && (
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-slate-600 font-medium">
-                                ¿Puede crear nuevas solicitudes?
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setMultipleKeys([mod.createKey!], !canCreate)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  canCreate
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-500 border-slate-200'
-                                }`}
-                              >
-                                {canCreate ? 'Sí, puede crear' : 'No puede crear'}
-                              </button>
+                            <div className="space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-slate-600 font-medium">
+                                  ¿Puede crear nuevas solicitudes?
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setMultipleKeys([mod.createKey!], !canCreate)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                    canCreate
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                                  }`}
+                                >
+                                  {canCreate ? 'Sí, puede crear' : 'No puede crear'}
+                                </button>
+                              </div>
+
+                              {(mod.key === 'solicitudes_combustible' || mod.key === 'solicitudes_compra') && canCreate && (
+                                <div className={`p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5 ${accessLevel === 'blocked' ? 'opacity-45 pointer-events-none' : ''}`}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-slate-800">
+                                      Nivel al hacer solicitudes:
+                                    </span>
+                                    <span className="text-[10px] font-semibold text-slate-500">
+                                      {createScopes[mod.key] === 'global' ? 'Selector habilitado' : '1 seccional fija'}
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 bg-white p-0.5 rounded-xl border border-slate-200/80 gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCreateScopes((prev) => ({
+                                          ...prev,
+                                          [mod.key]: 'global',
+                                        }))
+                                      }
+                                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                                        createScopes[mod.key] === 'global'
+                                          ? 'bg-slate-900 text-white shadow-2xs'
+                                          : 'text-slate-600 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <Globe className="w-3 h-3" />
+                                      Nivel Global
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const cKey = mod.key as CreateSolicitudModuleKey;
+                                        setCreateScopes((prev) => ({
+                                          ...prev,
+                                          [cKey]: 'seccional',
+                                        }));
+                                        setCreateSeccionales((prev) => {
+                                          if (prev[cKey]) return prev;
+                                          const fallbackSec =
+                                            userDefaultSeccionalId ||
+                                            (moduleSeccionales[cKey]?.length ? moduleSeccionales[cKey][0] : null) ||
+                                            seccionales[0]?.id ||
+                                            null;
+                                          return { ...prev, [cKey]: fallbackSec };
+                                        });
+                                      }}
+                                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                                        createScopes[mod.key] === 'seccional'
+                                          ? 'bg-slate-900 text-white shadow-2xs'
+                                          : 'text-slate-600 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <Building2 className="w-3 h-3" />
+                                      Nivel Seccional
+                                    </button>
+                                  </div>
+
+                                  {createScopes[mod.key] === 'global' ? (
+                                    <p className="text-[10px] text-emerald-700 font-medium leading-snug">
+                                      El campo de Seccional estará habilitado en el formulario para que pueda seleccionar cualquier seccional.
+                                    </p>
+                                  ) : (
+                                    <div className="space-y-1.5">
+                                      <label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                                        <Lock className="w-3 h-3 text-amber-600" />
+                                        Seccional única asignada (solo 1 seleccionable):
+                                      </label>
+                                      <select
+                                        value={createSeccionales[mod.key] ?? ''}
+                                        onChange={(e) => {
+                                          const cKey = mod.key as CreateSolicitudModuleKey;
+                                          const val = e.target.value ? Number(e.target.value) : null;
+                                          setCreateSeccionales((prev) => ({ ...prev, [cKey]: val }));
+                                        }}
+                                        className="w-full px-2.5 py-1.5 text-[11px] font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 outline-none"
+                                      >
+                                        <option value="">-- Seleccione una seccional --</option>
+                                        {seccionales.map((sec) => (
+                                          <option key={sec.id} value={sec.id}>
+                                            {sec.nombre}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <p className="text-[10px] text-slate-500 leading-snug">
+                                        En el formulario esta seccional quedará seleccionada automáticamente y bloqueada sin posibilidad de cambio.
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -1000,6 +1149,25 @@ export default function PermisosIndividualesModal({
                               </button>
                             </div>
                           )}
+
+                          {mod.pdfPreviewKey && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                Ver Previsualización / Impresión PDF:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setMultipleKeys([mod.pdfPreviewKey!], !canPreviewPdf)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  canPreviewPdf
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                                }`}
+                              >
+                                {canPreviewPdf ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1009,9 +1177,97 @@ export default function PermisosIndividualesModal({
             </div>
           )}
 
-          {/* TAB 2: SECCIONALES INDIVIDUALES PARA SOCORRISTAS */}
+          {/* TAB 2: SECCIONALES INDIVIDUALES Y EXPEDIENTE DIGITAL DE SOCORRISTAS */}
           {activeTab === 'seccionales' && (
             <div className="space-y-4">
+              {/* Expediente y Documentación Digital del Socorrista */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3 shadow-xs">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">
+                    Expediente y Documentación Digital del Socorrista
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Define de forma individual si el usuario puede subir documentos (CV, antecedentes, solvencia), previsualizarlos en línea o descargarlos.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                  {[
+                    {
+                      key: 'subir_expediente_socorrista',
+                      title: 'Subir Expediente Digital',
+                      desc: 'Cargar o actualizar nuevas versiones de documentos.',
+                    },
+                    {
+                      key: 'ver_expediente_socorrista',
+                      title: 'Previsualizar en Línea',
+                      desc: 'Abrir documentos PDF o imágenes dentro del sistema.',
+                    },
+                    {
+                      key: 'descargar_expediente_socorrista',
+                      title: 'Descargar Documentos',
+                      desc: 'Guardar archivos del expediente en su dispositivo.',
+                    },
+                  ].map((item) => {
+                    const st = getPermissionStatus(item.key);
+                    return (
+                      <div
+                        key={item.key}
+                        className="p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between gap-2.5"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-xs font-semibold text-slate-900">{item.title}</span>
+                            <span
+                              className={`text-[10px] font-bold ${
+                                st.effectiveValue ? 'text-emerald-700' : 'text-rose-600'
+                              }`}
+                            >
+                              {st.effectiveValue ? 'Permitido' : 'Bloqueado'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{item.desc}</p>
+                        </div>
+
+                        <div className="grid grid-cols-3 bg-white p-0.5 rounded-lg border border-slate-200/80 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(item.key, 'role')}
+                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
+                              !st.isOverridden ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                            }`}
+                          >
+                            Heredar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(item.key, 'allow')}
+                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
+                              st.isOverridden && st.overrideValue === true
+                                ? 'bg-emerald-600 text-white'
+                                : 'text-emerald-700 hover:bg-emerald-50'
+                            }`}
+                          >
+                            Permitir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(item.key, 'deny')}
+                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
+                              st.isOverridden && st.overrideValue === false
+                                ? 'bg-rose-600 text-white'
+                                : 'text-rose-700 hover:bg-rose-50'
+                            }`}
+                          >
+                            Denegar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>

@@ -10,10 +10,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { toJpeg } from 'html-to-image';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
+import { getApiUrl } from '../lib/api';
 import { usePresence } from '../hooks/usePresence';
 import { useSettings } from '../contexts/SettingsContext';
+import { useAuth } from '../contexts/AuthContext';
 import PresenceModal from '../components/PresenceModal';
-import WatermarkImage from '../components/WatermarkImage';
 import NoticiasBannerSlider from '../components/dashboard/NoticiasBannerSlider';
 import {
   DEFAULT_BANNER_CONFIG,
@@ -21,6 +22,42 @@ import {
   NoticiaBannerSlide,
   NoticiasBannerConfig,
 } from '../lib/noticiasBanner';
+
+function DashboardPersonAvatar({
+  fotoUrl,
+  initials,
+  variant = 'pink',
+}: {
+  fotoUrl?: string | null;
+  initials: string;
+  variant?: 'pink' | 'blue';
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (fotoUrl && !failed) {
+    return (
+      <img
+        src={fotoUrl}
+        alt={initials}
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="h-10 w-10 rounded-full object-cover border border-gray-200 shadow-2xs bg-gray-50"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`h-10 w-10 rounded-full font-bold flex items-center justify-center text-xs shadow-2xs border ${
+        variant === 'blue'
+          ? 'bg-blue-100/80 text-blue-700 border-blue-200'
+          : 'bg-pink-100/80 text-pink-700 border-pink-200'
+      }`}
+    >
+      {initials}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
@@ -31,6 +68,8 @@ export default function Dashboard() {
   // Sistema de presencia en vivo y concurrencia
   const { onlineCount, activeUsers, refreshPresence } = usePresence();
   const { colors } = useSettings();
+  const { role, permissions } = useAuth();
+  const canViewOnlineUsers = role === 'admin' || Boolean(permissions.ver_personas_conectadas);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
 
   // Estados para Anuncios Institucionales (Cuadro Notificación y Slider Noticias)
@@ -65,10 +104,37 @@ export default function Dashboard() {
         if (curRes.error) console.error('Error fetching cursos:', curRes.error);
         if (certRes.error) console.error('Error fetching certs:', certRes.error);
 
-        const socorristas = socRes.data || [];
+        let socorristas = socRes.data || [];
         const seccionales = secRes.data || [];
         const cursos = curRes.data || [];
         const certs = certRes.data || [];
+
+        // Enriquecer foto_url faltante desde SQLite local si existe
+        try {
+          if (socorristas.some((s: any) => !s.foto_url) || socorristas.length === 0) {
+            const localRes = await fetch(getApiUrl('/api/socorristas'));
+            if (localRes.ok) {
+              const localSocs = await localRes.json();
+              if (Array.isArray(localSocs) && localSocs.length > 0) {
+                if (socorristas.length === 0) {
+                  socorristas = localSocs;
+                } else {
+                  socorristas = socorristas.map((s: any) => {
+                    if (s.foto_url) return s;
+                    const match = localSocs.find(
+                      (ls: any) =>
+                        Number(ls.id) === Number(s.id) ||
+                        (ls.carnet && s.carnet && String(ls.carnet).trim() === String(s.carnet).trim())
+                    );
+                    return match?.foto_url ? { ...s, foto_url: match.foto_url } : s;
+                  });
+                }
+              }
+            }
+          }
+        } catch (localErr) {
+          // Ignorar si /api/socorristas no está disponible
+        }
 
         const now = new Date();
         const currentMonth = now.getMonth() + 1;
@@ -502,22 +568,37 @@ export default function Dashboard() {
         {/* Sector Superior: Personas Conectadas en Vivo (Apple Status Pill) */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Píldora de Personas Conectadas en Vivo */}
-          <button
-            onClick={() => setShowPresenceModal(true)}
-            className="group inline-flex items-center space-x-2 px-3.5 py-2 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-900 text-xs font-bold transition-all shadow-2xs hover:scale-102 cursor-pointer active:scale-98"
-            title="Haz clic para ver concurrencia y detalles de usuarios conectados"
-          >
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="font-semibold text-emerald-950">
-              {onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}
-            </span>
-            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/60 px-2 py-0.5 rounded-full">
-              En vivo
-            </span>
-          </button>
+          {canViewOnlineUsers ? (
+            <button
+              onClick={() => setShowPresenceModal(true)}
+              className="group inline-flex items-center space-x-2 px-3.5 py-2 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-900 text-xs font-bold transition-all shadow-2xs hover:scale-102 cursor-pointer active:scale-98"
+              title="Haz clic para ver concurrencia y detalles de usuarios conectados"
+            >
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="font-semibold text-emerald-950">
+                {onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}
+              </span>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/60 px-2 py-0.5 rounded-full">
+                En vivo
+              </span>
+            </button>
+          ) : (
+            <div className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-900 text-xs font-bold shadow-2xs select-none">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="font-semibold text-emerald-950">
+                {onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}
+              </span>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/60 px-2 py-0.5 rounded-full">
+                En vivo
+              </span>
+            </div>
+          )}
 
           {/* Fecha Oficial Estilo iOS */}
           <div className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-full bg-white/90 border border-gray-200/80 text-gray-700 text-xs font-semibold shadow-2xs">
@@ -1038,13 +1119,11 @@ export default function Dashboard() {
               stats.cumpleañeros.map((person: any) => (
                 <div key={person.id} className="py-3 flex items-center space-x-3.5 hover:bg-gray-50/80 px-2 rounded-2xl transition-colors">
                   <div className="flex-shrink-0">
-                    {person.foto_url ? (
-                      <WatermarkImage src={person.foto_url} alt="" className="h-10 w-10 border border-gray-200" isRounded={true} />
-                    ) : (
-                      <div className="h-10 w-10 rounded-full bg-pink-100/80 text-pink-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-pink-200">
-                        {person.primer_nombre[0]}{person.primer_apellido[0]}
-                      </div>
-                    )}
+                    <DashboardPersonAvatar
+                      fotoUrl={person.foto_url}
+                      initials={`${person.primer_nombre?.[0] || ''}${person.primer_apellido?.[0] || ''}`}
+                      variant="pink"
+                    />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs sm:text-sm font-bold text-gray-900 truncate">
@@ -1119,13 +1198,11 @@ export default function Dashboard() {
               stats.aniversarios.map((person: any) => (
                 <div key={person.id} className="py-3 flex items-center space-x-3.5 hover:bg-gray-50/80 px-2 rounded-2xl transition-colors">
                   <div className="flex-shrink-0">
-                    {person.foto_url ? (
-                      <WatermarkImage src={person.foto_url} alt="" className="h-10 w-10 border border-gray-200" isRounded={true} />
-                    ) : (
-                      <div className="h-10 w-10 rounded-full bg-blue-100/80 text-blue-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-blue-200">
-                        {person.primer_nombre[0]}{person.primer_apellido[0]}
-                      </div>
-                    )}
+                    <DashboardPersonAvatar
+                      fotoUrl={person.foto_url}
+                      initials={`${person.primer_nombre?.[0] || ''}${person.primer_apellido?.[0] || ''}`}
+                      variant="blue"
+                    />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs sm:text-sm font-bold text-gray-900 truncate">
@@ -1384,13 +1461,15 @@ export default function Dashboard() {
       )}
 
       {/* Modal de Concurrencia y Presencia */}
-      <PresenceModal
-        isOpen={showPresenceModal}
-        onClose={() => setShowPresenceModal(false)}
-        onlineCount={onlineCount}
-        activeUsers={activeUsers}
-        onRefresh={refreshPresence}
-      />
+      {canViewOnlineUsers && (
+        <PresenceModal
+          isOpen={showPresenceModal}
+          onClose={() => setShowPresenceModal(false)}
+          onlineCount={onlineCount}
+          activeUsers={activeUsers}
+          onRefresh={refreshPresence}
+        />
+      )}
     </div>
   );
 }

@@ -33,6 +33,7 @@ export default function Layout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showMisAccesosModal, setShowMisAccesosModal] = useState(false);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const canViewOnlineUsers = role === 'admin' || Boolean(permissions.ver_personas_conectadas);
 
   // Estados para notificaciones de solicitudes no leídas
   const [unreadCombustible, setUnreadCombustible] = useState(0);
@@ -288,24 +289,33 @@ export default function Layout() {
 
             {/* Presencia Móvil */}
             <div className="px-4 pt-3 pb-1">
-              <button
-                onClick={() => {
-                  setShowPresenceModal(true);
-                  setIsMobileMenuOpen(false);
-                }}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold"
-              >
-                <div className="flex items-center space-x-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              {canViewOnlineUsers ? (
+                <button
+                  onClick={() => {
+                    setShowPresenceModal(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold cursor-pointer"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span>{onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}</span>
+                  </div>
+                  <span className="text-[10px] font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full text-emerald-200">
+                    En vivo
                   </span>
-                  <span>{onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}</span>
+                </button>
+              ) : (
+                <div className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold select-none">
+                  <div className="flex items-center space-x-2">
+                    <span className="inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    <span>{onlineCount} {onlineCount === 1 ? 'persona conectada' : 'personas conectadas'}</span>
+                  </div>
                 </div>
-                <span className="text-[10px] font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full text-emerald-200">
-                  En vivo
-                </span>
-              </button>
+              )}
             </div>
 
             {/* Lista de Navegación Móvil */}
@@ -424,30 +434,48 @@ export default function Layout() {
 
         {/* Indicador de Concurrencia y Personas Conectadas (Pill iOS) */}
         <div className="px-3 pt-3 pb-1">
-          <button
-            onClick={() => setShowPresenceModal(true)}
-            className={`w-full group flex items-center rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/30 text-emerald-300 transition-all ${
-              isSidebarCollapsed ? 'p-2 justify-center' : 'px-3 py-2 justify-between'
-            }`}
-            title="Ver usuarios en línea y capacidad del servidor"
-          >
-            <div className="flex items-center space-x-2">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
+          {canViewOnlineUsers ? (
+            <button
+              onClick={() => setShowPresenceModal(true)}
+              className={`w-full group flex items-center rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/30 text-emerald-300 transition-all cursor-pointer ${
+                isSidebarCollapsed ? 'p-2 justify-center' : 'px-3 py-2 justify-between'
+              }`}
+              title="Ver usuarios en línea y capacidad del servidor"
+            >
+              <div className="flex items-center space-x-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                {!isSidebarCollapsed && (
+                  <span className="text-xs font-semibold tracking-tight text-emerald-200">
+                    {onlineCount} en línea
+                  </span>
+                )}
+              </div>
               {!isSidebarCollapsed && (
-                <span className="text-xs font-semibold tracking-tight text-emerald-200">
-                  {onlineCount} {onlineCount === 1 ? 'en línea' : 'en línea'}
+                <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full group-hover:bg-emerald-500/30 transition-colors">
+                  Ver
                 </span>
               )}
+            </button>
+          ) : (
+            <div
+              className={`w-full flex items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 select-none ${
+                isSidebarCollapsed ? 'p-2 justify-center' : 'px-3 py-2 justify-between'
+              }`}
+              title={`${onlineCount} personas conectadas`}
+            >
+              <div className="flex items-center space-x-2">
+                <span className="inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                {!isSidebarCollapsed && (
+                  <span className="text-xs font-semibold tracking-tight text-emerald-200">
+                    {onlineCount} en línea
+                  </span>
+                )}
+              </div>
             </div>
-            {!isSidebarCollapsed && (
-              <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full group-hover:bg-emerald-500/30 transition-colors">
-                Activos
-              </span>
-            )}
-          </button>
+          )}
         </div>
 
         {/* Lista de Navegación Segmentada (Estilo macOS / iPadOS) */}
@@ -597,13 +625,21 @@ export default function Layout() {
             <span className="text-xs font-black tracking-tight text-gray-900">Cruz Verde Salvadoreña</span>
           </div>
 
-          <button
-            onClick={() => setShowPresenceModal(true)}
-            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>{onlineCount}</span>
-          </button>
+          {canViewOnlineUsers ? (
+            <button
+              onClick={() => setShowPresenceModal(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold cursor-pointer"
+              title="Ver personas conectadas"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="tabular-nums">{onlineCount}</span>
+            </button>
+          ) : (
+            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold select-none">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span className="tabular-nums">{onlineCount}</span>
+            </div>
+          )}
         </header>
         
         <main className="flex-1 w-full overflow-x-hidden">
@@ -619,13 +655,15 @@ export default function Layout() {
         onClose={() => setShowMisAccesosModal(false)}
       />
 
-      <PresenceModal
-        isOpen={showPresenceModal}
-        onClose={() => setShowPresenceModal(false)}
-        onlineCount={onlineCount}
-        activeUsers={activeUsers}
-        onRefresh={refreshPresence}
-      />
+      {canViewOnlineUsers && (
+        <PresenceModal
+          isOpen={showPresenceModal}
+          onClose={() => setShowPresenceModal(false)}
+          onlineCount={onlineCount}
+          activeUsers={activeUsers}
+          onRefresh={refreshPresence}
+        />
+      )}
     </div>
   );
 }

@@ -2311,8 +2311,8 @@ export default function GenerarCarnet() {
                     style={{ maxHeight: '800px' }}
                   />
                   {watermarkEnabled && role !== 'admin' && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black bg-opacity-10 rounded-lg">
-                      <div className="transform -rotate-45 text-white text-opacity-70 font-bold text-center w-[200%]">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/10 rounded-lg">
+                      <div className="transform -rotate-45 text-white/70 font-bold text-center w-[200%]">
                         <p className="text-sm sm:text-base tracking-wider uppercase drop-shadow-md">
                           Cruz Verde Salvadoreña<br/>Sistema Interno
                         </p>
@@ -2330,7 +2330,7 @@ export default function GenerarCarnet() {
       </div>
       {/* Modals */}
       {showPresetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
               <h3 className="text-lg font-medium text-gray-900">Presets de Ajustes</h3>
@@ -2390,7 +2390,7 @@ export default function GenerarCarnet() {
 
 
       {previewTemplate && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-75 p-4" onClick={() => setPreviewTemplate(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4" onClick={() => setPreviewTemplate(null)}>
           <div className="relative bg-white rounded-lg shadow-2xl max-w-4xl w-full overflow-hidden" onClick={e => e.stopPropagation()}>
             <button onClick={() => setPreviewTemplate(null)} className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 bg-white rounded-full p-1 shadow-md">
               <XCircle className="h-8 w-8" />
@@ -2413,7 +2413,7 @@ export default function GenerarCarnet() {
       )}
 
       {showFontModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
               <h3 className="text-lg font-medium text-gray-900">Fuentes Guardadas</h3>

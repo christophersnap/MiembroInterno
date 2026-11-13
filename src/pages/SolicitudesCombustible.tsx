@@ -25,16 +25,21 @@ import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
-  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const combustibleScope = getModuleScope('solicitudes_combustible');
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_combustible');
+  const combustibleCreateScope = getCreateSolicitudScope('solicitudes_combustible');
+  const combustibleCreateSeccionalId = getCreateSolicitudSeccionalId('solicitudes_combustible');
+  const canSelectAnySeccionalOnCreate = isAdmin || combustibleCreateScope === 'global';
+  const canCreateCombustible = isAdmin || (permissions.crear_solicitudes_combustible ?? true);
   const hasNivelNacional = isAdmin || combustibleScope === 'global';
   const isSeccionalOnly = combustibleScope === 'seccional';
   const canApprove = isAdmin || permissions.edit_solicitudes_combustible === true || permissions.aprobar_solicitudes_combustible === true;
   const canViewHistorial = isAdmin || Boolean(permissions.view_combustible_historial);
   const canViewPlantillas = isAdmin || Boolean(permissions.view_combustible_plantillas);
+  const canPreviewPdf = isAdmin || (permissions.ver_previsualizacion_pdf ?? true);
 
   // Estados principales
   const [solicitudes, setSolicitudes] = useState<SolicitudCombustible[]>([]);
@@ -72,15 +77,19 @@ export default function SolicitudesCombustible() {
   const [copiedSql, setCopiedSql] = useState(false);
 
   // Navegación de pestañas
-  const [activeTab, setActiveTab] = useState<'formulario' | 'historial' | 'plantillas'>('formulario');
+  const [activeTab, setActiveTab] = useState<'formulario' | 'historial' | 'plantillas'>(
+    canCreateCombustible ? 'formulario' : (canViewHistorial ? 'historial' : 'formulario')
+  );
 
   useEffect(() => {
-    if (activeTab === 'historial' && !canViewHistorial) {
+    if (activeTab === 'formulario' && !canCreateCombustible && canViewHistorial) {
+      setActiveTab('historial');
+    } else if (activeTab === 'historial' && !canViewHistorial) {
       setActiveTab('formulario');
     } else if (activeTab === 'plantillas' && !canViewPlantillas) {
-      setActiveTab('formulario');
+      setActiveTab(canCreateCombustible ? 'formulario' : (canViewHistorial ? 'historial' : 'formulario'));
     }
-  }, [activeTab, canViewHistorial, canViewPlantillas]);
+  }, [activeTab, canCreateCombustible, canViewHistorial, canViewPlantillas]);
 
   // Filtros de búsqueda
   const [searchTerm, setSearchTerm] = useState('');
@@ -684,17 +693,19 @@ NOTIFY pgrst, 'reload schema';`;
 
         {/* Pestañas */}
         <div className="flex items-center bg-gray-100 p-1 rounded-xl shadow-2xs">
-          <button
-            onClick={() => setActiveTab('formulario')}
-            className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition ${
-              activeTab === 'formulario'
-                ? 'bg-white text-gray-900 shadow-2xs'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <Plus className="w-4 h-4 mr-1.5 text-emerald-600" />
-            Formulario
-          </button>
+          {canCreateCombustible && (
+            <button
+              onClick={() => setActiveTab('formulario')}
+              className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'formulario'
+                  ? 'bg-white text-gray-900 shadow-2xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Plus className="w-4 h-4 mr-1.5 text-emerald-600" />
+              Formulario
+            </button>
+          )}
 
           {canViewHistorial && (
             <button
@@ -726,19 +737,30 @@ NOTIFY pgrst, 'reload schema';`;
         </div>
       </div>
 
-      {/* PESTAÑA 1: FORMULARIO (IMAGEN 1) */}
-      {activeTab === 'formulario' && (
-        <CombustibleForm
-          seccionales={seccionales}
-          isAdmin={isAdmin}
-          userSeccionalNombre={userSeccionalNombre}
-          defaultDirector={userSeccionalNombre ? (seccionales.find(s => s.nombre.toLowerCase() === userSeccionalNombre.toLowerCase())?.director || 'Director Seccional') : 'Director Seccional'}
-          defaultEmail={user?.email || ''}
-          defaultSolicitante={userName && userName !== 'Usuario' ? userName : ''}
-          submitting={submitting}
-          onSubmit={handleSubmitForm}
-        />
-      )}
+      {/* PESTAÑA 1: FORMULARIO */}
+      {activeTab === 'formulario' && canCreateCombustible && (() => {
+        const lockedId = !canSelectAnySeccionalOnCreate
+          ? (combustibleCreateSeccionalId || effectiveSeccionalId)
+          : effectiveSeccionalId;
+        const lockedObj = lockedId ? seccionales.find(s => Number(s.id) === Number(lockedId)) : null;
+        const resolvedSecNombre = lockedObj?.nombre || userSeccionalNombre;
+        const resolvedDirector = lockedObj?.director || (resolvedSecNombre ? seccionales.find(s => s.nombre.toLowerCase() === resolvedSecNombre.toLowerCase())?.director : undefined) || 'Director Seccional';
+
+        return (
+          <CombustibleForm
+            seccionales={seccionales}
+            isAdmin={isAdmin}
+            canSelectAnySeccional={canSelectAnySeccionalOnCreate}
+            userSeccionalId={lockedId}
+            userSeccionalNombre={resolvedSecNombre}
+            defaultDirector={resolvedDirector}
+            defaultEmail={user?.email || ''}
+            defaultSolicitante={userName && userName !== 'Usuario' ? userName : ''}
+            submitting={submitting}
+            onSubmit={handleSubmitForm}
+          />
+        );
+      })()}
 
       {/* PESTAÑA 2: HISTORIAL DE SOLICITUDES */}
       {canViewHistorial && activeTab === 'historial' && (
@@ -870,16 +892,18 @@ NOTIFY pgrst, 'reload schema';`;
                             </button>
 
                             {/* Botón Documento Oficial PDF (Documento 3) */}
-                            <button
-                              onClick={() => {
-                                setSelectedSolicitud(sol);
-                                setShowPdfModal(true);
-                              }}
-                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
-                              title="Ver / Imprimir Hoja Oficial PDF"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
+                            {canPreviewPdf && (
+                              <button
+                                onClick={() => {
+                                  setSelectedSolicitud(sol);
+                                  setShowPdfModal(true);
+                                }}
+                                className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                                title="Ver / Imprimir Hoja Oficial PDF"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+                            )}
 
                             {/* Botón Gestión de Estado (Admin) */}
                             {canApprove && (
@@ -915,6 +939,7 @@ NOTIFY pgrst, 'reload schema';`;
           config={config}
           onSave={handleSaveConfig}
           saving={savingConfig}
+          canPreviewPdf={canPreviewPdf}
         />
       )}
 
@@ -928,7 +953,7 @@ NOTIFY pgrst, 'reload schema';`;
       )}
 
       {/* MODAL 2: DOCUMENTO OFICIAL PDF TAMAÑO CARTA (DOCUMENTO 3) */}
-      {showPdfModal && selectedSolicitud && (
+      {canPreviewPdf && showPdfModal && selectedSolicitud && (
         <CombustiblePdfModal
           solicitud={selectedSolicitud}
           config={config}
@@ -967,17 +992,19 @@ NOTIFY pgrst, 'reload schema';`;
                 Ver Acuse de Correo
               </button>
 
-              <button
-                onClick={() => {
-                  setSelectedSolicitud(lastSubmittedSolicitud);
-                  setShowCelebrationModal(false);
-                  setShowPdfModal(true);
-                }}
-                className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition"
-              >
-                <Printer className="w-4 h-4 mr-1.5" />
-                Imprimir Documento PDF
-              </button>
+              {canPreviewPdf && (
+                <button
+                  onClick={() => {
+                    setSelectedSolicitud(lastSubmittedSolicitud);
+                    setShowCelebrationModal(false);
+                    setShowPdfModal(true);
+                  }}
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 mr-1.5" />
+                  Imprimir Documento PDF
+                </button>
+              )}
 
               <button
                 onClick={() => {

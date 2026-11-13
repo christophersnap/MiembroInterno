@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FileText, Upload, CheckCircle2, Clock, Download, ExternalLink, 
-  Trash2, ChevronDown, ChevronUp, AlertCircle, ShieldCheck, History, Plus
+  FileText, Upload, CheckCircle2, Clock, Download, Eye, X, 
+  Trash2, ChevronDown, ChevronUp, AlertCircle, ShieldCheck, History, Plus, Lock
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { DocumentoSocorrista, TIPOS_DOCUMENTOS } from '../../types/socorrista';
@@ -18,13 +18,16 @@ export default function DocumentosSocorristaCard({
   socorristaNombre,
   readOnly = false
 }: DocumentosSocorristaCardProps) {
-  const { role, userName } = useAuth();
-  const canUpload = !readOnly && (role === 'admin' || role === 'director' || role === 'jefe_seccional');
+  const { role, userName, permissions } = useAuth();
+  const canUpload = !readOnly && (role === 'admin' || Boolean(permissions.subir_expediente_socorrista));
+  const canPreviewOnline = role === 'admin' || Boolean(permissions.ver_expediente_socorrista);
+  const canDownload = role === 'admin' || Boolean(permissions.descargar_expediente_socorrista);
 
   const [documentos, setDocumentos] = useState<DocumentoSocorrista[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadingTipo, setUploadingTipo] = useState<string | null>(null);
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
+  const [previewDoc, setPreviewDoc] = useState<DocumentoSocorrista | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -305,23 +308,32 @@ export default function DocumentosSocorristaCard({
                         <div className="flex items-center justify-between text-3xs text-gray-500 pt-1 border-t border-gray-100">
                           <span>{formatFileSize(activeDoc.tamanio_bytes)} {activeDoc.subido_por ? `• Por: ${activeDoc.subido_por}` : ''}</span>
                           <div className="flex items-center space-x-2">
-                            <a
-                              href={activeDoc.archivo_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center text-emerald-700 hover:text-emerald-900 font-bold hover:underline"
-                            >
-                              <ExternalLink className="w-3 h-3 mr-0.5" />
-                              Ver PDF
-                            </a>
-                            <a
-                              href={activeDoc.archivo_url}
-                              download={activeDoc.nombre_archivo}
-                              className="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium"
-                            >
-                              <Download className="w-3 h-3 mr-0.5" />
-                              Bajar
-                            </a>
+                            {canPreviewOnline && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewDoc(activeDoc)}
+                                className="inline-flex items-center text-emerald-700 hover:text-emerald-900 font-bold hover:underline cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3 mr-0.5" />
+                                Ver en línea
+                              </button>
+                            )}
+                            {canDownload && (
+                              <a
+                                href={activeDoc.archivo_url}
+                                download={activeDoc.nombre_archivo}
+                                className="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium"
+                              >
+                                <Download className="w-3 h-3 mr-0.5" />
+                                Descargar
+                              </a>
+                            )}
+                            {!canPreviewOnline && !canDownload && (
+                              <span className="inline-flex items-center text-gray-400 font-medium">
+                                <Lock className="w-3 h-3 mr-0.5" />
+                                Documento cargado
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -361,14 +373,28 @@ export default function DocumentosSocorristaCard({
                                 </span>
                                 <span className="text-gray-500 ml-1 truncate">{prevDoc.nombre_archivo}</span>
                               </div>
-                              <a
-                                href={prevDoc.archivo_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-emerald-700 hover:text-emerald-900 font-bold shrink-0 ml-1"
-                              >
-                                Descargar
-                              </a>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                {canPreviewOnline && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewDoc(prevDoc)}
+                                    className="inline-flex items-center text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
+                                  >
+                                    <Eye className="w-3 h-3 mr-0.5" />
+                                    Ver
+                                  </button>
+                                )}
+                                {canDownload && (
+                                  <a
+                                    href={prevDoc.archivo_url}
+                                    download={prevDoc.nombre_archivo}
+                                    className="inline-flex items-center text-gray-700 hover:text-gray-900 font-semibold"
+                                  >
+                                    <Download className="w-3 h-3 mr-0.5" />
+                                    Descargar
+                                  </a>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -400,6 +426,67 @@ export default function DocumentosSocorristaCard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Modal de Previsualización en Línea del Expediente Digital */}
+      {previewDoc && canPreviewOnline && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+          onClick={() => setPreviewDoc(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-slate-900 truncate">
+                  {previewDoc.nombre_archivo}
+                </h4>
+                <p className="text-xs text-slate-500">
+                  {socorristaNombre ? `${socorristaNombre} · ` : ''}Versión {previewDoc.version}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {canDownload && (
+                  <a
+                    href={previewDoc.archivo_url}
+                    download={previewDoc.nombre_archivo}
+                    className="inline-flex items-center px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" />
+                    Descargar
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-slate-100 p-3 sm:p-4 overflow-auto flex items-center justify-center min-h-[60vh]">
+              {/\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(previewDoc.archivo_url) ||
+              /\.(jpg|jpeg|png|webp|gif)$/i.test(previewDoc.nombre_archivo) ? (
+                <img
+                  src={previewDoc.archivo_url}
+                  alt={previewDoc.nombre_archivo}
+                  referrerPolicy="no-referrer"
+                  className="max-h-[74vh] max-w-full rounded-xl object-contain shadow-sm"
+                />
+              ) : (
+                <iframe
+                  src={`${previewDoc.archivo_url}${canDownload ? '' : '#toolbar=0'}`}
+                  title={previewDoc.nombre_archivo}
+                  className="w-full h-[72vh] rounded-xl bg-white border border-slate-200"
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

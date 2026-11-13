@@ -20,12 +20,14 @@ interface CombustibleTemplateConfigProps {
   config: CombustibleConfig;
   onSave: (newConfig: CombustibleConfig) => Promise<void>;
   saving: boolean;
+  canPreviewPdf?: boolean;
 }
 
 export default function CombustibleTemplateConfig({
   config: initialConfig,
   onSave,
-  saving
+  saving,
+  canPreviewPdf = true
 }: CombustibleTemplateConfigProps) {
   const [currentConfig, setCurrentConfig] = useState<CombustibleConfig>(() => ({
     ...DEFAULT_COMBUSTIBLE_CONFIG,
@@ -314,15 +316,17 @@ export default function CombustibleTemplateConfig({
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => setShowPreviewModal(true)}
-            className="inline-flex items-center px-3.5 py-2 border border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-xs font-bold transition shadow-2xs"
-            title="Previsualizar cómo se verá el PDF final con los ajustes actuales"
-          >
-            <Eye className="w-4 h-4 mr-1.5 text-emerald-700" />
-            Previsualizar PDF
-          </button>
+          {canPreviewPdf && (
+            <button
+              type="button"
+              onClick={() => setShowPreviewModal(true)}
+              className="inline-flex items-center px-3.5 py-2 border border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+              title="Previsualizar cómo se verá el PDF final con los ajustes actuales"
+            >
+              <Eye className="w-4 h-4 mr-1.5 text-emerald-700" />
+              Previsualizar PDF
+            </button>
+          )}
 
           <button
             type="button"
@@ -1261,7 +1265,7 @@ export default function CombustibleTemplateConfig({
       </form>
 
       {/* Modal de Previsualización en Vivo de PDF */}
-      {showPreviewModal && (
+      {canPreviewPdf && showPreviewModal && (
         <CombustiblePdfModal
           solicitud={demoSolicitud}
           config={currentConfig}
