@@ -2,14 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Link, useNavigate } from 'react-router-dom';
-import { IdCard, CheckCircle, AlertCircle, Loader2, ArrowLeft, Send, X, Crop, Camera } from 'lucide-react';
-import WatermarkImage from '../components/WatermarkImage';
-import Cropper from 'react-easy-crop';
-import getCroppedImg from '../utils/cropImage';
+import { IdCard, CheckCircle, AlertCircle, Loader2, ArrowLeft, Send, Camera, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
+import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 
 export default function SolicitudCarnet() {
-  const { user } = useAuth();
+  const { user, userName } = useAuth();
   const navigate = useNavigate();
   const { logos } = useSettings();
 
@@ -22,13 +20,9 @@ export default function SolicitudCarnet() {
   const [motivo, setMotivo] = useState('');
   const [detallesMotivo, setDetallesMotivo] = useState('');
   const [fotoFile, setFotoFile] = useState<File | null>(null);
-
-  // Cropper state
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
-  const [showCropper, setShowCropper] = useState(false);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [photoDecision, setPhotoDecision] = useState<'keep' | 'replace'>('replace');
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
   
   const [confirmInformation, setConfirmInformation] = useState(false);
   const [confirmValidation, setConfirmValidation] = useState(false);
@@ -67,13 +61,16 @@ export default function SolicitudCarnet() {
         .from('socorristas')
         .select(`
           id,
+          carnet,
           primer_nombre,
           segundo_nombre,
           primer_apellido,
           segundo_apellido,
           estado,
           cargo_institucional,
-          seccionales (nombre)
+          foto_url,
+          seccional_id,
+          seccionales (id, nombre)
         `)
         .eq('carnet', carnet)
         .single();
@@ -84,6 +81,9 @@ export default function SolicitudCarnet() {
         setSearchError("Socorrista inactivo. Debe solicitar a su director el cambio de estado a Activo.");
       } else {
         setSocorrista(data);
+        setFotoFile(null);
+        setFotoPreview(null);
+        setPhotoDecision(data.foto_url ? 'keep' : 'replace');
         if (tipoSolicitud === 'Nuevo') {
             // Check if already has a request pending
             const { data: requestData } = await supabase
@@ -105,39 +105,10 @@ export default function SolicitudCarnet() {
     }
   };
 
-  const onCropComplete = useCallback((croppedArea: any, croppedAreaPixels: any) => {
-    setCroppedAreaPixels(croppedAreaPixels);
-  }, []);
-
-  const handleFotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) {
-        alert("La imagen no debe superar los 5MB");
-        return;
-      }
-      const reader = new FileReader();
-      reader.addEventListener('load', () => {
-        setImageSrc(reader.result?.toString() || null);
-        setShowCropper(true);
-      });
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleCropSave = async () => {
-    try {
-      if (!imageSrc || !croppedAreaPixels) return;
-      const croppedImageBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
-      if (croppedImageBlob) {
-        const file = new File([croppedImageBlob], 'cropped_image.jpg', { type: 'image/jpeg' });
-        setFotoFile(file);
-        setShowCropper(false);
-      }
-    } catch (e) {
-      console.error(e);
-      alert('Error al recortar la imagen');
-    }
+  const handlePhotoReady = (file: File, previewUrl: string) => {
+    setFotoFile(file);
+    setFotoPreview(previewUrl);
+    setPhotoDecision('replace');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -160,8 +131,10 @@ export default function SolicitudCarnet() {
     setLoadingSubmit(true);
 
     try {
-      let fotoUrl = null;
-      if (fotoFile) {
+      let fotoUrl: string | null = null;
+      if (photoDecision === 'keep' && socorrista.foto_url && !fotoFile) {
+        fotoUrl = socorrista.foto_url;
+      } else if (fotoFile) {
         const fileExt = (fotoFile.name.split('.').pop() || 'jpg').toLowerCase();
         const fileName = `${carnet}_solicitud_${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
@@ -180,10 +153,14 @@ export default function SolicitudCarnet() {
           .from('socorristas')
           .getPublicUrl(fileName);
         fotoUrl = publicUrl;
-        // La foto queda asociada a la solicitud (solicitudes_carnet) para que el administrador la revise y apruebe en Generar Carnet
       }
 
-      const solicitudPayload = {
+      const secObj = Array.isArray(socorrista.seccionales) ? socorrista.seccionales[0] : socorrista.seccionales;
+      const seccionalIdResolved = socorrista.seccional_id || secObj?.id || null;
+      const seccionalNombreResolved = secObj?.nombre || null;
+      const nombreElemento = `${socorrista.primer_nombre} ${socorrista.primer_apellido}`.trim();
+
+      const corePayload = {
         socorrista_id: socorrista.id,
         tipo_solicitud: tipoSolicitud,
         motivo: ['Cambio', 'Reposición'].includes(tipoSolicitud) ? motivo : null,
@@ -192,20 +169,33 @@ export default function SolicitudCarnet() {
         estado_solicitud: 'Pendiente'
       };
 
-      const { error: insertError } = await supabase
+      const extendedPayload = {
+        ...corePayload,
+        seccional_id: seccionalIdResolved,
+        seccional_nombre: seccionalNombreResolved,
+        solicitado_por: userName || nombreElemento,
+        solicitado_por_email: user?.email || null,
+      };
+
+      let { error: insertError } = await supabase
         .from('solicitudes_carnet')
-        .insert([solicitudPayload]);
+        .insert([extendedPayload]);
+
+      // Retry without extended columns if migration 31 hasn't been executed yet
+      if (insertError) {
+        const retry = await supabase.from('solicitudes_carnet').insert([corePayload]);
+        insertError = retry.error;
+      }
 
       if (insertError) {
         console.warn("Aviso insertando en solicitudes_carnet (posible RLS):", insertError);
-        // Guardar respaldo en configuracion para que el administrador la vea en Generar Carnet
         try {
           await supabase.from('configuracion').insert({
             clave: `solicitud_carnet_${socorrista.id}_${Date.now()}`,
             valor: JSON.stringify({
-              ...solicitudPayload,
-              carnet: socorrista.carnet,
-              nombre_completo: `${socorrista.primer_nombre} ${socorrista.primer_apellido}`,
+              ...extendedPayload,
+              carnet: socorrista.carnet || carnet,
+              nombre_completo: nombreElemento,
               fecha_solicitud: new Date().toISOString()
             })
           });
@@ -214,6 +204,7 @@ export default function SolicitudCarnet() {
         }
       }
 
+      window.dispatchEvent(new Event('solicitudes_updated'));
       setSubmitSuccess(true);
       window.scrollTo(0,0);
     } catch (error: any) {
@@ -405,33 +396,99 @@ export default function SolicitudCarnet() {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Fotografía Reciente (Opcional)
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-gray-800">
+                  Fotografía Oficial para Carnet
                 </label>
-                <p className="text-xs text-gray-500 mb-2">Para una mejor impresión, suba una foto con fondo claro y rostro visible (Max. 5MB).</p>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="flex-shrink-0 h-24 w-24 border border-gray-300 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center relative group">
-                    {fotoFile ? (
-                      <img src={URL.createObjectURL(fotoFile)} alt="Preview" className="h-full w-full object-cover" />
-                    ) : (
-                      <Camera className="h-8 w-8 text-gray-400" />
-                    )}
+
+                {socorrista.foto_url && (
+                  <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/60 space-y-3">
+                    <div className="flex items-center gap-3.5">
+                      <img
+                        src={socorrista.foto_url}
+                        alt="Fotografía actual en perfil"
+                        className="w-16 h-16 rounded-full object-cover border-2 border-emerald-400 shrink-0"
+                      />
+                      <div className="text-xs text-emerald-950">
+                        <p className="font-bold">Este elemento ya cuenta con una fotografía registrada</p>
+                        <p className="text-emerald-800 mt-0.5">
+                          ¿Deseas mantener la fotografía actual o actualizarla por una nueva?
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoDecision('keep');
+                          setFotoFile(null);
+                          setFotoPreview(null);
+                        }}
+                        className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                          photoDecision === 'keep'
+                            ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Mantener Fotografía Actual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoDecision('replace');
+                          setShowPhotoModal(true);
+                        }}
+                        className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                          photoDecision === 'replace'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Actualizar Fotografía
+                      </button>
+                    </div>
                   </div>
-                  
-                  <div className="flex-1">
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png"
-                      onChange={handleFotoChange}
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:bg-opacity-10 file:text-primary hover:file:bg-opacity-20"
-                    />
-                    {fotoFile && (
-                      <p className="mt-1 text-xs text-green-600 font-medium">✓ Fotografía recortada lista</p>
-                    )}
+                )}
+
+                {(!socorrista.foto_url || photoDecision === 'replace') && (
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+                    <div className="flex items-start gap-2.5 text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200/70">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <span>
+                        Antes de tomar o subir la foto, el asistente te mostrará los lineamientos oficiales (de frente tipo pasaporte, camisa blanca, fondo liso blanco, sin gorra ni lentes) y una máscara guía si usas la cámara.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="flex-shrink-0 h-24 w-24 border-2 border-slate-300 rounded-full overflow-hidden bg-white flex items-center justify-center">
+                        {fotoPreview ? (
+                          <img src={fotoPreview} alt="Vista previa" className="h-full w-full object-cover" />
+                        ) : (
+                          <Camera className="h-8 w-8 text-slate-400" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowPhotoModal(true)}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Camera className="w-4 h-4" />
+                          {fotoPreview ? 'Cambiar Fotografía' : 'Tomar Foto / Subir Archivo'}
+                        </button>
+                        {fotoPreview && (
+                          <p className="text-xs text-emerald-700 font-semibold">
+                            ✓ Nueva fotografía recortada lista para enviar
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="border-t border-gray-200 pt-4 space-y-4">
@@ -510,53 +567,12 @@ export default function SolicitudCarnet() {
       </div>
       </div>
 
-      {showCropper && imageSrc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl overflow-hidden flex flex-col h-[80vh]">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-medium text-gray-900">Recortar Fotografía</h3>
-              <button type="button" onClick={() => setShowCropper(false)} className="text-gray-400 hover:text-gray-500">
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            <div className="relative flex-1 bg-gray-900">
-              <Cropper
-                image={imageSrc}
-                crop={crop}
-                zoom={zoom}
-                aspect={1}
-                cropShape="round"
-                showGrid={false}
-                onCropChange={setCrop}
-                onCropComplete={onCropComplete}
-                onZoomChange={setZoom}
-              />
-            </div>
-            <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
-              <div className="flex-1 mr-4">
-                <input
-                  type="range"
-                  value={zoom}
-                  min={1}
-                  max={3}
-                  step={0.1}
-                  aria-labelledby="Zoom"
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleCropSave}
-                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-hover focus:outline-none"
-              >
-                <Crop className="h-4 w-4 mr-2" />
-                Aplicar Recorte
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CarnetPhotoCaptureModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        onPhotoReady={handlePhotoReady}
+        title="Fotografía para Solicitud de Carnet"
+      />
 
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 py-8 mt-8">

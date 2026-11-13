@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   ClipboardList, Fuel, Plus, Search, Filter, Eye, Download, Mail, 
   CheckCircle2, Clock, XCircle, AlertCircle, RefreshCw, ChevronLeft, 
   Building2, User, FileText, Send, Calendar, Check, ExternalLink,
   DollarSign, Truck, AlertTriangle, ShieldCheck, Info, ArrowUpRight,
-  Sliders, Edit3, X
+  Sliders, Edit3, X, IdCard
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -18,6 +18,7 @@ import { generarHtmlCorreoCombustible, generarHtmlCorreoCompra } from '../lib/em
 import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
+import SolicitudesCarnetTab from '../components/solicitudes/SolicitudesCarnetTab';
 
 export type TipoSolicitudFilter = 'todas' | 'combustible' | 'compra';
 
@@ -50,11 +51,45 @@ export interface SolicitudUnifiedItem {
 
 export default function Solicitudes() {
   const navigate = useNavigate();
-  const { user, userName, role, userSeccionalId, userSeccionalNombre, permissions } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds } = useAuth();
   
   const isAdmin = role === 'admin';
-  const hasNivelNacional = isAdmin || Boolean(permissions.ver_todas_seccionales);
-  const isRestrictedSeccional = !hasNivelNacional && Boolean(userSeccionalNombre || userSeccionalId);
+  const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
+  const compraScope = getModuleScope('solicitudes_compra');
+  const combustibleScope = getModuleScope('solicitudes_combustible');
+  const compraSeccionalIds = getModuleSeccionalIds('solicitudes_compra');
+  const combustibleSeccionalIds = getModuleSeccionalIds('solicitudes_combustible');
+
+  const canViewCompra = isAdmin || Boolean(permissions.view_solicitudes_compra);
+  const canViewCombustible = isAdmin || Boolean(permissions.view_solicitudes_combustible);
+  const canViewLogistica = canViewCompra || canViewCombustible;
+  const canViewCarnet = isAdmin || Boolean(permissions.view_solicitudes_carnet);
+
+  const hasNivelNacional = isAdmin || (canViewCompra && compraScope === 'global') || (canViewCombustible && combustibleScope === 'global');
+  const combinedAllowedSecIds = Array.from(new Set([
+    ...(canViewCompra && compraScope === 'seccional' ? compraSeccionalIds : []),
+    ...(canViewCombustible && combustibleScope === 'seccional' ? combustibleSeccionalIds : []),
+  ]));
+  const isRestrictedSeccional = !hasNivelNacional && (compraScope === 'seccional' || combustibleScope === 'seccional') && (combinedAllowedSecIds.length > 0 || Boolean(userSeccionalNombre || effectiveSeccionalId));
+
+  const [activeMainTab, setActiveMainTab] = useState<'logistica' | 'carnet'>(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'carnet' && canViewCarnet) return 'carnet';
+    if (!canViewLogistica && canViewCarnet) return 'carnet';
+    return 'logistica';
+  });
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'carnet' && canViewCarnet) {
+      setActiveMainTab('carnet');
+    } else if (!canViewLogistica && canViewCarnet) {
+      setActiveMainTab('carnet');
+    } else if (canViewLogistica && activeMainTab === 'carnet' && tabParam !== 'carnet') {
+      // keep current if user explicitly clicked
+    }
+  }, [searchParams, canViewCarnet, canViewLogistica]);
 
   // Estados de datos
   const [solicitudes, setSolicitudes] = useState<SolicitudUnifiedItem[]>([]);
@@ -65,7 +100,7 @@ export default function Solicitudes() {
   const [tipoFiltro, setTipoFiltro] = useState<TipoSolicitudFilter>('todas');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('Todos');
-  const [filterSeccional, setFilterSeccional] = useState(isRestrictedSeccional && userSeccionalNombre ? userSeccionalNombre : 'Todas');
+  const [filterSeccional, setFilterSeccional] = useState('Todas');
 
   // Modales
   const [detailItem, setDetailItem] = useState<SolicitudUnifiedItem | null>(null);
@@ -77,8 +112,11 @@ export default function Solicitudes() {
   const [combustibleConfig, setCombustibleConfig] = useState<CombustibleConfig>(DEFAULT_COMBUSTIBLE_CONFIG);
   const [compraConfig, setCompraConfig] = useState<CompraConfig>(DEFAULT_COMPRA_CONFIG);
 
-  // Permisos y estados para cambio de estado unificado
-  const canManageStatus = isAdmin || Boolean(permissions?.autorizar_solicitudes || permissions?.edit_solicitudes_compra || permissions?.edit_solicitudes_combustible);
+  // Permisos y estados para cambio de estado unificado (Editar vs Solo Ver por módulo)
+  const canEditCompra = isAdmin || Boolean(permissions?.edit_solicitudes_compra || permissions?.aprobar_solicitudes_compra || permissions?.autorizar_solicitudes);
+  const canEditCombustible = isAdmin || Boolean(permissions?.edit_solicitudes_combustible || permissions?.aprobar_solicitudes_combustible || permissions?.autorizar_solicitudes);
+  const canManageItem = (item: SolicitudUnifiedItem) => item.tipo === 'compra' ? canEditCompra : canEditCombustible;
+  const canManageStatus = canEditCompra || canEditCombustible;
   const [statusModalItem, setStatusModalItem] = useState<SolicitudUnifiedItem | null>(null);
   const [newStatus, setNewStatus] = useState<string>('Aprobada');
   const [motivoRechazo, setMotivoRechazo] = useState('');
@@ -386,7 +424,7 @@ export default function Solicitudes() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (isRestrictedSeccional && userSeccionalNombre) {
+        if (combustibleScope === 'seccional' && combustibleSeccionalIds.length <= 1 && userSeccionalNombre && !effectiveSeccionalId) {
           combQuery = combQuery.ilike('seccional_nombre', `%${userSeccionalNombre}%`);
         }
 
@@ -432,7 +470,7 @@ export default function Solicitudes() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (isRestrictedSeccional && userSeccionalNombre) {
+        if (compraScope === 'seccional' && compraSeccionalIds.length <= 1 && userSeccionalNombre && !effectiveSeccionalId) {
           compQuery = compQuery.ilike('seccional_nombre', `%${userSeccionalNombre}%`);
         }
 
@@ -541,13 +579,37 @@ export default function Solicitudes() {
         return dateB - dateA;
       });
 
-      // Si el usuario no es admin, solo podrá ver en la tabla las solicitudes que ha realizado
-      if (!isAdmin) {
-        const soloDelUsuario = unified.filter(item => isSolicitudRealizadaPorUsuario(item, user, userName));
-        setSolicitudes(soloDelUsuario);
-      } else {
-        setSolicitudes(unified);
-      }
+      // Filtrar según permisos de módulo y alcance individual (global | seccional | usuario)
+      const matchesScope = (item: SolicitudUnifiedItem) => {
+        if (item.tipo === 'compra' && !canViewCompra) return false;
+        if (item.tipo === 'combustible' && !canViewCombustible) return false;
+        const scope = item.tipo === 'compra' ? compraScope : combustibleScope;
+        if (scope === 'global') return true;
+        if (scope === 'seccional') {
+          const customIds = item.tipo === 'compra' ? compraSeccionalIds : combustibleSeccionalIds;
+          const targetIds = customIds.length > 0
+            ? customIds
+            : (effectiveSeccionalId ? [Number(effectiveSeccionalId)] : []);
+
+          if (targetIds.length > 0) {
+            if (item.seccional_id && targetIds.includes(Number(item.seccional_id))) return true;
+            const allowedNames = loadedSeccs
+              .filter(s => targetIds.includes(s.id))
+              .map(s => s.nombre.toLowerCase());
+            if (item.seccional_nombre && allowedNames.some(n => item.seccional_nombre.toLowerCase().includes(n))) {
+              return true;
+            }
+            return false;
+          }
+          if (userSeccionalNombre) {
+            return (item.seccional_nombre || '').toLowerCase().includes(userSeccionalNombre.toLowerCase());
+          }
+          return isSolicitudRealizadaPorUsuario(item, user, userName);
+        }
+        return isSolicitudRealizadaPorUsuario(item, user, userName);
+      };
+
+      setSolicitudes(unified.filter(matchesScope));
 
     } catch (err) {
       console.error('Error cargando solicitudes:', err);
@@ -556,33 +618,25 @@ export default function Solicitudes() {
     }
   };
 
+  const allowedSecsKey = `${compraSeccionalIds.join(',')}|${combustibleSeccionalIds.join(',')}`;
   useEffect(() => {
     fetchAllData();
-  }, [userSeccionalNombre, userSeccionalId, role, user?.id, user?.email, userName]);
+  }, [userSeccionalNombre, effectiveSeccionalId, role, user?.id, user?.email, userName, compraScope, combustibleScope, allowedSecsKey, canViewCompra, canViewCombustible]);
 
   // Filtrado de solicitudes
   const filteredSolicitudes = useMemo(() => {
     return solicitudes.filter(item => {
-      // 0. Si el usuario NO es admin, solo podrá ver las solicitudes que ha realizado
-      if (!isAdmin && !isSolicitudRealizadaPorUsuario(item, user, userName)) {
-        return false;
-      }
-
       // 1. Tipo
       if (tipoFiltro !== 'todas' && item.tipo !== tipoFiltro) {
         return false;
       }
 
-      // 2. Seccional (Solo aplicable si es admin)
-      if (isAdmin) {
-        if (isRestrictedSeccional && userSeccionalNombre) {
-          if (!item.seccional_nombre.toLowerCase().includes(userSeccionalNombre.toLowerCase())) {
-            return false;
-          }
-        } else if (filterSeccional !== 'Todas') {
-          if (item.seccional_nombre !== filterSeccional) {
-            return false;
-          }
+      // 2. Seccional
+      const itemScope = item.tipo === 'compra' ? compraScope : combustibleScope;
+      const canFilterBySec = itemScope === 'global' || (itemScope === 'seccional' && combinedAllowedSecIds.length > 1);
+      if (canFilterBySec && filterSeccional !== 'Todas') {
+        if (item.seccional_nombre !== filterSeccional) {
+          return false;
         }
       }
 
@@ -609,7 +663,7 @@ export default function Solicitudes() {
 
       return true;
     });
-  }, [solicitudes, tipoFiltro, filterSeccional, filterEstado, searchTerm, isRestrictedSeccional, userSeccionalNombre, isAdmin, user, userName]);
+  }, [solicitudes, tipoFiltro, filterSeccional, filterEstado, searchTerm, compraScope, combustibleScope]);
 
   // Manejar apertura de PDF
   const handleOpenPdf = (item: SolicitudUnifiedItem) => {
@@ -662,33 +716,83 @@ export default function Solicitudes() {
         </div>
 
         {/* Botones de Acción Rápida para Nuevas Solicitudes */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            onClick={() => navigate('/solicitudes-combustible')}
-            className="inline-flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
-          >
-            <Fuel className="w-4 h-4 mr-1.5" />
-            + Nueva Solicitud de Combustible
-          </button>
+        {activeMainTab === 'logistica' && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            {canViewCombustible && (
+              <button
+                onClick={() => navigate('/solicitudes-combustible')}
+                className="inline-flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <Fuel className="w-4 h-4 mr-1.5" />
+                + Nueva Solicitud de Combustible
+              </button>
+            )}
 
-          <button
-            onClick={() => navigate('/solicitudes-compra')}
-            className="inline-flex items-center px-4 py-2.5 bg-primary hover:bg-blue-900 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
-          >
-            <FileText className="w-4 h-4 mr-1.5" />
-            + Nueva Solicitud de Compra
-          </button>
+            {canViewCompra && (
+              <button
+                onClick={() => navigate('/solicitudes-compra')}
+                className="inline-flex items-center px-4 py-2.5 bg-primary hover:bg-blue-900 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <FileText className="w-4 h-4 mr-1.5" />
+                + Nueva Solicitud de Compra
+              </button>
+            )}
 
-          <button
-            onClick={fetchAllData}
-            title="Recargar datos"
-            className="p-2.5 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-xl transition shadow-2xs"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
+            <button
+              onClick={fetchAllData}
+              title="Recargar datos"
+              className="p-2.5 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-xl transition shadow-2xs"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Selector de Módulo dentro de Gestión Logística */}
+      {(canViewLogistica || canViewCarnet) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 pb-3">
+          {canViewLogistica && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMainTab('logistica');
+                setSearchParams({});
+              }}
+              className={`inline-flex items-center px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                activeMainTab === 'logistica'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              <ClipboardList className="w-4 h-4 mr-2" />
+              Compras y Combustible ({solicitudes.length})
+            </button>
+          )}
+          {canViewCarnet && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMainTab('carnet');
+                setSearchParams({ tab: 'carnet' });
+              }}
+              className={`inline-flex items-center px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                activeMainTab === 'carnet'
+                  ? 'bg-emerald-700 text-white shadow-sm'
+                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              <IdCard className="w-4 h-4 mr-2" />
+              Solicitudes de Carnet
+            </button>
+          )}
+        </div>
+      )}
+
+      {activeMainTab === 'carnet' && canViewCarnet ? (
+        <SolicitudesCarnetTab />
+      ) : (
+        <>
       {/* Tarjetas de Resumen Rápido / Pestañas de Tipo */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         
@@ -814,32 +918,39 @@ export default function Solicitudes() {
             </select>
           </div>
 
-          {/* Filtro Seccional o Indicador de Vista Personal */}
+          {/* Filtro Seccional o Indicador de Alcance */}
           <div className="md:col-span-3">
-            {!isAdmin ? (
-              <div className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-emerald-900 text-xs font-medium">
-                <span className="truncate flex items-center">
-                  <User className="w-3.5 h-3.5 mr-1.5 text-emerald-600 shrink-0" />
-                  Solo mis solicitudes
-                </span>
-                <span className="text-2xs bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold shrink-0">Activo</span>
-              </div>
-            ) : isRestrictedSeccional ? (
-              <div className="w-full py-2 px-3 bg-gray-100 border border-gray-300 rounded-lg flex items-center justify-between text-gray-700 font-medium">
-                <span className="truncate">Seccional: {userSeccionalNombre}</span>
-                <span className="text-2xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">Fijada</span>
-              </div>
-            ) : (
+            {hasNivelNacional || combinedAllowedSecIds.length > 1 ? (
               <select
                 value={filterSeccional}
                 onChange={(e) => setFilterSeccional(e.target.value)}
                 className="w-full py-2 px-2.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white font-medium"
               >
-                <option value="Todas">Seccional: Todas las seccionales</option>
-                {seccionales.map(s => (
+                <option value="Todas">
+                  {hasNivelNacional ? 'Seccional: Todas las seccionales' : `Seccionales (${combinedAllowedSecIds.length}): Todas`}
+                </option>
+                {(hasNivelNacional
+                  ? seccionales
+                  : seccionales.filter(s => combinedAllowedSecIds.includes(s.id))
+                ).map(s => (
                   <option key={s.id} value={s.nombre}>{s.nombre}</option>
                 ))}
               </select>
+            ) : isRestrictedSeccional ? (
+              <div className="w-full py-2 px-3 bg-gray-100 border border-gray-300 rounded-lg flex items-center justify-between text-gray-700 font-medium">
+                <span className="truncate">
+                  Seccional: {seccionales.find(s => combinedAllowedSecIds.includes(s.id))?.nombre || userSeccionalNombre || 'Asignada'}
+                </span>
+                <span className="text-2xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">Seccional</span>
+              </div>
+            ) : (
+              <div className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-emerald-900 text-xs font-medium">
+                <span className="truncate flex items-center">
+                  <User className="w-3.5 h-3.5 mr-1.5 text-emerald-600 shrink-0" />
+                  Solo mis solicitudes
+                </span>
+                <span className="text-2xs bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold shrink-0">Usuario</span>
+              </div>
             )}
           </div>
         </div>
@@ -1003,10 +1114,10 @@ export default function Solicitudes() {
                         <div className="flex flex-col space-y-1">
                           <button
                             type="button"
-                            onClick={() => canManageStatus && handleOpenStatusModal(item)}
-                            disabled={!canManageStatus}
+                            onClick={() => canManageItem(item) && handleOpenStatusModal(item)}
+                            disabled={!canManageItem(item)}
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold transition ${
-                              canManageStatus ? 'cursor-pointer hover:shadow-xs hover:ring-2 hover:ring-offset-1 hover:ring-primary/40' : 'cursor-default'
+                              canManageItem(item) ? 'cursor-pointer hover:shadow-xs hover:ring-2 hover:ring-offset-1 hover:ring-primary/40' : 'cursor-default'
                             } ${
                               item.estado === 'Aprobada'
                                 ? 'bg-green-100 text-green-800'
@@ -1018,18 +1129,18 @@ export default function Solicitudes() {
                                 ? 'bg-red-100 text-red-800'
                                 : 'bg-blue-100 text-blue-800'
                             }`}
-                            title={canManageStatus ? "Haga clic para cambiar estado (Aprobar, Finalizar, Pendiente, etc.)" : item.estado}
+                            title={canManageItem(item) ? "Haga clic para cambiar estado (Aprobar, Finalizar, Pendiente, etc.)" : item.estado}
                           >
                             {item.estado === 'Aprobada' && <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />}
                             {item.estado === 'Pendiente' && <Clock className="w-3 h-3 mr-1 text-amber-600" />}
                             {(item.estado === 'Finalizada' || item.estado === 'Entregada') && <ShieldCheck className="w-3 h-3 mr-1 text-purple-600" />}
                             {item.estado === 'Rechazada' && <XCircle className="w-3 h-3 mr-1 text-red-600" />}
                             <span>{item.estado}</span>
-                            {canManageStatus && <Edit3 className="w-2.5 h-2.5 ml-1 opacity-60" />}
+                            {canManageItem(item) && <Edit3 className="w-2.5 h-2.5 ml-1 opacity-60" />}
                           </button>
 
-                          {/* Acciones directas de estado para administradores / coordinadores */}
-                          {canManageStatus && (
+                          {/* Acciones directas de estado para usuarios con permiso de edición */}
+                          {canManageItem(item) && (
                             <div className="flex items-center space-x-1 pt-0.5">
                               {item.estado !== 'Aprobada' && (
                                 <button
@@ -1096,7 +1207,7 @@ export default function Solicitudes() {
                       <td className="px-4 py-3 whitespace-nowrap text-right space-x-1.5">
                         
                         {/* Cambiar estado */}
-                        {canManageStatus && (
+                        {canManageItem(item) && (
                           <button
                             onClick={() => handleOpenStatusModal(item)}
                             className="inline-flex items-center p-1.5 text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition"
@@ -1147,6 +1258,8 @@ export default function Solicitudes() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* ========================================================= */}
       {/* MODAL 1: VER MÁS DETALLES DE LA SOLICITUD                 */}

@@ -9,12 +9,14 @@ import { logActivity } from '../lib/logger';
 import WatermarkImage from '../components/WatermarkImage';
 import DateInput from '../components/DateInput';
 import DocumentosSocorristaCard from '../components/socorristas/DocumentosSocorristaCard';
+import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { role, permissions, watermarkEnabled, userName } = useAuth();
+  const { role, permissions, watermarkEnabled, userName, canAccessSeccionalSocorristas } = useAuth();
   const [socorrista, setSocorrista] = useState<any>(null);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [meritosList, setMeritosList] = useState<any[]>([]);
   const [loadingMeritos, setLoadingMeritos] = useState<boolean>(false);
 
@@ -770,6 +772,8 @@ export default function SocorristaProfile() {
     return new Date(fecha_vencimiento) >= new Date();
   };
 
+  const canEditThisSocorrista = canAccessSeccionalSocorristas(socorrista?.seccional_id, 'edit');
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between">
@@ -781,7 +785,7 @@ export default function SocorristaProfile() {
         </div>
         <div className="flex space-x-3">
           {!isEditing ? (
-            role === 'admin' && (
+            canEditThisSocorrista && (
               <button 
                 onClick={() => setIsEditing(true)}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
@@ -833,14 +837,26 @@ export default function SocorristaProfile() {
                         </span>
                       )}
                     </div>
-                    <label className="absolute bottom-0 right-0 bg-primary rounded-full p-2 cursor-pointer hover:bg-primary-hover transition-colors shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => setShowPhotoModal(true)}
+                      title="Tomar o subir fotografía con lineamientos oficiales"
+                      className="absolute bottom-0 right-0 bg-primary rounded-full p-2 cursor-pointer hover:bg-primary-hover transition-colors shadow-lg"
+                    >
                       <Camera className="h-5 w-5 text-white" />
-                      <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-                    </label>
+                    </button>
                   </div>
                   <p className="mt-2 text-sm text-gray-500 font-medium">
-                    {socorrista.foto_url || fotoFile ? 'Cambiar fotografía' : 'Agregar fotografía'}
+                    {socorrista.foto_url || fotoFile ? 'Cambiar fotografía (Cámara o Archivo)' : 'Agregar fotografía (Cámara o Archivo)'}
                   </p>
+                  <CarnetPhotoCaptureModal
+                    isOpen={showPhotoModal}
+                    onClose={() => setShowPhotoModal(false)}
+                    onPhotoReady={(file) => {
+                      setFotoFile(file);
+                    }}
+                    title="Actualizar Fotografía de Elemento"
+                  />
                 </div>
 
                 <div>
@@ -937,7 +953,7 @@ export default function SocorristaProfile() {
                             name="tiene_licencia_vehiculo" 
                             checked={editForm.tiene_licencia_vehiculo || false} 
                             onChange={(e) => setEditForm(prev => ({ ...prev, tiene_licencia_vehiculo: e.target.checked }))} 
-                            disabled={role !== 'admin' && role !== 'director'}
+                            disabled={!canEditThisSocorrista}
                             className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded disabled:opacity-50" 
                           />
                           <span className="ml-2 text-sm text-gray-700">Tiene licencia de vehículo</span>
@@ -951,7 +967,7 @@ export default function SocorristaProfile() {
                                 name="licencia_vehiculo_numero" 
                                 value={editForm.licencia_vehiculo_numero || ''} 
                                 onChange={handleEditChange} 
-                                disabled={role !== 'admin' && role !== 'director'}
+                                disabled={!canEditThisSocorrista}
                                 placeholder="00000000-0"
                                 className="mt-1 shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" 
                               />
@@ -962,7 +978,7 @@ export default function SocorristaProfile() {
                                 name="licencia_vehiculo_clase" 
                                 value={editForm.licencia_vehiculo_clase || 'Liviana'} 
                                 onChange={handleEditChange}
-                                disabled={role !== 'admin' && role !== 'director'}
+                                disabled={!canEditThisSocorrista}
                                 className="mt-1 shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500"
                               >
                                 <option value="Particular">Particular</option>
@@ -978,7 +994,7 @@ export default function SocorristaProfile() {
                                 name="licencia_vehiculo_vencimiento" 
                                 value={editForm.licencia_vehiculo_vencimiento || ''} 
                                 onChange={(val) => setEditForm(p => ({...p, licencia_vehiculo_vencimiento: val}))} 
-                                disabled={role !== 'admin' && role !== 'director'}
+                                disabled={!canEditThisSocorrista}
                                 className="mt-1 shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" 
                               />
                             </div>
@@ -993,7 +1009,7 @@ export default function SocorristaProfile() {
                             name="tiene_licencia_moto" 
                             checked={editForm.tiene_licencia_moto || false} 
                             onChange={(e) => setEditForm(prev => ({ ...prev, tiene_licencia_moto: e.target.checked }))} 
-                            disabled={role !== 'admin' && role !== 'director'}
+                            disabled={!canEditThisSocorrista}
                             className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded disabled:opacity-50" 
                           />
                           <span className="ml-2 text-sm text-gray-700">Tiene licencia de motocicleta</span>
@@ -1007,7 +1023,7 @@ export default function SocorristaProfile() {
                                 name="licencia_moto_numero" 
                                 value={editForm.licencia_moto_numero || ''} 
                                 onChange={handleEditChange} 
-                                disabled={role !== 'admin' && role !== 'director'}
+                                disabled={!canEditThisSocorrista}
                                 placeholder="00000000-0"
                                 className="mt-1 shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" 
                               />
@@ -1018,7 +1034,7 @@ export default function SocorristaProfile() {
                                 name="licencia_moto_vencimiento" 
                                 value={editForm.licencia_moto_vencimiento || ''} 
                                 onChange={(val) => setEditForm(p => ({...p, licencia_moto_vencimiento: val}))} 
-                                disabled={role !== 'admin' && role !== 'director'}
+                                disabled={!canEditThisSocorrista}
                                 className="mt-1 shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" 
                               />
                             </div>
@@ -1035,7 +1051,7 @@ export default function SocorristaProfile() {
                         name="motorista_autorizado" 
                         checked={editForm.motorista_autorizado || false} 
                         onChange={(e) => setEditForm(prev => ({ ...prev, motorista_autorizado: e.target.checked }))} 
-                        disabled={role !== 'admin' && role !== 'director'}
+                        disabled={!canEditThisSocorrista}
                         className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded disabled:opacity-50" 
                       />
                       <label className="ml-2 block text-sm font-medium text-gray-700">
@@ -1153,7 +1169,7 @@ export default function SocorristaProfile() {
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Seccional</label>
                     <div className="mt-1">
-                      <select disabled={role === 'socorrista' || role === 'director'} required value={editForm.seccional_id || ''} name="seccional_id" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500">
+                      <select disabled={role !== 'admin' && !permissions.ver_todas_seccionales} required value={editForm.seccional_id || ''} name="seccional_id" onChange={handleEditChange} className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500">
                         <option value="">Seleccione...</option>
                         {seccionales.map(s => (
                           <option key={s.id} value={s.id}>{s.nombre}</option>
@@ -1172,14 +1188,14 @@ export default function SocorristaProfile() {
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Cargo Institucional</label>
                     <div className="mt-1">
-                      <input disabled={role === 'socorrista'} type="text" value={editForm.cargo_institucional || ''} name="cargo_institucional" onChange={handleEditChange} placeholder="Ej. Socorrista, Jefe de Brigada..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
+                      <input disabled={!canEditThisSocorrista} type="text" value={editForm.cargo_institucional || ''} name="cargo_institucional" onChange={handleEditChange} placeholder="Ej. Socorrista, Jefe de Brigada..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
                     </div>
                   </div>
 
                   <div className="sm:col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Cargo Administrativo</label>
                     <div className="mt-1">
-                      <input disabled={role === 'socorrista'} type="text" value={editForm.cargo_administrativo || ''} name="cargo_administrativo" onChange={handleEditChange} placeholder="Ej. Tesorero, Secretario..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
+                      <input disabled={!canEditThisSocorrista} type="text" value={editForm.cargo_administrativo || ''} name="cargo_administrativo" onChange={handleEditChange} placeholder="Ej. Tesorero, Secretario..." className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500" />
                     </div>
                   </div>
 
@@ -1188,7 +1204,7 @@ export default function SocorristaProfile() {
                     <p className="text-xs text-gray-500 mt-0.5">Dirección de Seccional (1 cupo por seccional)</p>
                     <div className="mt-1 space-y-2">
                       <select
-                        disabled={role === 'socorrista'}
+                        disabled={!canEditThisSocorrista}
                         value={editForm.segundo_cargo_administrativo || ''}
                         name="segundo_cargo_administrativo"
                         onChange={handleEditChange}

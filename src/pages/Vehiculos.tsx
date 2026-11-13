@@ -105,7 +105,7 @@ const TIPOS_MANTENIMIENTO = [
 export default function Vehiculos() {
   const { permissions, role, userSeccionalId, userSeccionalNombre, allowSeccionalEditVehiculos } = useAuth();
   const isSeccionalUser = role !== 'admin' && !permissions.ver_todas_seccionales && Boolean(userSeccionalNombre || userSeccionalId);
-  const canEdit = role === 'admin' || (Boolean(allowSeccionalEditVehiculos) && permissions.edit_vehiculos !== false);
+  const canEdit = role === 'admin' || Boolean(permissions.edit_vehiculos);
 
   // Estados principales
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);

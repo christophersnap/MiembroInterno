@@ -37,6 +37,7 @@ export default function Layout() {
   // Estados para notificaciones de solicitudes no leídas
   const [unreadCombustible, setUnreadCombustible] = useState(0);
   const [unreadCompra, setUnreadCompra] = useState(0);
+  const [unreadCarnet, setUnreadCarnet] = useState(0);
   const [unreadGeneral, setUnreadGeneral] = useState(0);
 
   const checkUnreadSolicitudes = async () => {
@@ -108,7 +109,20 @@ export default function Layout() {
         setUnreadCompra(unreadComp);
       }
 
-      // 3. Solicitudes generales
+      // 3. Solicitudes de carnet pendientes (si tiene permiso)
+      let carnetPending = 0;
+      if (role === 'admin' || permissions.view_solicitudes_carnet) {
+        try {
+          const { count } = await supabase
+            .from('solicitudes_carnet')
+            .select('id', { count: 'exact', head: true })
+            .in('estado_solicitud', ['Pendiente', 'Observada']);
+          if (typeof count === 'number') carnetPending = count;
+        } catch (e) {}
+      }
+      setUnreadCarnet(location.pathname === '/solicitudes' ? 0 : carnetPending);
+
+      // 4. Solicitudes generales
       if (location.pathname === '/solicitudes') {
         setUnreadGeneral(0);
       } else {
@@ -120,7 +134,7 @@ export default function Layout() {
           }
           return itemTime > lastSeenGen;
         }).length;
-        setUnreadGeneral(unreadGen);
+        setUnreadGeneral(unreadGen + carnetPending);
       }
 
     } catch (e) {
@@ -157,7 +171,7 @@ export default function Layout() {
     };
   }, []);
 
-  const totalUnreadSolicitudes = unreadGeneral > 0 ? unreadGeneral : (unreadCombustible + unreadCompra);
+  const totalUnreadSolicitudes = unreadGeneral > 0 ? unreadGeneral : (unreadCombustible + unreadCompra + unreadCarnet);
 
   const navigation: NavItem[] = [
     // Principal
@@ -176,7 +190,7 @@ export default function Layout() {
     { name: 'Directorio', href: '/directorio', icon: PhoneCall, show: permissions.view_directorio, category: 'operaciones' },
     
     // Gestión & Solicitudes
-    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
+    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(role === 'admin' || permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible || permissions.view_solicitudes_carnet), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
     { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: permissions.view_solicitudes_compra ?? true, category: 'gestion', badge: unreadCompra > 0 ? unreadCompra : undefined },
     { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: permissions.view_solicitudes_combustible ?? true, category: 'gestion', badge: unreadCombustible > 0 ? unreadCombustible : undefined },
     

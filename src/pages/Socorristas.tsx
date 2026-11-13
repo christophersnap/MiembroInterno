@@ -19,7 +19,18 @@ const SteeringWheelIcon = ({ className }: { className?: string }) => (
 
 export default function Socorristas() {
   const location = useLocation();
-  const { role, permissions, directorSeccionalId, userSeccionalId, userSeccionalNombre, userName, watermarkEnabled } = useAuth();
+  const {
+    role,
+    permissions,
+    directorSeccionalId,
+    userSeccionalId,
+    userSeccionalNombre,
+    userName,
+    watermarkEnabled,
+    canAddAnySocorrista,
+    canAccessSeccionalSocorristas,
+    getAllowedSocorristaSeccionalIds,
+  } = useAuth();
   const [socorristas, setSocorristas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -92,10 +103,14 @@ export default function Socorristas() {
           )
         `);
         
-      if (role === 'director' && directorSeccionalId) {
-        query = query.eq('seccional_id', directorSeccionalId);
-      } else if (role !== 'admin' && !permissions.ver_todas_seccionales && userSeccionalId) {
-        query = query.eq('seccional_id', userSeccionalId);
+      const allowedSeccionalIds = getAllowedSocorristaSeccionalIds();
+      if (allowedSeccionalIds !== 'all') {
+        if (allowedSeccionalIds.length === 0) {
+          setSocorristas([]);
+          setLoading(false);
+          return;
+        }
+        query = query.in('seccional_id', allowedSeccionalIds);
       }
       
       const { data, error } = await query;
@@ -231,15 +246,15 @@ export default function Socorristas() {
     ...socorristas.map(s => s.segundo_cargo_administrativo)
   ].filter(Boolean))).sort((a, b) => (a as string).localeCompare(b as string));
 
-  const isRestrictedSeccional = role !== 'admin' && !permissions.ver_todas_seccionales && Boolean(userSeccionalNombre || userSeccionalId);
+  const allowedSeccionalIds = getAllowedSocorristaSeccionalIds();
+  const isRestrictedSeccional = allowedSeccionalIds !== 'all' && allowedSeccionalIds.length <= 1 && Boolean(userSeccionalNombre || userSeccionalId);
 
   const filteredData = socorristas.filter(s => {
     const matchesSearch = (s.primer_nombre + ' ' + s.primer_apellido).toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (s.carnet && s.carnet.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesEstado = filterEstado === 'Todos' || s.estado === filterEstado;
-    const matchesSeccional = isRestrictedSeccional
-      ? (userSeccionalNombre ? s.seccional_nombre === userSeccionalNombre : (userSeccionalId ? s.seccional_id === userSeccionalId : true))
-      : (filterSeccional === 'Todas' || s.seccional_nombre === filterSeccional);
+    const matchesAllowed = allowedSeccionalIds === 'all' || allowedSeccionalIds.includes(Number(s.seccional_id));
+    const matchesSeccional = matchesAllowed && (filterSeccional === 'Todas' || s.seccional_nombre === filterSeccional);
     const matchesCargoInst = filterCargoInst === 'Todos' || s.cargo_institucional === filterCargoInst;
     const matchesCargoAdmin = filterCargoAdmin === 'Todos' || s.cargo_administrativo === filterCargoAdmin || s.segundo_cargo_administrativo === filterCargoAdmin;
     const matchesCarnetGenerado = filterCarnetGenerado === 'Todos' || 
@@ -337,7 +352,7 @@ export default function Socorristas() {
               {exporting ? 'Exportando...' : 'Exportar Excel'}
             </button>
           )}
-          {role === 'admin' && (
+          {canAddAnySocorrista && (
             <Link
               to="/socorristas/nuevo"
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
@@ -794,7 +809,7 @@ export default function Socorristas() {
                           )}
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex items-center justify-end space-x-2">
-                              {(permissions.cambiar_estado_socorrista || role === 'admin') && (
+                              {(permissions.cambiar_estado_socorrista || canAccessSeccionalSocorristas(person.seccional_id, 'edit')) && (
                                 <button
                                   onClick={() => toggleEstado(person.id, person.estado)}
                                   title={person.estado === 'Activo' ? 'Desactivar' : 'Activar'}

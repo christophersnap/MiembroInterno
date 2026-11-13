@@ -44,7 +44,7 @@ const TIPOS_ANUNCIO = [
 export default function Anuncios() {
   const { user, userName, role, permissions } = useAuth();
   const isAdmin = role === 'admin';
-  const canPublish = isAdmin || Boolean(permissions?.crear_anuncios);
+  const canPublish = isAdmin || Boolean(permissions?.edit_anuncios || permissions?.crear_anuncios);
 
   const [anuncios, setAnuncios] = useState<AnuncioItem[]>([]);
   const [loading, setLoading] = useState(true);

@@ -76,25 +76,53 @@ const TIPOS_SOLICITUD = [
 
 export default function SolicitudesCompra() {
   const navigate = useNavigate();
-  const { user, userName, role, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds } = useAuth();
   const isAdmin = role === 'admin';
-  const hasNivelNacional = isAdmin || Boolean(permissions.ver_todas_seccionales);
-  const isSeccionalOnly = !hasNivelNacional;
-  const canApprove = isAdmin || permissions.aprobar_solicitudes_compra === true;
+  const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
+  const compraScope = getModuleScope('solicitudes_compra');
+  const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_compra');
+  const hasNivelNacional = isAdmin || compraScope === 'global';
+  const isSeccionalOnly = compraScope === 'seccional';
+  const canApprove = isAdmin || permissions.edit_solicitudes_compra === true || permissions.aprobar_solicitudes_compra === true;
+  const canViewHistorial = isAdmin || Boolean(permissions.view_compra_historial);
+  const canViewPlantillas = isAdmin || Boolean(permissions.view_compra_plantillas);
 
   // Estados principales
   const [solicitudes, setSolicitudes] = useState<SolicitudCompra[]>([]);
   const [seccionales, setSeccionales] = useState<{ id: number; nombre: string; director?: string; correo?: string }[]>([]);
+
+  const matchesCompraScope = (s: SolicitudCompra, seccsList: { id: number; nombre: string }[] = seccionales) => {
+    if (compraScope === 'global') return true;
+    if (compraScope === 'seccional') {
+      const targetIds = allowedSeccionalIds.length > 0
+        ? allowedSeccionalIds
+        : (effectiveSeccionalId ? [Number(effectiveSeccionalId)] : []);
+
+      if (targetIds.length > 0) {
+        if (s.seccional_id && targetIds.includes(Number(s.seccional_id))) return true;
+        const allowedNames = seccsList
+          .filter(sec => targetIds.includes(sec.id))
+          .map(sec => sec.nombre.toLowerCase());
+        if (s.seccional_nombre && allowedNames.some(n => s.seccional_nombre.toLowerCase().includes(n))) {
+          return true;
+        }
+        return false;
+      }
+      if (userSeccionalNombre) {
+        return (s.seccional_nombre || '').toLowerCase().includes(userSeccionalNombre.toLowerCase());
+      }
+      return isSolicitudRealizadaPorUsuario(s, user, userName);
+    }
+    return isSolicitudRealizadaPorUsuario(s, user, userName);
+  };
   const [vehiculos, setVehiculos] = useState<VehiculoSimple[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbTableMissing, setDbTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
-  // Navegación de vistas:
-  // - Para los usuarios que no son admin (nivel seccional), al ingresar van directo al formulario ('nueva')
-  // - El usuario admin o con el rol adecuado (nivel nacional) puede ver la tabla y su dashboard ('lista')
+  // Navegación de vistas
   const [activeTab, setActiveTab] = useState<'lista' | 'nueva' | 'plantillas'>(
-    isAdmin || hasNivelNacional ? 'lista' : 'nueva'
+    canViewHistorial && (isAdmin || hasNivelNacional) ? 'lista' : 'nueva'
   );
 
   // Sincronizar pestaña inicial una vez que el contexto de autenticación termina de cargar
@@ -102,13 +130,21 @@ export default function SolicitudesCompra() {
   useEffect(() => {
     if (!authLoading && !initialResolvedRef.current) {
       initialResolvedRef.current = true;
-      if (isAdmin || hasNivelNacional) {
+      if (canViewHistorial && (isAdmin || hasNivelNacional)) {
         setActiveTab('lista');
       } else {
         setActiveTab('nueva');
       }
     }
-  }, [authLoading, isAdmin, hasNivelNacional]);
+  }, [authLoading, isAdmin, hasNivelNacional, canViewHistorial]);
+
+  useEffect(() => {
+    if (activeTab === 'lista' && !canViewHistorial) {
+      setActiveTab('nueva');
+    } else if (activeTab === 'plantillas' && !canViewPlantillas) {
+      setActiveTab('nueva');
+    }
+  }, [activeTab, canViewHistorial, canViewPlantillas]);
 
   // Configuración completa de plantillas y PDF
   const [compraConfig, setCompraConfig] = useState<CompraConfig>(() => {
@@ -129,7 +165,7 @@ export default function SolicitudesCompra() {
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('Todos');
-  const [filterSeccional, setFilterSeccional] = useState(isAdmin ? 'Todas' : (userSeccionalNombre || 'Todas'));
+  const [filterSeccional, setFilterSeccional] = useState('Todas');
   const [filterTipo, setFilterTipo] = useState('Todos');
 
   // Formulario de Nueva Solicitud
@@ -423,9 +459,7 @@ export default function SolicitudesCompra() {
         }
       } else {
         let list = solData || [];
-        if (!isAdmin) {
-          list = list.filter(s => isSolicitudRealizadaPorUsuario(s, user, userName));
-        }
+        list = list.filter((s) => matchesCompraScope(s, loadedSeccs));
         setSolicitudes(list);
         setDbTableMissing(false);
       }
@@ -549,9 +583,10 @@ export default function SolicitudesCompra() {
     }
   };
 
+  const allowedSecKey = allowedSeccionalIds.join(',');
   useEffect(() => {
     fetchData();
-  }, [isAdmin, user?.email, user?.id, userName]);
+  }, [isAdmin, compraScope, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user?.email, user?.id, userName]);
 
   // Prellenar automáticamente el formulario según el usuario detectado
   useEffect(() => {
@@ -1232,8 +1267,7 @@ Cruz Verde Salvadoreña`;
   // Filtrado de solicitudes en la tabla
   const filteredSolicitudes = useMemo(() => {
     return solicitudes.filter(s => {
-      // Si el usuario no es admin, solo puede ver las solicitudes que ha realizado
-      if (!isAdmin && !isSolicitudRealizadaPorUsuario(s, user, userName)) {
+      if (!matchesCompraScope(s)) {
         return false;
       }
 
@@ -1248,9 +1282,8 @@ Cruz Verde Salvadoreña`;
       const matchesEstado = filterEstado === 'Todos' || s.estado === filterEstado;
 
       let matchesSeccional = true;
-      if (!isAdmin && userSeccionalNombre) {
-        matchesSeccional = s.seccional_nombre === userSeccionalNombre || (userSeccionalId ? s.seccional_id === userSeccionalId : false);
-      } else {
+      const canFilterBySec = hasNivelNacional || (isSeccionalOnly && allowedSeccionalIds.length > 1);
+      if (canFilterBySec) {
         matchesSeccional = filterSeccional === 'Todas' || s.seccional_nombre === filterSeccional;
       }
 
@@ -1258,7 +1291,7 @@ Cruz Verde Salvadoreña`;
 
       return matchesSearch && matchesEstado && matchesSeccional && matchesTipo;
     });
-  }, [solicitudes, searchTerm, filterEstado, filterSeccional, filterTipo, isAdmin, userSeccionalNombre, userSeccionalId, user, userName]);
+  }, [solicitudes, searchTerm, filterEstado, filterSeccional, filterTipo, compraScope, hasNivelNacional, isSeccionalOnly, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user, userName]);
 
   // Contadores de resumen
   const stats = useMemo(() => {
@@ -1358,7 +1391,7 @@ Cruz Verde Salvadoreña`;
         {/* Selector de pestañas y Acciones Principales */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center space-x-1.5 bg-gray-100 p-1 rounded-xl">
-            {!isAdmin ? (
+            {!hasNivelNacional ? (
               <>
                 <button
                   onClick={() => setActiveTab('nueva')}
@@ -1371,29 +1404,46 @@ Cruz Verde Salvadoreña`;
                   <Plus className="w-3.5 h-3.5 mr-1" />
                   Formulario
                 </button>
-                <button
-                  onClick={() => setActiveTab('lista')}
-                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'lista'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Mis Solicitudes ({solicitudes.length})
-                </button>
+                {canViewHistorial && (
+                  <button
+                    onClick={() => setActiveTab('lista')}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === 'lista'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+                  </button>
+                )}
+                {canViewPlantillas && (
+                  <button
+                    onClick={() => setActiveTab('plantillas')}
+                    className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === 'plantillas'
+                        ? 'bg-emerald-700 text-white shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5 mr-1" />
+                    Plantillas y Configuración
+                  </button>
+                )}
               </>
             ) : (
               <>
-                <button
-                  onClick={() => setActiveTab('lista')}
-                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'lista'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Historial y Dashboard ({solicitudes.length})
-                </button>
+                {canViewHistorial && (
+                  <button
+                    onClick={() => setActiveTab('lista')}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === 'lista'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Historial y Dashboard ({solicitudes.length})
+                  </button>
+                )}
                 <button
                   onClick={() => setActiveTab('nueva')}
                   className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -1405,7 +1455,7 @@ Cruz Verde Salvadoreña`;
                   <Plus className="w-3.5 h-3.5 mr-1" />
                   Formulario
                 </button>
-                {!isSeccionalOnly && (
+                {canViewPlantillas && (
                   <button
                     onClick={() => setActiveTab('plantillas')}
                     className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -1456,7 +1506,7 @@ Cruz Verde Salvadoreña`;
       {/* ========================================================================= */}
       {/* VISTA 2: TABLA DE HISTORIAL Y SEGUIMIENTO (DASHBOARD O MIS SOLICITUDES)  */}
       {/* ========================================================================= */}
-      {activeTab === 'lista' && (
+      {canViewHistorial && activeTab === 'lista' && (
         <div className="space-y-4">
           
           {/* Banner de Ayuda Supabase si la tabla aún no existe (Solo Administrador) */}
@@ -1555,22 +1605,33 @@ Cruz Verde Salvadoreña`;
 
               {/* Filtro Seccional */}
               <div className="md:col-span-3">
-                {!isAdmin && userSeccionalNombre ? (
-                  <div className="w-full py-2 px-3 text-xs bg-gray-100 border border-gray-300 rounded-lg flex items-center justify-between text-gray-700 font-medium">
-                    <span className="truncate">Seccional: {userSeccionalNombre}</span>
-                    <span className="text-2xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">Fijada</span>
-                  </div>
-                ) : (
+                {hasNivelNacional || (isSeccionalOnly && allowedSeccionalIds.length > 1) ? (
                   <select
                     value={filterSeccional}
                     onChange={(e) => setFilterSeccional(e.target.value)}
                     className="w-full py-2 px-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
                   >
-                    <option value="Todas">Seccional: Todas</option>
-                    {seccionales.map(s => (
+                    <option value="Todas">
+                      {hasNivelNacional ? 'Seccional: Todas' : `Seccionales (${allowedSeccionalIds.length}): Todas`}
+                    </option>
+                    {(hasNivelNacional
+                      ? seccionales
+                      : seccionales.filter(s => allowedSeccionalIds.includes(s.id))
+                    ).map(s => (
                       <option key={s.id} value={s.nombre}>{s.nombre}</option>
                     ))}
                   </select>
+                ) : (
+                  <div className="w-full py-2 px-3 text-xs bg-gray-100 border border-gray-300 rounded-lg flex items-center justify-between text-gray-700 font-medium">
+                    <span className="truncate">
+                      {compraScope === 'seccional'
+                        ? `Seccional: ${seccionales.find(s => allowedSeccionalIds.includes(s.id))?.nombre || userSeccionalNombre || 'Asignada'}`
+                        : 'Alcance: Mis solicitudes'}
+                    </span>
+                    <span className="text-2xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                      {compraScope === 'seccional' ? 'Seccional' : 'Usuario'}
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -1773,7 +1834,7 @@ Cruz Verde Salvadoreña`;
       {/* ========================================================================= */}
       {/* VISTA 3: PLANTILLAS Y CONFIGURACIÓN (ARRASTRE DE BLOQUES, LOGO Y TEXTOS)  */}
       {/* ========================================================================= */}
-      {!isSeccionalOnly && activeTab === 'plantillas' && (
+      {canViewPlantillas && activeTab === 'plantillas' && (
         <CompraTemplateConfig
           config={compraConfig}
           onSave={handleSaveCompraConfig}

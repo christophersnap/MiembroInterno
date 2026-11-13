@@ -15,9 +15,15 @@ import { getOfficialFormUrl } from '../utils/appUrl';
 import { logActivity } from '../lib/logger';
 
 export default function Formularios() {
-  const { user, userName, role, permissions } = useAuth();
-  const canManageForms = role === 'admin' || Boolean(permissions?.crear_formularios);
+  const { user, userName, role, permissions, directorSeccionalId, userSeccionalId, userSeccionalNombre, getModuleScope, getModuleSeccionalIds } = useAuth();
+  const formulariosScope = getModuleScope('formularios');
+  const allowedSeccionalIds = getModuleSeccionalIds('formularios');
+  const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
+  const canManageForms = role === 'admin' || Boolean(permissions?.edit_formularios || permissions?.crear_formularios);
+  const canDeleteForms = role === 'admin';
   const [formularios, setFormularios] = useState<Formulario[]>([]);
+  const [seccionalesRecords, setSeccionalesRecords] = useState<{ id: number; nombre: string }[]>([]);
+  const [creatorSeccionalMap, setCreatorSeccionalMap] = useState<Record<string, { seccional_id: number | null; seccional_nombre: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedCategoria, setSelectedCategoria] = useState('Todas');
@@ -88,6 +94,27 @@ export default function Formularios() {
 
       const mergedList = Array.from(combinedMap.values()).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
       setFormularios(mergedList);
+
+      // Cargar mapa de seccionales por usuario creador para filtrar por alcance 'seccional'
+      try {
+        const { data: rolesData } = await supabase
+          .from('user_roles')
+          .select('id, socorristas (seccional_id, seccionales (id, nombre))');
+        if (rolesData) {
+          const map: Record<string, { seccional_id: number | null; seccional_nombre: string | null }> = {};
+          rolesData.forEach((r: any) => {
+            const soc = Array.isArray(r.socorristas) ? r.socorristas[0] : r.socorristas;
+            const sec = soc?.seccionales ? (Array.isArray(soc.seccionales) ? soc.seccionales[0] : soc.seccionales) : null;
+            if (r.id && (soc?.seccional_id || sec?.id || sec?.nombre)) {
+              map[r.id] = {
+                seccional_id: soc?.seccional_id ?? sec?.id ?? null,
+                seccional_nombre: sec?.nombre ?? null,
+              };
+            }
+          });
+          setCreatorSeccionalMap(map);
+        }
+      } catch (e) {}
     } catch (err) {
       console.error('Error al cargar formularios:', err);
     } finally {
@@ -97,14 +124,16 @@ export default function Formularios() {
 
   const loadSeccionales = async () => {
     try {
-      const { data: supaSeccs } = await supabase.from('seccionales').select('nombre');
+      const { data: supaSeccs } = await supabase.from('seccionales').select('id, nombre');
       if (supaSeccs && supaSeccs.length > 0) {
+        setSeccionalesRecords(supaSeccs);
         setSeccionalesList(supaSeccs.map((s: any) => s.nombre).filter(Boolean));
         return;
       }
       const res = await fetch(getApiUrl('/api/seccionales'));
       if (res.ok) {
         const data = await res.json();
+        setSeccionalesRecords(data.map((s: any) => ({ id: s.id, nombre: s.nombre })).filter((s: any) => s.nombre));
         setSeccionalesList(data.map((s: any) => s.nombre).filter(Boolean));
       }
     } catch (e) {
@@ -259,11 +288,7 @@ export default function Formularios() {
     }
   };
 
-  // Control de acceso: solo el admin o usuarios con permiso 'ver_todos_formularios' pueden ver todos los formularios
-  const canViewAllFormularios = role === 'admin' || Boolean(permissions?.ver_todos_formularios);
-
   const isFormCreator = (f: Formulario) => {
-    if (canViewAllFormularios) return true;
     return (
       (user?.id && f.creado_por === user.id) ||
       (user?.email && f.creado_por === user.email) ||
@@ -272,8 +297,41 @@ export default function Formularios() {
     );
   };
 
-  // Formularios que este usuario tiene permiso de ver
-  const userVisibleFormularios = formularios.filter(isFormCreator);
+  const isFormVisible = (f: Formulario) => {
+    if (role === 'admin' || formulariosScope === 'global') return true;
+    if (formulariosScope === 'seccional') {
+      if (isFormCreator(f)) return true;
+      const targetIds = allowedSeccionalIds.length > 0
+        ? allowedSeccionalIds
+        : (effectiveSeccionalId ? [Number(effectiveSeccionalId)] : []);
+
+      const targetNames = targetIds.length > 0
+        ? seccionalesRecords.filter(s => targetIds.includes(s.id)).map(s => s.nombre.toLowerCase())
+        : (userSeccionalNombre ? [userSeccionalNombre.toLowerCase()] : []);
+
+      const anyF = f as any;
+      if (anyF.seccional_id && targetIds.includes(Number(anyF.seccional_id))) {
+        return true;
+      }
+      if (anyF.seccional_nombre && targetNames.includes(String(anyF.seccional_nombre).toLowerCase())) {
+        return true;
+      }
+      const creatorInfo = f.creado_por ? creatorSeccionalMap[f.creado_por] : undefined;
+      if (creatorInfo) {
+        if (creatorInfo.seccional_id && targetIds.includes(Number(creatorInfo.seccional_id))) {
+          return true;
+        }
+        if (creatorInfo.seccional_nombre && targetNames.includes(creatorInfo.seccional_nombre.toLowerCase())) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return isFormCreator(f);
+  };
+
+  // Formularios que este usuario tiene permiso de ver según alcance
+  const userVisibleFormularios = formularios.filter(isFormVisible);
 
   // Filtered list con búsqueda y categorías
   const filteredFormularios = userVisibleFormularios.filter(f => {
@@ -323,10 +381,17 @@ export default function Formularios() {
             Crea formularios con campos institucionales (carnet, DUI, seccional, teléfono internacional con código de país), enlaces para compartir y control de acceso.
           </p>
           <div className="mt-2.5 flex items-center gap-2">
-            {canViewAllFormularios ? (
+            {formulariosScope === 'global' || role === 'admin' ? (
               <span className="inline-flex items-center text-3xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
                 <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
-                Permiso Activo: Visualizando formularios de todos los usuarios
+                Alcance Global: Visualizando formularios de todas las seccionales y usuarios
+              </span>
+            ) : formulariosScope === 'seccional' ? (
+              <span className="inline-flex items-center text-3xs font-bold text-blue-800 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
+                <Users className="w-3 h-3 mr-1 text-blue-600" />
+                {allowedSeccionalIds.length > 1
+                  ? `Alcance Seccional: ${allowedSeccionalIds.length} seccionales habilitadas`
+                  : `Alcance Seccional: Formularios de ${seccionalesRecords.find(s => allowedSeccionalIds.includes(s.id))?.nombre || userSeccionalNombre || 'tu seccional'}`}
               </span>
             ) : (
               <span className="inline-flex items-center text-3xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
@@ -640,28 +705,28 @@ export default function Formularios() {
 
                   <div className="flex items-center gap-1.5">
                     {canManageForms && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingForm(form);
-                            setBuilderOpen(true);
-                          }}
-                          className="p-2 text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-colors"
-                          title="Editar formulario"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingForm(form);
+                          setBuilderOpen(true);
+                        }}
+                        className="p-2 text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-colors"
+                        title="Editar formulario"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    )}
 
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteFormulario(form.id, form.titulo)}
-                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                          title="Eliminar formulario"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
+                    {canDeleteForms && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteFormulario(form.id, form.titulo)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                        title="Eliminar formulario"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     )}
                   </div>
                 </div>

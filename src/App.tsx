@@ -100,10 +100,10 @@ export default function App() {
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="socorristas" element={<ProtectedRoute requiredPermission="view_socorristas"><Socorristas /></ProtectedRoute>} />
-              <Route path="socorristas/nuevo" element={<ProtectedRoute requiredPermission="edit_socorristas"><NewSocorrista /></ProtectedRoute>} />
+              <Route path="socorristas/nuevo" element={<ProtectedRoute anyPermission={['add_socorristas', 'edit_socorristas']}><NewSocorrista /></ProtectedRoute>} />
               <Route path="socorristas/:id" element={<SocorristaProfile />} />
               <Route path="vehiculos" element={<ProtectedRoute requiredPermission="view_vehiculos"><Vehiculos /></ProtectedRoute>} />
-              <Route path="solicitudes" element={<ProtectedRoute><Solicitudes /></ProtectedRoute>} />
+              <Route path="solicitudes" element={<ProtectedRoute anyPermission={['view_solicitudes_compra', 'view_solicitudes_combustible', 'view_solicitudes_carnet']}><Solicitudes /></ProtectedRoute>} />
               <Route path="solicitudes-compra" element={<ProtectedRoute requiredPermission="view_solicitudes_compra"><SolicitudesCompra /></ProtectedRoute>} />
               <Route path="solicitudes-combustible" element={<ProtectedRoute requiredPermission="view_solicitudes_combustible"><SolicitudesCombustible /></ProtectedRoute>} />
               <Route path="carnet" element={<ProtectedRoute requiredPermission="view_carnet"><GenerarCarnet /></ProtectedRoute>} />

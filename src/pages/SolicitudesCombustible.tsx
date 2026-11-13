@@ -25,15 +25,45 @@ import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
-  const { user, userName, role, userSeccionalId, userSeccionalNombre, permissions } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds } = useAuth();
   const isAdmin = role === 'admin';
-  const hasNivelNacional = isAdmin || Boolean(permissions.ver_todas_seccionales);
-  const isSeccionalOnly = !hasNivelNacional;
-  const canApprove = isAdmin || permissions.aprobar_solicitudes_compra === true;
+  const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
+  const combustibleScope = getModuleScope('solicitudes_combustible');
+  const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_combustible');
+  const hasNivelNacional = isAdmin || combustibleScope === 'global';
+  const isSeccionalOnly = combustibleScope === 'seccional';
+  const canApprove = isAdmin || permissions.edit_solicitudes_combustible === true || permissions.aprobar_solicitudes_combustible === true;
+  const canViewHistorial = isAdmin || Boolean(permissions.view_combustible_historial);
+  const canViewPlantillas = isAdmin || Boolean(permissions.view_combustible_plantillas);
 
   // Estados principales
   const [solicitudes, setSolicitudes] = useState<SolicitudCombustible[]>([]);
   const [seccionales, setSeccionales] = useState<{ id: number; nombre: string; director?: string; correo?: string }[]>([]);
+
+  const matchesCombustibleScope = (sol: SolicitudCombustible, seccsList: { id: number; nombre: string }[] = seccionales) => {
+    if (combustibleScope === 'global') return true;
+    if (combustibleScope === 'seccional') {
+      const targetIds = allowedSeccionalIds.length > 0
+        ? allowedSeccionalIds
+        : (effectiveSeccionalId ? [Number(effectiveSeccionalId)] : []);
+
+      if (targetIds.length > 0) {
+        if (sol.seccional_id && targetIds.includes(Number(sol.seccional_id))) return true;
+        const allowedNames = seccsList
+          .filter(s => targetIds.includes(s.id))
+          .map(s => s.nombre.toLowerCase());
+        if (sol.seccional_nombre && allowedNames.some(n => sol.seccional_nombre.toLowerCase().includes(n))) {
+          return true;
+        }
+        return false;
+      }
+      if (userSeccionalNombre) {
+        return (sol.seccional_nombre || '').toLowerCase().includes(userSeccionalNombre.toLowerCase());
+      }
+      return isSolicitudRealizadaPorUsuario(sol, user, userName);
+    }
+    return isSolicitudRealizadaPorUsuario(sol, user, userName);
+  };
   const [config, setConfig] = useState<CombustibleConfig>(DEFAULT_COMBUSTIBLE_CONFIG);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -44,10 +74,18 @@ export default function SolicitudesCombustible() {
   // Navegación de pestañas
   const [activeTab, setActiveTab] = useState<'formulario' | 'historial' | 'plantillas'>('formulario');
 
+  useEffect(() => {
+    if (activeTab === 'historial' && !canViewHistorial) {
+      setActiveTab('formulario');
+    } else if (activeTab === 'plantillas' && !canViewPlantillas) {
+      setActiveTab('formulario');
+    }
+  }, [activeTab, canViewHistorial, canViewPlantillas]);
+
   // Filtros de búsqueda
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('Todos');
-  const [filterSeccional, setFilterSeccional] = useState(isAdmin ? 'Todas' : (userSeccionalNombre || 'Todas'));
+  const [filterSeccional, setFilterSeccional] = useState('Todas');
 
   // Modales
   const [selectedSolicitud, setSelectedSolicitud] = useState<SolicitudCombustible | null>(null);
@@ -232,7 +270,7 @@ NOTIFY pgrst, 'reload schema';`;
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!isAdmin && userSeccionalNombre) {
+      if (combustibleScope === 'seccional' && allowedSeccionalIds.length <= 1 && userSeccionalNombre && !effectiveSeccionalId) {
         query = query.ilike('seccional_nombre', `%${userSeccionalNombre}%`);
       }
 
@@ -254,9 +292,7 @@ NOTIFY pgrst, 'reload schema';`;
         }
       } else {
         let list = solData || [];
-        if (!isAdmin) {
-          list = list.filter(s => isSolicitudRealizadaPorUsuario(s, user, userName));
-        }
+        list = list.filter((s) => matchesCombustibleScope(s, loadedSeccs));
         setSolicitudes(list);
         setDbTableMissing(false);
       }
@@ -268,9 +304,10 @@ NOTIFY pgrst, 'reload schema';`;
     }
   };
 
+  const allowedSecKey = allowedSeccionalIds.join(',');
   useEffect(() => {
     fetchData();
-  }, [isAdmin, user?.email, user?.id, userName]);
+  }, [isAdmin, combustibleScope, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user?.email, user?.id, userName]);
 
   // 2. Manejar envío de formulario
   const handleSubmitForm = async (formData: Omit<SolicitudCombustible, 'id' | 'folio' | 'estado' | 'created_at'>) => {
@@ -560,8 +597,7 @@ NOTIFY pgrst, 'reload schema';`;
 
   // Filtrado de solicitudes
   const filteredSolicitudes = solicitudes.filter(sol => {
-    // Si el usuario no es admin, solo puede ver las solicitudes que ha realizado
-    if (!isAdmin && !isSolicitudRealizadaPorUsuario(sol, user, userName)) {
+    if (!matchesCombustibleScope(sol)) {
       return false;
     }
 
@@ -572,7 +608,8 @@ NOTIFY pgrst, 'reload schema';`;
       sol.actividad.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesEstado = filterEstado === 'Todos' || sol.estado === filterEstado;
-    const matchesSeccional = filterSeccional === 'Todas' || sol.seccional_nombre === filterSeccional;
+    const canFilterBySec = hasNivelNacional || (isSeccionalOnly && allowedSeccionalIds.length > 1);
+    const matchesSeccional = !canFilterBySec || filterSeccional === 'Todas' || sol.seccional_nombre === filterSeccional;
 
     return matchesSearch && matchesEstado && matchesSeccional;
   });
@@ -659,19 +696,21 @@ NOTIFY pgrst, 'reload schema';`;
             Formulario
           </button>
 
-          <button
-            onClick={() => setActiveTab('historial')}
-            className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition ${
-              activeTab === 'historial'
-                ? 'bg-white text-gray-900 shadow-2xs'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <List className="w-4 h-4 mr-1.5 text-blue-600" />
-            {isAdmin ? `Historial (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
-          </button>
+          {canViewHistorial && (
+            <button
+              onClick={() => setActiveTab('historial')}
+              className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'historial'
+                  ? 'bg-white text-gray-900 shadow-2xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <List className="w-4 h-4 mr-1.5 text-blue-600" />
+              {hasNivelNacional ? `Historial (${solicitudes.length})` : isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+            </button>
+          )}
 
-          {!isSeccionalOnly && (
+          {canViewPlantillas && (
             <button
               onClick={() => setActiveTab('plantillas')}
               className={`inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold transition ${
@@ -702,7 +741,7 @@ NOTIFY pgrst, 'reload schema';`;
       )}
 
       {/* PESTAÑA 2: HISTORIAL DE SOLICITUDES */}
-      {activeTab === 'historial' && (
+      {canViewHistorial && activeTab === 'historial' && (
         <div className="space-y-4">
           
           {/* Barra de Filtros y Búsqueda */}
@@ -732,14 +771,19 @@ NOTIFY pgrst, 'reload schema';`;
                 <option value="Entregada">⚪ Entregada</option>
               </select>
 
-              {isAdmin && (
+              {(hasNivelNacional || (isSeccionalOnly && allowedSeccionalIds.length > 1)) && (
                 <select
                   value={filterSeccional}
                   onChange={(e) => setFilterSeccional(e.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white font-medium"
                 >
-                  <option value="Todas">Todas las Seccionales</option>
-                  {seccionales.map(s => (
+                  <option value="Todas">
+                    {hasNivelNacional ? 'Todas las Seccionales' : `Mis Seccionales (${allowedSeccionalIds.length})`}
+                  </option>
+                  {(hasNivelNacional
+                    ? seccionales
+                    : seccionales.filter(s => allowedSeccionalIds.includes(s.id))
+                  ).map(s => (
                     <option key={s.id} value={s.nombre}>{s.nombre}</option>
                   ))}
                 </select>
@@ -866,7 +910,7 @@ NOTIFY pgrst, 'reload schema';`;
       )}
 
       {/* PESTAÑA 3: PLANTILLAS Y CONFIGURACIÓN */}
-      {activeTab === 'plantillas' && (
+      {canViewPlantillas && activeTab === 'plantillas' && (
         <CombustibleTemplateConfig
           config={config}
           onSave={handleSaveConfig}

@@ -43,8 +43,8 @@ const CATEGORIAS_DEFAULT = [
 export default function Archivos() {
   const { user, userName, role, permissions } = useAuth();
   
-  // El usuario admin siempre puede subir; o cualquier usuario con subir_archivos habilitado
-  const canUpload = role === 'admin' || !!permissions.subir_archivos;
+  // El usuario admin siempre puede subir; o cualquier usuario con edit_archivos/subir_archivos habilitado
+  const canUpload = role === 'admin' || Boolean(permissions?.edit_archivos || permissions?.subir_archivos);
 
   const [archivos, setArchivos] = useState<ArchivoItem[]>([]);
   const [loading, setLoading] = useState(true);

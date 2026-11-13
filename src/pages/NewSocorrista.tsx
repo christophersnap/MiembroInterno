@@ -1,16 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, ArrowLeft, Upload, X, Check, PhoneCall } from 'lucide-react';
+import { Save, ArrowLeft, Upload, X, Check, PhoneCall, Camera } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
 import DateInput from '../components/DateInput';
+import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 
 export default function NewSocorrista() {
   const navigate = useNavigate();
-  const { role, directorSeccionalId } = useAuth();
+  const { role, directorSeccionalId, permissions, getAddAllowedSocorristaSeccionalIds } = useAuth();
   const [seccionales, setSeccionales] = useState<any[]>([]);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [formData, setFormData] = useState({
@@ -87,7 +89,14 @@ export default function NewSocorrista() {
           .eq('estado', 'Activa')
           .order('nombre');
         
-        if (data) setSeccionales(data);
+        if (data) {
+          const allowedIds = getAddAllowedSocorristaSeccionalIds();
+          const filtered = allowedIds === 'all' ? data : data.filter((s: any) => allowedIds.includes(Number(s.id)));
+          setSeccionales(filtered);
+          if (filtered.length === 1) {
+            setFormData(prev => ({ ...prev, seccional_id: String(filtered[0].id) }));
+          }
+        }
         if (error) console.error(error);
       } catch (err) {
         console.error('Error fetching seccionales:', err);
@@ -649,18 +658,31 @@ export default function NewSocorrista() {
                         </button>
                       </div>
                     ) : (
-                      <div className="space-y-1 text-center">
-                        <Upload className="mx-auto h-12 w-12 text-gray-400" />
-                        <div className="flex text-sm text-gray-600 justify-center">
-                          <label className="relative cursor-pointer bg-white rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary">
-                            <span>Subir un archivo</span>
-                            <input type="file" className="sr-only" accept="image/*" onChange={handleFileChange} />
-                          </label>
+                      <div className="space-y-2 text-center">
+                        <Camera className="mx-auto h-10 w-10 text-gray-400" />
+                        <div className="flex justify-center">
+                          <button
+                            type="button"
+                            onClick={() => setShowPhotoModal(true)}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                          >
+                            <Camera className="w-4 h-4" />
+                            Tomar Foto (Máscara Pasaporte) o Subir Archivo
+                          </button>
                         </div>
-                        <p className="text-xs text-gray-500">PNG, JPG, GIF hasta 10MB</p>
+                        <p className="text-xs text-gray-500">Se mostrarán los lineamientos oficiales de fotografía antes de capturar</p>
                       </div>
                     )}
                   </div>
+                  <CarnetPhotoCaptureModal
+                    isOpen={showPhotoModal}
+                    onClose={() => setShowPhotoModal(false)}
+                    onPhotoReady={(file, previewUrl) => {
+                      setFoto(file);
+                      setFotoPreview(previewUrl);
+                    }}
+                    title="Fotografía del Nuevo Elemento"
+                  />
                 </div>
               </div>
 
@@ -746,7 +768,7 @@ export default function NewSocorrista() {
                     name="motorista_autorizado" 
                     checked={formData.motorista_autorizado} 
                     onChange={(e) => setFormData(prev => ({ ...prev, motorista_autorizado: e.target.checked }))} 
-                    disabled={role !== 'admin' && role !== 'director'}
+                    disabled={role !== 'admin' && role !== 'director' && !permissions.add_socorristas && !permissions.edit_socorristas}
                     className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded disabled:opacity-50" 
                   />
                   <span className="ml-2 text-sm text-gray-500">Marcar si tiene autorización de manejar ambulancias / vehículos institucionales.</span>
@@ -988,7 +1010,7 @@ export default function NewSocorrista() {
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Seccional <span className="text-red-500">*</span></label>
                 <div className="mt-1 sm:mt-0 sm:col-span-2">
-                  <select disabled={role === 'director'} name="seccional_id" required value={formData.seccional_id} onChange={handleChange} className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 disabled:bg-gray-100 disabled:text-gray-500">
+                  <select disabled={seccionales.length === 1 && role !== 'admin'} name="seccional_id" required value={formData.seccional_id} onChange={handleChange} className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 disabled:bg-gray-100 disabled:text-gray-500">
                     <option value="">Seleccione una seccional</option>
                     {seccionales.map(s => (
                       <option key={s.id} value={s.id}>{s.nombre}</option>

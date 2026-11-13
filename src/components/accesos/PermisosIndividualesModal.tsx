@@ -1,26 +1,59 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Shield, Check, X, Search, RotateCcw,
-  CheckCircle2, XCircle, Sliders, Info, HelpCircle,
-  FolderDown, Car, Users, Sparkles, Megaphone, FileSpreadsheet, Palette
+import {
+  Shield,
+  Check,
+  X,
+  Search,
+  RotateCcw,
+  CheckCircle2,
+  XCircle,
+  Sliders,
+  HelpCircle,
+  FolderDown,
+  Car,
+  Users,
+  Sparkles,
+  Megaphone,
+  FileSpreadsheet,
+  MapPin,
+  IdCard,
+  Fuel,
+  FileText,
+  Globe,
+  Building2,
+  User,
+  Lock,
+  Eye,
+  Edit3,
+  Plus,
 } from 'lucide-react';
+import {
+  ModuleScope,
+  ScopedModuleKey,
+  SeccionalesSocorristasConfig,
+} from '../../contexts/AuthContext';
 
 interface PermisosIndividualesModalProps {
   user: any;
   roles: string[];
   rolePermissions: any[];
   permissionLabels: Record<string, string>;
+  seccionales: { id: number; nombre: string }[];
   onClose: () => void;
-  onSave: (userId: string, updatedCustomPermissions: Record<string, boolean>, updatedCanUploadFiles: boolean) => Promise<void>;
+  onSave: (
+    userId: string,
+    updatedCustomPermissions: Record<string, any>,
+    updatedCanUploadFiles: boolean
+  ) => Promise<void>;
 }
 
-// Categories for clean grouping
 const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: string[] }> = {
   socorristas: {
     label: 'Socorristas y Méritos',
     icon: Users,
     keys: [
       'view_socorristas',
+      'add_socorristas',
       'edit_socorristas',
       'cambiar_estado_socorrista',
       'descargar_excel_socorristas',
@@ -29,22 +62,31 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'descargar_carnet',
       'view_solicitar_carnet',
       'view_verificar_carnet',
-      'view_meritos'
-    ]
+      'view_meritos',
+      'edit_meritos',
+    ],
   },
   vehiculos: {
-    label: 'Vehículos y Flota',
+    label: 'Vehículos y Solicitudes',
     icon: Car,
     keys: [
       'view_vehiculos',
       'edit_vehiculos',
       'view_solicitudes_compra',
       'crear_solicitudes_compra',
+      'edit_solicitudes_compra',
       'aprobar_solicitudes_compra',
+      'view_compra_historial',
+      'view_compra_plantillas',
       'view_solicitudes_combustible',
       'crear_solicitudes_combustible',
-      'aprobar_solicitudes_combustible'
-    ]
+      'edit_solicitudes_combustible',
+      'aprobar_solicitudes_combustible',
+      'view_combustible_historial',
+      'view_combustible_plantillas',
+      'view_solicitudes_carnet',
+      'edit_solicitudes_carnet',
+    ],
   },
   contenido: {
     label: 'Archivos y Seccionales',
@@ -53,12 +95,13 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'view_dashboard',
       'view_archivos',
       'subir_archivos',
+      'edit_archivos',
       'view_cursos',
       'view_seccionales',
       'edit_seccionales',
       'view_directorio',
-      'edit_directorio'
-    ]
+      'edit_directorio',
+    ],
   },
   comunicacion: {
     label: 'Anuncios y Formularios',
@@ -66,10 +109,12 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
     keys: [
       'view_anuncios',
       'crear_anuncios',
+      'edit_anuncios',
       'view_formularios',
       'crear_formularios',
-      'ver_todos_formularios'
-    ]
+      'edit_formularios',
+      'ver_todos_formularios',
+    ],
   },
   admin: {
     label: 'Seguridad y Sistema',
@@ -79,27 +124,127 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'personalizar_colores',
       'view_config',
       'view_activity',
-      'view_accesos'
-    ]
-  }
+      'view_accesos',
+    ],
+  },
 };
+
+const SCOPED_MODULES: {
+  key: ScopedModuleKey;
+  label: string;
+  desc: string;
+  icon: any;
+  viewKey: string;
+  editKeys: string[];
+  createKey?: string;
+  historialKey?: string;
+  plantillasKey?: string;
+}[] = [
+  {
+    key: 'formularios',
+    label: 'Formularios',
+    desc: 'Control de formularios institucionales y respuestas (sin opción de eliminar).',
+    icon: FileSpreadsheet,
+    viewKey: 'view_formularios',
+    editKeys: ['edit_formularios', 'crear_formularios'],
+  },
+  {
+    key: 'solicitudes_combustible',
+    label: 'Solicitudes de Combustible',
+    desc: 'Gestión de vales, dotación y aprobaciones (sin opción de eliminar).',
+    icon: Fuel,
+    viewKey: 'view_solicitudes_combustible',
+    editKeys: ['edit_solicitudes_combustible', 'aprobar_solicitudes_combustible'],
+    createKey: 'crear_solicitudes_combustible',
+    historialKey: 'view_combustible_historial',
+    plantillasKey: 'view_combustible_plantillas',
+  },
+  {
+    key: 'solicitudes_compra',
+    label: 'Solicitudes de Compra',
+    desc: 'Requisiciones de insumos, repuestos y mantenimiento (sin opción de eliminar).',
+    icon: FileText,
+    viewKey: 'view_solicitudes_compra',
+    editKeys: ['edit_solicitudes_compra', 'aprobar_solicitudes_compra'],
+    createKey: 'crear_solicitudes_compra',
+    historialKey: 'view_compra_historial',
+    plantillasKey: 'view_compra_plantillas',
+  },
+  {
+    key: 'solicitudes_carnet',
+    label: 'Solicitudes de Carnet',
+    desc: 'Control de solicitudes pendientes, observadas y completadas (sin opción de eliminar).',
+    icon: IdCard,
+    viewKey: 'view_solicitudes_carnet',
+    editKeys: ['edit_solicitudes_carnet'],
+  },
+];
+
+const SIMPLE_VIEW_EDIT_MODULES: {
+  label: string;
+  desc: string;
+  viewKey: string;
+  editKeys: string[];
+}[] = [
+  {
+    label: 'Anuncios Institucionales',
+    desc: 'Publicar, editar o solo leer avisos y boletines.',
+    viewKey: 'view_anuncios',
+    editKeys: ['edit_anuncios', 'crear_anuncios'],
+  },
+  {
+    label: 'Archivos Descargables',
+    desc: 'Subir y administrar documentos o solo descargar.',
+    viewKey: 'view_archivos',
+    editKeys: ['edit_archivos', 'subir_archivos'],
+  },
+  {
+    label: 'Méritos y Premios',
+    desc: 'Registrar condecoraciones y enlaces o solo consultar.',
+    viewKey: 'view_meritos',
+    editKeys: ['edit_meritos'],
+  },
+  {
+    label: 'Flota de Vehículos',
+    desc: 'Crear/editar vehículos y mantenimientos o solo visualizar.',
+    viewKey: 'view_vehiculos',
+    editKeys: ['edit_vehiculos'],
+  },
+  {
+    label: 'Socorristas (Nivel General)',
+    desc: 'Acceso base al módulo de socorristas; las seccionales específicas se configuran en la pestaña de Seccionales.',
+    viewKey: 'view_socorristas',
+    editKeys: ['edit_socorristas'],
+  },
+  {
+    label: 'Seccionales',
+    desc: 'Crear y modificar información de seccionales o solo consultar.',
+    viewKey: 'view_seccionales',
+    editKeys: ['edit_seccionales'],
+  },
+  {
+    label: 'Directorio y Directores',
+    desc: 'Editar contactos institucionales y directorio o solo lectura.',
+    viewKey: 'view_directorio',
+    editKeys: ['edit_directorio'],
+  },
+];
 
 export default function PermisosIndividualesModal({
   user,
   rolePermissions,
   permissionLabels,
+  seccionales,
   onClose,
-  onSave
+  onSave,
 }: PermisosIndividualesModalProps) {
-  // Current user's base role permissions
   const baseRolePermissions = useMemo(() => {
-    const found = rolePermissions.find(rp => rp.role === user.role);
+    const found = rolePermissions.find((rp) => rp.role === user.role);
     if (found && found.permissions) return found.permissions;
-    
-    // Default fallback base permissions if not in table
+
     if (user.role === 'admin') {
       const allTrue: Record<string, boolean> = {};
-      Object.keys(permissionLabels).forEach(k => allTrue[k] = true);
+      Object.keys(permissionLabels).forEach((k) => (allTrue[k] = true));
       return allTrue;
     }
     return {
@@ -111,63 +256,226 @@ export default function PermisosIndividualesModal({
       view_vehiculos: true,
       view_solicitudes_compra: true,
       crear_solicitudes_compra: true,
+      view_compra_historial: true,
+      view_compra_plantillas: false,
       view_solicitudes_combustible: true,
-      crear_solicitudes_combustible: true
+      crear_solicitudes_combustible: true,
+      view_combustible_historial: true,
+      view_combustible_plantillas: false,
+      view_meritos: true,
+      view_anuncios: true,
+      view_formularios: true,
     };
   }, [user.role, rolePermissions, permissionLabels]);
 
-  // Initial custom overrides state
+  const userDefaultSeccionalId = user?.socorristas?.seccional_id ? Number(user.socorristas.seccional_id) : null;
+
+  // Extract ONLY boolean overrides safely (preserve _module_scopes, _module_seccionales and _seccionales_socorristas separately)
   const [customOverrides, setCustomOverrides] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = { ...(user.custom_permissions || {}) };
+    const raw = user.custom_permissions || {};
+    const initial: Record<string, boolean> = {};
+    Object.keys(raw).forEach((k) => {
+      if (typeof raw[k] === 'boolean') {
+        initial[k] = raw[k];
+      }
+    });
     if (user.can_upload_files && initial.subir_archivos === undefined) {
       initial.subir_archivos = true;
     }
     return initial;
   });
 
+  const [moduleScopes, setModuleScopes] = useState<Record<ScopedModuleKey, ModuleScope>>(() => {
+    const rawScopes = user.custom_permissions?._module_scopes || {};
+    return {
+      formularios: rawScopes.formularios || (baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario'),
+      solicitudes_combustible: rawScopes.solicitudes_combustible || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_compra: rawScopes.solicitudes_compra || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_carnet: rawScopes.solicitudes_carnet || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional'),
+    };
+  });
+
+  const [moduleSeccionales, setModuleSeccionales] = useState<Record<ScopedModuleKey, number[]>>(() => {
+    const rawModSeccs = user.custom_permissions?._module_seccionales || {};
+    const fallbackArr = userDefaultSeccionalId ? [userDefaultSeccionalId] : [];
+    const parseArr = (val: any) =>
+      Array.isArray(val) ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0))) : fallbackArr;
+    return {
+      formularios: parseArr(rawModSeccs.formularios),
+      solicitudes_combustible: parseArr(rawModSeccs.solicitudes_combustible),
+      solicitudes_compra: parseArr(rawModSeccs.solicitudes_compra),
+      solicitudes_carnet: parseArr(rawModSeccs.solicitudes_carnet),
+    };
+  });
+
+  const [secConfig, setSecConfig] = useState<SeccionalesSocorristasConfig>(() => {
+    const raw = user.custom_permissions?._seccionales_socorristas;
+    if (raw && (raw.mode === 'all' || raw.mode === 'custom' || raw.mode === 'default')) {
+      return {
+        mode: raw.mode,
+        seccionales: raw.seccionales && typeof raw.seccionales === 'object' ? raw.seccionales : {},
+      };
+    }
+    return { mode: 'default', seccionales: {} };
+  });
+
+  const [activeTab, setActiveTab] = useState<'alcances' | 'seccionales' | 'modulos' | 'todos'>('alcances');
   const [searchTerm, setSearchTerm] = useState('');
+  const [secSearchTerm, setSecSearchTerm] = useState('');
+  const [scopeSecSearch, setScopeSecSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'todos' | 'permitidos' | 'denegados' | 'personalizados'>('todos');
   const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Compute effective access status for each permission
   const getPermissionStatus = (key: string) => {
     const isOverridden = customOverrides[key] !== undefined && customOverrides[key] !== null;
     const baseValue = Boolean(baseRolePermissions[key]);
     const effectiveValue = isOverridden ? Boolean(customOverrides[key]) : baseValue;
-
     return {
       effectiveValue,
       isOverridden,
       overrideValue: customOverrides[key],
-      baseValue
+      baseValue,
     };
   };
 
-  // Set override: 'role' (remove override), 'allow' (force true), 'deny' (force false)
   const handleSetOverride = (key: string, mode: 'role' | 'allow' | 'deny') => {
-    setCustomOverrides(prev => {
+    setCustomOverrides((prev) => {
       const copy = { ...prev };
-      if (mode === 'role') {
-        delete copy[key];
-      } else if (mode === 'allow') {
-        copy[key] = true;
-      } else if (mode === 'deny') {
-        copy[key] = false;
+      if (mode === 'role') delete copy[key];
+      else if (mode === 'allow') copy[key] = true;
+      else copy[key] = false;
+      return copy;
+    });
+  };
+
+  const setMultipleKeys = (keys: string[], value: boolean | 'role') => {
+    setCustomOverrides((prev) => {
+      const copy = { ...prev };
+      keys.forEach((k) => {
+        if (value === 'role') delete copy[k];
+        else copy[k] = value;
+      });
+      return copy;
+    });
+  };
+
+  const getModuleAccessLevel = (viewKey: string, editKeys: string[]): 'blocked' | 'view' | 'edit' => {
+    const canView = getPermissionStatus(viewKey).effectiveValue;
+    const canEdit = editKeys.some((ek) => getPermissionStatus(ek).effectiveValue);
+    if (!canView && !canEdit) return 'blocked';
+    if (canEdit) return 'edit';
+    return 'view';
+  };
+
+  const setModuleAccessLevel = (viewKey: string, editKeys: string[], level: 'blocked' | 'view' | 'edit') => {
+    setCustomOverrides((prev) => {
+      const copy = { ...prev };
+      if (level === 'blocked') {
+        copy[viewKey] = false;
+        editKeys.forEach((ek) => {
+          copy[ek] = false;
+        });
+      } else if (level === 'view') {
+        copy[viewKey] = true;
+        editKeys.forEach((ek) => {
+          copy[ek] = false;
+        });
+      } else {
+        copy[viewKey] = true;
+        editKeys.forEach((ek) => {
+          copy[ek] = true;
+        });
       }
       return copy;
+    });
+  };
+
+  const toggleSeccionalPerm = (secId: number, field: 'view' | 'add' | 'edit') => {
+    setSecConfig((prev) => {
+      const current = prev.seccionales[secId] || { view: false, add: false, edit: false };
+      const nextVal = !current[field];
+      const updated = {
+        ...current,
+        [field]: nextVal,
+      };
+      // If granting add or edit, automatically ensure view is enabled
+      if ((field === 'add' || field === 'edit') && nextVal) {
+        updated.view = true;
+      }
+      // If disabling view, also disable add & edit
+      if (field === 'view' && !nextVal) {
+        updated.add = false;
+        updated.edit = false;
+      }
+      return {
+        ...prev,
+        mode: 'custom',
+        seccionales: {
+          ...prev.seccionales,
+          [secId]: updated,
+        },
+      };
+    });
+  };
+
+  const handleBulkSeccionales = (field: 'view' | 'add' | 'edit' | 'all' | 'none') => {
+    setSecConfig((prev) => {
+      if (field === 'none') {
+        return { mode: 'custom', seccionales: {} };
+      }
+      const nextMap: Record<number, { view: boolean; add: boolean; edit: boolean }> = {};
+      seccionales.forEach((s) => {
+        const cur = prev.seccionales[s.id] || { view: false, add: false, edit: false };
+        if (field === 'all') {
+          nextMap[s.id] = { view: true, add: true, edit: true };
+        } else {
+          const allCurrentlyOn = seccionales.every((sec) => prev.seccionales[sec.id]?.[field]);
+          const target = !allCurrentlyOn;
+          nextMap[s.id] = {
+            ...cur,
+            [field]: target,
+            ...(target && (field === 'add' || field === 'edit') ? { view: true } : {}),
+            ...(field === 'view' && !target ? { add: false, edit: false } : {}),
+          };
+        }
+      });
+      return { mode: 'custom', seccionales: nextMap };
+    });
+  };
+
+  const toggleModuleSeccional = (modKey: ScopedModuleKey, secId: number) => {
+    setModuleSeccionales((prev) => {
+      const current = prev[modKey] || [];
+      const exists = current.includes(secId);
+      const next = exists ? current.filter((id) => id !== secId) : [...current, secId];
+      return { ...prev, [modKey]: next };
     });
   };
 
   const handleResetAllToRole = () => {
     if (confirm(`¿Restablecer todos los permisos de ${user.email} para que hereden exactamente su rol base "${user.role}"?`)) {
       setCustomOverrides({});
+      setSecConfig({ mode: 'default', seccionales: {} });
+      setModuleScopes({
+        formularios: baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario',
+        solicitudes_combustible: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
+        solicitudes_compra: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
+        solicitudes_carnet: baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional',
+      });
+      const fallbackArr = userDefaultSeccionalId ? [userDefaultSeccionalId] : [];
+      setModuleSeccionales({
+        formularios: fallbackArr,
+        solicitudes_combustible: fallbackArr,
+        solicitudes_compra: fallbackArr,
+        solicitudes_carnet: fallbackArr,
+      });
     }
   };
 
   const handleAllowAll = () => {
     const allAllowed: Record<string, boolean> = {};
-    Object.keys(permissionLabels).forEach(k => {
+    Object.keys(permissionLabels).forEach((k) => {
       allAllowed[k] = true;
     });
     setCustomOverrides(allAllowed);
@@ -175,64 +483,83 @@ export default function PermisosIndividualesModal({
 
   const handleDenyAll = () => {
     const allDenied: Record<string, boolean> = {};
-    Object.keys(permissionLabels).forEach(k => {
+    Object.keys(permissionLabels).forEach((k) => {
       allDenied[k] = false;
     });
     setCustomOverrides(allDenied);
   };
 
-  // Filtered permission keys
   const filteredKeys = useMemo(() => {
     let keys = Object.keys(permissionLabels);
 
     if (selectedCategory !== 'todas') {
       const categoryKeys = PERMISSION_CATEGORIES[selectedCategory]?.keys || [];
-      keys = keys.filter(k => categoryKeys.includes(k));
+      keys = keys.filter((k) => categoryKeys.includes(k));
     }
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
-      keys = keys.filter(k => {
+      keys = keys.filter((k) => {
         const label = (permissionLabels[k] || '').toLowerCase();
         return label.includes(q) || k.toLowerCase().includes(q);
       });
     }
 
     if (activeFilter === 'permitidos') {
-      keys = keys.filter(k => getPermissionStatus(k).effectiveValue);
+      keys = keys.filter((k) => getPermissionStatus(k).effectiveValue);
     } else if (activeFilter === 'denegados') {
-      keys = keys.filter(k => !getPermissionStatus(k).effectiveValue);
+      keys = keys.filter((k) => !getPermissionStatus(k).effectiveValue);
     } else if (activeFilter === 'personalizados') {
-      keys = keys.filter(k => getPermissionStatus(k).isOverridden);
+      keys = keys.filter((k) => getPermissionStatus(k).isOverridden);
     }
 
     return keys;
   }, [permissionLabels, selectedCategory, searchTerm, activeFilter, customOverrides, baseRolePermissions]);
 
-  // Summary counts
+  const filteredSeccionales = useMemo(() => {
+    const q = secSearchTerm.trim().toLowerCase();
+    if (!q) return seccionales;
+    return seccionales.filter((s) => s.nombre.toLowerCase().includes(q));
+  }, [seccionales, secSearchTerm]);
+
   const summary = useMemo(() => {
     let allowedCount = 0;
     let deniedCount = 0;
     let overrideCount = 0;
 
-    Object.keys(permissionLabels).forEach(k => {
+    Object.keys(permissionLabels).forEach((k) => {
       const status = getPermissionStatus(k);
       if (status.effectiveValue) allowedCount++;
       else deniedCount++;
       if (status.isOverridden) overrideCount++;
     });
 
-    return { allowedCount, deniedCount, overrideCount, totalCount: Object.keys(permissionLabels).length };
+    return {
+      allowedCount,
+      deniedCount,
+      overrideCount,
+      totalCount: Object.keys(permissionLabels).length,
+    };
   }, [permissionLabels, customOverrides, baseRolePermissions]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const canUploadFiles = customOverrides.subir_archivos !== undefined 
-        ? Boolean(customOverrides.subir_archivos) 
-        : Boolean(baseRolePermissions.subir_archivos);
+      const canUploadFiles =
+        customOverrides.subir_archivos !== undefined
+          ? Boolean(customOverrides.subir_archivos)
+          : customOverrides.edit_archivos !== undefined
+          ? Boolean(customOverrides.edit_archivos)
+          : Boolean(baseRolePermissions.subir_archivos);
 
-      await onSave(user.id, customOverrides, canUploadFiles);
+      const finalPayload: Record<string, any> = {
+        ...customOverrides,
+        _module_scopes: moduleScopes,
+        _module_seccionales: moduleSeccionales,
+        _seccionales_socorristas: secConfig,
+      };
+
+      await onSave(user.id, finalPayload, canUploadFiles);
       onClose();
     } catch (err) {
       console.error('Error saving user permissions:', err);
@@ -241,15 +568,14 @@ export default function PermisosIndividualesModal({
     }
   };
 
-  const nombreUsuario = user.socorristas 
-    ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}` 
-    : (user.email || 'Usuario');
+  const nombreUsuario = user.socorristas
+    ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}`
+    : user.email || 'Usuario';
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/40 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150">
-        
-        {/* HEADER APPLE macOS WINDOW STYLE */}
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/45 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150">
+        {/* HEADER */}
         <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3.5">
             <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center border border-slate-200/60 shadow-2xs">
@@ -257,7 +583,9 @@ export default function PermisosIndividualesModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-gray-900 tracking-tight">Permisos Individuales de Usuario</h2>
+                <h2 className="text-sm font-semibold text-gray-900 tracking-tight">
+                  Permisos Individuales y Alcance por Seccional
+                </h2>
                 <span className="px-2 py-0.5 rounded-full text-3xs font-medium bg-slate-100 text-slate-700 border border-slate-200/60 uppercase">
                   Rol: {user.role}
                 </span>
@@ -267,7 +595,7 @@ export default function PermisosIndividualesModal({
               </p>
             </div>
           </div>
-          <button 
+          <button
             type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
@@ -276,257 +604,833 @@ export default function PermisosIndividualesModal({
           </button>
         </div>
 
-        {/* QUICK STATS SUBHEADER */}
-        <div className="px-6 py-3 bg-slate-50/70 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-              <Check className="w-3 h-3 mr-1 text-emerald-600" />
-              {summary.allowedCount} Permitidos
-            </span>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
-              <X className="w-3 h-3 mr-1 text-rose-600" />
-              {summary.deniedCount} Bloqueados
-            </span>
-            {summary.overrideCount > 0 && (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
-                <Sparkles className="w-3 h-3 mr-1 text-amber-600" />
-                {summary.overrideCount} Excepciones
+        {/* QUICK STATS + TOP NAVIGATION TABS */}
+        <div className="px-6 py-3 bg-slate-50/80 border-b border-slate-200/70 space-y-3 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                <Check className="w-3 h-3 mr-1 text-emerald-600" />
+                {summary.allowedCount} Permitidos
               </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={handleResetAllToRole}
-              className="px-2.5 py-1 text-3xs font-semibold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-              title="Quitar excepciones y heredar el rol"
-            >
-              <RotateCcw className="w-3 h-3 mr-1 text-slate-400" />
-              Heredar de Rol
-            </button>
-            <button
-              type="button"
-              onClick={handleAllowAll}
-              className="px-2.5 py-1 text-3xs font-semibold text-emerald-700 bg-white hover:bg-emerald-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-            >
-              <Check className="w-3 h-3 mr-1 text-emerald-600" />
-              Permitir Todo
-            </button>
-            <button
-              type="button"
-              onClick={handleDenyAll}
-              className="px-2.5 py-1 text-3xs font-semibold text-rose-700 bg-white hover:bg-rose-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-            >
-              <X className="w-3 h-3 mr-1 text-rose-600" />
-              Denegar Todo
-            </button>
-          </div>
-        </div>
-
-        {/* SEARCH & CATEGORY BAR */}
-        <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            {/* Search Input Apple Style */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Buscar permiso..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 outline-none placeholder-slate-400 transition-all"
-              />
-              {searchTerm && (
-                <button 
-                  type="button"
-                  onClick={() => setSearchTerm('')} 
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
+                <X className="w-3 h-3 mr-1 text-rose-600" />
+                {summary.deniedCount} Bloqueados
+              </span>
+              {summary.overrideCount > 0 && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
+                  <Sparkles className="w-3 h-3 mr-1 text-amber-600" />
+                  {summary.overrideCount} Excepciones
+                </span>
               )}
             </div>
 
-            {/* Filter Tabs */}
-            <div className="bg-slate-100 p-0.5 rounded-lg flex items-center text-3xs font-semibold">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setActiveFilter('todos')}
-                className={`px-2 py-1 rounded-md transition-all cursor-pointer ${activeFilter === 'todos' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                onClick={handleResetAllToRole}
+                className="px-2.5 py-1 text-3xs font-semibold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
               >
-                Todos ({summary.totalCount})
+                <RotateCcw className="w-3 h-3 mr-1 text-slate-400" />
+                Heredar de Rol
               </button>
               <button
                 type="button"
-                onClick={() => setActiveFilter('permitidos')}
-                className={`px-2 py-1 rounded-md transition-all cursor-pointer ${activeFilter === 'permitidos' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                onClick={handleAllowAll}
+                className="px-2.5 py-1 text-3xs font-semibold text-emerald-700 bg-white hover:bg-emerald-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
               >
-                Permitidos ({summary.allowedCount})
+                <Check className="w-3 h-3 mr-1 text-emerald-600" />
+                Permitir Todo
               </button>
               <button
                 type="button"
-                onClick={() => setActiveFilter('denegados')}
-                className={`px-2 py-1 rounded-md transition-all cursor-pointer ${activeFilter === 'denegados' ? 'bg-white text-rose-700 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                onClick={handleDenyAll}
+                className="px-2.5 py-1 text-3xs font-semibold text-rose-700 bg-white hover:bg-rose-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
               >
-                Bloqueados ({summary.deniedCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveFilter('personalizados')}
-                className={`px-2 py-1 rounded-md transition-all cursor-pointer ${activeFilter === 'personalizados' ? 'bg-white text-amber-800 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
-              >
-                Excepciones ({summary.overrideCount})
+                <X className="w-3 h-3 mr-1 text-rose-600" />
+                Denegar Todo
               </button>
             </div>
           </div>
 
-          {/* Category Pills (Apple Segmented Bar) */}
-          <div className="flex items-center gap-1 overflow-x-auto text-3xs font-semibold pb-0.5">
+          {/* 4 Main Configuration Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             <button
               type="button"
-              onClick={() => setSelectedCategory('todas')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
-                selectedCategory === 'todas'
-                  ? 'bg-slate-900 text-white shadow-2xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+              onClick={() => setActiveTab('alcances')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'alcances'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
               }`}
             >
-              Todas las Áreas
+              <Globe className="w-3.5 h-3.5" />
+              Formularios y Solicitudes (Alcance)
             </button>
-            {Object.entries(PERMISSION_CATEGORIES).map(([catKey, cat]) => {
-              const IconComponent = cat.icon;
-              return (
-                <button
-                  key={catKey}
-                  type="button"
-                  onClick={() => setSelectedCategory(catKey)}
-                  className={`px-2.5 py-1 rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer ${
-                    selectedCategory === catKey
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
-                  }`}
-                >
-                  <IconComponent className="w-3 h-3" />
-                  {cat.label}
-                </button>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => setActiveTab('seccionales')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'seccionales'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              Seccionales (Socorristas)
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('modulos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'modulos'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              Módulos (Ver vs Editar)
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('todos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'todos'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              Todos los Permisos ({summary.totalCount})
+            </button>
           </div>
         </div>
 
-        {/* PERMISSIONS INSET LIST */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
-          {filteredKeys.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <HelpCircle className="h-8 w-8 mx-auto text-slate-300 mb-1.5" />
-              <p className="font-semibold text-xs text-slate-700">Sin permisos encontrados</p>
-              <p className="text-3xs text-slate-400">Modifica el término de búsqueda o cambia de categoría.</p>
+        {/* TAB BODY */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50 space-y-4">
+          {/* TAB 1: FORMULARIOS Y SOLICITUDES CON ALCANCE */}
+          {activeTab === 'alcances' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900 flex items-start gap-2.5">
+                <Shield className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  Configura de forma individual qué módulos de <strong>Formularios</strong> y <strong>Solicitudes</strong>{' '}
+                  tiene activos el usuario, si puede <strong>Solo Ver</strong> o <strong>Editar</strong> (sin permisos de
+                  eliminación), y qué registros puede ver según su alcance: <strong>Global</strong>,{' '}
+                  <strong>Solo su Seccional</strong> o <strong>Solo de Usuario</strong>.
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {SCOPED_MODULES.map((mod) => {
+                  const IconComp = mod.icon;
+                  const accessLevel = getModuleAccessLevel(mod.viewKey, mod.editKeys);
+                  const currentScope = moduleScopes[mod.key];
+                  const selectedSecIds = moduleSeccionales[mod.key] || [];
+                  const canCreate = mod.createKey ? getPermissionStatus(mod.createKey).effectiveValue : null;
+                  const canHistorial = mod.historialKey ? getPermissionStatus(mod.historialKey).effectiveValue : null;
+                  const canPlantillas = mod.plantillasKey ? getPermissionStatus(mod.plantillasKey).effectiveValue : null;
+                  const visibleSeccionalesForScope = scopeSecSearch.trim()
+                    ? seccionales.filter((s) => s.nombre.toLowerCase().includes(scopeSecSearch.trim().toLowerCase()))
+                    : seccionales;
+
+                  return (
+                    <div
+                      key={mod.key}
+                      className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 space-y-3.5 flex flex-col justify-between"
+                    >
+                      <div className="space-y-3.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5">
+                            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center justify-center shrink-0">
+                              <IconComp className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-xs font-bold text-slate-900">{mod.label}</h3>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                                  Eliminar: No
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{mod.desc}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Nivel de Acceso: Desactivado / Solo Ver / Editar */}
+                        <div className="space-y-1.5">
+                          <span className="text-[11px] font-semibold text-slate-600 block">
+                            Nivel de Acción:
+                          </span>
+                          <div className="grid grid-cols-3 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                accessLevel === 'blocked'
+                                  ? 'bg-rose-600 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <Lock className="w-3 h-3" />
+                              Desactivado
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view')}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                accessLevel === 'view'
+                                  ? 'bg-amber-500 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <Eye className="w-3 h-3" />
+                              Solo Ver
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit')}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                accessLevel === 'edit'
+                                  ? 'bg-emerald-600 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              Editar
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Alcance de Visibilidad: Global / Seccional / Usuario */}
+                        <div className={`space-y-2 ${accessLevel === 'blocked' ? 'opacity-45 pointer-events-none' : ''}`}>
+                          <span className="text-[11px] font-semibold text-slate-600 block">
+                            Alcance de Registros Visibles:
+                          </span>
+                          <div className="grid grid-cols-3 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setModuleScopes((prev) => ({ ...prev, [mod.key]: 'global' }))}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                currentScope === 'global'
+                                  ? 'bg-slate-900 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <Globe className="w-3 h-3" />
+                              Globales
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModuleScopes((prev) => ({ ...prev, [mod.key]: 'seccional' }));
+                                if ((moduleSeccionales[mod.key] || []).length === 0 && userDefaultSeccionalId) {
+                                  setModuleSeccionales((prev) => ({ ...prev, [mod.key]: [userDefaultSeccionalId] }));
+                                }
+                              }}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                currentScope === 'seccional'
+                                  ? 'bg-slate-900 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <Building2 className="w-3 h-3" />
+                              Seccional
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setModuleScopes((prev) => ({ ...prev, [mod.key]: 'usuario' }))}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                                currentScope === 'usuario'
+                                  ? 'bg-slate-900 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:bg-white/70'
+                              }`}
+                            >
+                              <User className="w-3 h-3" />
+                              Usuario
+                            </button>
+                          </div>
+
+                          {/* Checklist de Seccional(es) cuando selecciona Alcance = Seccional */}
+                          {currentScope === 'seccional' && (
+                            <div className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                                  Seccionales habilitadas ({selectedSecIds.length})
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setModuleSeccionales((prev) => ({
+                                        ...prev,
+                                        [mod.key]: seccionales.map((s) => s.id),
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                  >
+                                    Todas
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setModuleSeccionales((prev) => ({
+                                        ...prev,
+                                        [mod.key]: [],
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                  >
+                                    Ninguna
+                                  </button>
+                                </div>
+                              </div>
+
+                              {seccionales.length > 6 && (
+                                <div className="relative">
+                                  <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2" />
+                                  <input
+                                    type="text"
+                                    value={scopeSecSearch}
+                                    onChange={(e) => setScopeSecSearch(e.target.value)}
+                                    placeholder="Filtrar seccionales..."
+                                    className="w-full pl-7 pr-2.5 py-1 text-[11px] bg-white border border-slate-200 rounded-lg outline-none focus:border-emerald-500"
+                                  />
+                                </div>
+                              )}
+
+                              <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                                {visibleSeccionalesForScope.map((sec) => {
+                                  const checked = selectedSecIds.includes(sec.id);
+                                  return (
+                                    <label
+                                      key={sec.id}
+                                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-colors ${
+                                        checked
+                                          ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold'
+                                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => toggleModuleSeccional(mod.key, sec.id)}
+                                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 shrink-0"
+                                      />
+                                      <span className="truncate">{sec.nombre}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+
+                              {selectedSecIds.length === 0 && (
+                                <p className="text-[10px] text-amber-700 font-medium">
+                                  Si no marcas ninguna seccional, se usará la seccional asignada al usuario.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Opciones adicionales de módulo (Crear, Botón Historial, Botón Plantillas y Config.) */}
+                      {(mod.createKey || mod.historialKey || mod.plantillasKey) && (
+                        <div className="pt-2.5 border-t border-slate-100 space-y-2">
+                          {mod.createKey && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                ¿Puede crear nuevas solicitudes?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setMultipleKeys([mod.createKey!], !canCreate)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  canCreate
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-slate-50 text-slate-500 border-slate-200'
+                                }`}
+                              >
+                                {canCreate ? 'Sí, puede crear' : 'No puede crear'}
+                              </button>
+                            </div>
+                          )}
+
+                          {mod.historialKey && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                Botón Ver &ldquo;Historial&rdquo;:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setMultipleKeys([mod.historialKey!], !canHistorial)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  canHistorial
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                                }`}
+                              >
+                                {canHistorial ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
+                              </button>
+                            </div>
+                          )}
+
+                          {mod.plantillasKey && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                Botón &ldquo;Plantillas y Configuraciones&rdquo;:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setMultipleKeys([mod.plantillasKey!], !canPlantillas)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  canPlantillas
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                                }`}
+                              >
+                                {canPlantillas ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          ) : (
+          )}
+
+          {/* TAB 2: SECCIONALES INDIVIDUALES PARA SOCORRISTAS */}
+          {activeTab === 'seccionales' && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900">Modo de Acceso a Socorristas por Seccional</h3>
+                    <p className="text-[11px] text-slate-500">
+                      Define si el usuario hereda su rol base, accede a todas las seccionales, o tiene permisos individuales por cada seccional.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'default' }))}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      secConfig.mode === 'default'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <p className="text-xs font-bold">Heredar del Rol</p>
+                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'default' ? 'text-slate-300' : 'text-slate-500'}`}>
+                      Solo su seccional asignada (o todas si tiene acceso nacional).
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'all' }))}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      secConfig.mode === 'all'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <p className="text-xs font-bold">Todas las Seccionales</p>
+                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'all' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                      Acceso a ver socorristas de todas las seccionales del país.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'custom' }))}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      secConfig.mode === 'custom'
+                        ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <p className="text-xs font-bold">Por Seccional Individual</p>
+                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'custom' ? 'text-blue-100' : 'text-slate-500'}`}>
+                      Elige exactamente en qué seccionales puede Ver, Agregar o Editar.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Per-seccional Matrix */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Buscar seccional..."
+                      value={secSearchTerm}
+                      onChange={(e) => setSecSearchTerm(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleBulkSeccionales('view')}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                    >
+                      Alternar Ver Todas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkSeccionales('add')}
+                      className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[11px] font-semibold text-blue-700 cursor-pointer"
+                    >
+                      Alternar Agregar Todas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkSeccionales('edit')}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-700 cursor-pointer"
+                    >
+                      Alternar Editar Todas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkSeccionales('none')}
+                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-[11px] font-semibold text-rose-700 cursor-pointer"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                </div>
+
+                {secConfig.mode !== 'custom' && (
+                  <div className="px-4 py-2 bg-amber-50 border-b border-amber-200/70 text-[11px] text-amber-900 font-medium">
+                    Nota: Al marcar cualquier casilla individual abajo, el modo cambiará automáticamente a{' '}
+                    <strong>Por Seccional Individual</strong>.
+                  </div>
+                )}
+
+                <div className="overflow-x-auto max-h-[340px] overflow-y-auto">
+                  <table className="min-w-full divide-y divide-slate-100">
+                    <thead className="bg-slate-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase">Seccional</th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Ver Socorristas</th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Agregar Nuevos</th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Modificar / Editar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredSeccionales.map((sec) => {
+                        const perm = secConfig.seccionales[sec.id] || { view: false, add: false, edit: false };
+                        return (
+                          <tr key={sec.id} className="hover:bg-slate-50/70">
+                            <td className="px-4 py-2.5 text-xs font-semibold text-slate-800">{sec.nombre}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => toggleSeccionalPerm(sec.id, 'view')}
+                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  perm.view
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                <Eye className="w-3 h-3" />
+                                {perm.view ? 'Sí' : 'No'}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => toggleSeccionalPerm(sec.id, 'add')}
+                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  perm.add
+                                    ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                <Plus className="w-3 h-3" />
+                                {perm.add ? 'Sí' : 'No'}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => toggleSeccionalPerm(sec.id, 'edit')}
+                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
+                                  perm.edit
+                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                {perm.edit ? 'Sí' : 'No'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: MODULOS GENERALES (SOLO VER vs EDITAR) */}
+          {activeTab === 'modulos' && (
             <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs divide-y divide-slate-100 overflow-hidden">
-              {filteredKeys.map((key) => {
-                const label = permissionLabels[key] || key;
-                const status = getPermissionStatus(key);
+              {SIMPLE_VIEW_EDIT_MODULES.map((mod) => {
+                const level = getModuleAccessLevel(mod.viewKey, mod.editKeys);
+                const isCustom =
+                  customOverrides[mod.viewKey] !== undefined ||
+                  mod.editKeys.some((ek) => customOverrides[ek] !== undefined);
 
                 return (
-                  <div 
-                    key={key}
-                    className="p-3.5 transition-colors hover:bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  <div
+                    key={mod.viewKey}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70"
                   >
-                    
-                    {/* INFO */}
-                    <div className="flex-1 min-w-0 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                        <span className="font-semibold text-xs text-slate-900">
-                          {label}
-                        </span>
-                        
-                        {status.effectiveValue ? (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600" />
-                            Permitido
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
-                            <XCircle className="w-2.5 h-2.5 mr-0.5 text-rose-600" />
-                            Bloqueado
-                          </span>
-                        )}
-
-                        {status.isOverridden && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
-                            <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600" />
-                            Excepción
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900">{mod.label}</span>
+                        {isCustom && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                            Personalizado
                           </span>
                         )}
                       </div>
-
-                      <div className="flex items-center gap-3 text-3xs text-slate-400 font-mono">
-                        <span>{key}</span>
-                        <span>&bull;</span>
-                        <span>Base ({user.role}): {status.baseValue ? 'Habilitado' : 'Desactivado'}</span>
-                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{mod.desc}</p>
                     </div>
 
-                    {/* 3-WAY SEGMENTED CONTROL ESTILO APPLE */}
-                    <div className="shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 flex items-center">
+                    <div className="flex items-center gap-1.5 shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60">
                       <button
                         type="button"
-                        onClick={() => handleSetOverride(key, 'role')}
-                        className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
-                          !status.isOverridden
-                            ? 'bg-white text-slate-900 shadow-2xs'
-                            : 'text-slate-500 hover:text-slate-800'
+                        onClick={() => setMultipleKeys([mod.viewKey, ...mod.editKeys], 'role')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                          !isCustom ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
                         }`}
-                        title="Heredar del rol base"
                       >
-                        <RotateCcw className="w-2.5 h-2.5 text-slate-400" />
                         Heredar
                       </button>
-
                       <button
                         type="button"
-                        onClick={() => handleSetOverride(key, 'allow')}
-                        className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
-                          status.isOverridden && status.overrideValue === true
-                            ? 'bg-emerald-600 text-white shadow-2xs'
-                            : 'text-emerald-700 hover:bg-emerald-50'
-                        }`}
-                        title="Permitir para este usuario"
-                      >
-                        <Check className="w-2.5 h-2.5" />
-                        Permitir
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleSetOverride(key, 'deny')}
-                        className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
-                          status.isOverridden && status.overrideValue === false
+                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                          isCustom && level === 'blocked'
                             ? 'bg-rose-600 text-white shadow-2xs'
                             : 'text-rose-700 hover:bg-rose-50'
                         }`}
-                        title="Bloquear para este usuario"
                       >
-                        <X className="w-2.5 h-2.5" />
-                        Denegar
+                        Bloqueado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                          isCustom && level === 'view'
+                            ? 'bg-amber-500 text-white shadow-2xs'
+                            : 'text-amber-700 hover:bg-amber-50'
+                        }`}
+                      >
+                        Solo Ver
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                          isCustom && level === 'edit'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-emerald-700 hover:bg-emerald-50'
+                        }`}
+                      >
+                        Ver y Editar
                       </button>
                     </div>
-
                   </div>
                 );
               })}
             </div>
           )}
+
+          {/* TAB 4: TODOS LOS PERMISOS (DETALLADO) */}
+          {activeTab === 'todos' && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar permiso..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                    />
+                  </div>
+
+                  <div className="bg-slate-100 p-0.5 rounded-lg flex items-center text-3xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('todos')}
+                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'todos' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'}`}
+                    >
+                      Todos ({summary.totalCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('permitidos')}
+                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'permitidos' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-slate-500'}`}
+                    >
+                      Permitidos ({summary.allowedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('denegados')}
+                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'denegados' ? 'bg-white text-rose-700 shadow-2xs' : 'text-slate-500'}`}
+                    >
+                      Bloqueados ({summary.deniedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('personalizados')}
+                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'personalizados' ? 'bg-white text-amber-800 shadow-2xs' : 'text-slate-500'}`}
+                    >
+                      Excepciones ({summary.overrideCount})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 overflow-x-auto text-3xs font-semibold pb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory('todas')}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${
+                      selectedCategory === 'todas' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    Todas las Áreas
+                  </button>
+                  {Object.entries(PERMISSION_CATEGORIES).map(([catKey, cat]) => {
+                    const IconComponent = cat.icon;
+                    return (
+                      <button
+                        key={catKey}
+                        type="button"
+                        onClick={() => setSelectedCategory(catKey)}
+                        className={`px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
+                          selectedCategory === catKey ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <IconComponent className="w-3 h-3" />
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {filteredKeys.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <HelpCircle className="h-8 w-8 mx-auto text-slate-300 mb-1.5" />
+                  <p className="font-semibold text-xs text-slate-700">Sin permisos encontrados</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs divide-y divide-slate-100 overflow-hidden">
+                  {filteredKeys.map((key) => {
+                    const label = permissionLabels[key] || key;
+                    const status = getPermissionStatus(key);
+
+                    return (
+                      <div
+                        key={key}
+                        className="p-3.5 transition-colors hover:bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex-1 min-w-0 pr-2">
+                          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                            <span className="font-semibold text-xs text-slate-900">{label}</span>
+                            {status.effectiveValue ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600" />
+                                Permitido
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
+                                <XCircle className="w-2.5 h-2.5 mr-0.5 text-rose-600" />
+                                Bloqueado
+                              </span>
+                            )}
+                            {status.isOverridden && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
+                                <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600" />
+                                Excepción
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-3xs text-slate-400 font-mono">
+                            <span>{key}</span>
+                            <span>&bull;</span>
+                            <span>Base ({user.role}): {status.baseValue ? 'Habilitado' : 'Desactivado'}</span>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(key, 'role')}
+                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                              !status.isOverridden ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            <RotateCcw className="w-2.5 h-2.5 text-slate-400" />
+                            Heredar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(key, 'allow')}
+                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                              status.isOverridden && status.overrideValue === true
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : 'text-emerald-700 hover:bg-emerald-50'
+                            }`}
+                          >
+                            <Check className="w-2.5 h-2.5" />
+                            Permitir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetOverride(key, 'deny')}
+                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                              status.isOverridden && status.overrideValue === false
+                                ? 'bg-rose-600 text-white shadow-2xs'
+                                : 'text-rose-700 hover:bg-rose-50'
+                            }`}
+                          >
+                            <X className="w-2.5 h-2.5" />
+                            Denegar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* FOOTER APPLE STYLE */}
+        {/* FOOTER */}
         <div className="px-6 py-3.5 bg-white border-t border-slate-200/80 flex items-center justify-between shrink-0">
           <div className="text-3xs text-slate-500">
-            {summary.overrideCount > 0 ? (
+            {summary.overrideCount > 0 || secConfig.mode !== 'default' ? (
               <span className="font-medium text-amber-800">
-                {summary.overrideCount} excepciones configuradas para este usuario
+                Configuración personalizada activa para este usuario
               </span>
             ) : (
               <span>Usa la configuración predeterminada de su rol</span>
@@ -551,7 +1455,6 @@ export default function PermisosIndividualesModal({
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

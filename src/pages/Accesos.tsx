@@ -74,6 +74,7 @@ export default function Accesos() {
   const [sqlCopied, setSqlCopied] = useState(false);
   const [sql21Copied, setSql21Copied] = useState(false);
   const [sql22Copied, setSql22Copied] = useState(false);
+  const [sql31Copied, setSql31Copied] = useState(false);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
                             loginShowSolicitar !== originalAjustes.loginSolicitar || 
@@ -660,7 +661,7 @@ export default function Accesos() {
 
   const handleSaveCustomPermissions = async (
     targetUserId: string, 
-    updatedCustomPermissions: Record<string, boolean>, 
+    updatedCustomPermissions: Record<string, any>, 
     updatedCanUploadFiles: boolean
   ) => {
     try {
@@ -1008,13 +1009,57 @@ END $$;`;
     setTimeout(() => setSql22Copied(false), 3000);
   };
 
+  const handleCopySqlMigration31 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 31: PERMISOS GRANULARES POR SECCIONAL, ALCANCES Y SOLICITUDES DE CARNET
+-- =========================================================================================
+ALTER TABLE IF EXISTS public.user_roles
+  ADD COLUMN IF NOT EXISTS custom_permissions JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS can_upload_files BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'activo';
+
+ALTER TABLE IF EXISTS public.solicitudes_carnet
+  ADD COLUMN IF NOT EXISTS seccional_id INTEGER REFERENCES public.seccionales(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS seccional_nombre TEXT,
+  ADD COLUMN IF NOT EXISTS observaciones TEXT,
+  ADD COLUMN IF NOT EXISTS solicitado_por TEXT,
+  ADD COLUMN IF NOT EXISTS solicitado_por_email TEXT,
+  ADD COLUMN IF NOT EXISTS revisado_por TEXT,
+  ADD COLUMN IF NOT EXISTS fecha_revision TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+DECLARE constraint_rec RECORD;
+BEGIN
+  FOR constraint_rec IN
+    SELECT conname FROM pg_constraint
+    WHERE conrelid = 'public.solicitudes_carnet'::regclass
+      AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%estado_solicitud%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.solicitudes_carnet DROP CONSTRAINT IF EXISTS %I', constraint_rec.conname);
+  END LOOP;
+END $$;
+
+ALTER TABLE public.solicitudes_carnet
+  ADD CONSTRAINT solicitudes_carnet_estado_check
+  CHECK (estado_solicitud IN ('Pendiente','En revisión','Observada','Aprobada','En impresión','Lista para entrega','Completada','Rechazada'));
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql31Copied(true);
+    setTimeout(() => setSql31Copied(false), 3000);
+  };
+
   const pendingSolicitudesCount = solicitudes.filter(s => s.estado === 'pendiente').length;
 
   const permissionLabels: Record<string, string> = {
     ver_todas_seccionales: 'Ver y Gestionar Todas las Seccionales (Nivel Nacional)',
     view_dashboard: 'Ver Dashboard',
     view_socorristas: 'Ver Lista de Socorristas',
-    edit_socorristas: 'Crear/Editar Socorristas',
+    add_socorristas: 'Agregar Nuevos Socorristas',
+    edit_socorristas: 'Editar / Modificar Socorristas',
     cambiar_estado_socorrista: 'Activar/Desactivar Socorristas',
     descargar_excel_socorristas: 'Descargar Excel de Socorristas',
     view_carnet: 'Generar Carnets',
@@ -1031,18 +1076,30 @@ END $$;`;
     edit_vehiculos: 'Crear/Editar Vehículos y Mantenimiento',
     view_solicitudes_compra: 'Ver Solicitudes de Compra y Mantenimiento',
     crear_solicitudes_compra: 'Crear Solicitudes de Compra y Mantenimiento',
-    aprobar_solicitudes_compra: 'Aprobar/Rechazar Solicitudes (Administración)',
+    edit_solicitudes_compra: 'Editar / Gestionar Solicitudes de Compra (Sin eliminar)',
+    aprobar_solicitudes_compra: 'Aprobar/Rechazar Solicitudes de Compra',
+    view_compra_historial: 'Ver Botón Historial en Compra y Mantenimiento',
+    view_compra_plantillas: 'Ver Botón Plantillas y Configuraciones en Compra',
     view_solicitudes_combustible: 'Ver Solicitudes de Combustible',
     crear_solicitudes_combustible: 'Crear Solicitudes de Combustible',
+    edit_solicitudes_combustible: 'Editar / Gestionar Solicitudes de Combustible (Sin eliminar)',
     aprobar_solicitudes_combustible: 'Aprobar/Rechazar Solicitudes de Combustible',
+    view_combustible_historial: 'Ver Botón Historial en Solicitud de Combustible',
+    view_combustible_plantillas: 'Ver Botón Plantillas y Configuraciones en Combustible',
+    view_solicitudes_carnet: 'Ver Solicitudes de Carnet en Gestión Logística',
+    edit_solicitudes_carnet: 'Editar / Gestionar Solicitudes de Carnet (Sin eliminar)',
     view_archivos: 'Ver y Descargar Archivos',
-    subir_archivos: 'Subir y Gestionar Archivos Institucionales',
+    subir_archivos: 'Subir Archivos Institucionales',
+    edit_archivos: 'Subir y Editar Archivos Institucionales',
     view_anuncios: 'Ver y Acceder a Anuncios Institucionales',
-    crear_anuncios: 'Crear, Publicar y Eliminar Anuncios',
+    crear_anuncios: 'Crear y Publicar Anuncios',
+    edit_anuncios: 'Crear y Editar Anuncios Institucionales',
     view_formularios: 'Ver Pestaña de Formularios y Respuestas',
-    crear_formularios: 'Crear y Gestionar Formularios (Fluent Forms)',
-    ver_todos_formularios: 'Ver Todos los Formularios (Ignorar restricción de ver solo creados por el usuario)',
-    view_meritos: 'Ver y Gestionar Méritos y Reconocimientos Institucionales',
+    crear_formularios: 'Crear Formularios (Fluent Forms)',
+    edit_formularios: 'Editar Formularios y Respuestas (Sin eliminar)',
+    ver_todos_formularios: 'Ver Todos los Formularios (Alcance Global)',
+    view_meritos: 'Ver Méritos y Reconocimientos Institucionales',
+    edit_meritos: 'Crear y Editar Méritos y Reconocimientos',
     personalizar_colores: 'Personalizar Colores del Sistema y Marca',
     view_config: 'Ajustes de Verificación',
     view_activity: 'Ver Registro de Actividad',
@@ -1257,7 +1314,11 @@ END $$;`;
 
                                 {/* Excepciones badge */}
                                 {(() => {
-                                  const customCount = Object.keys(user.custom_permissions || {}).length;
+                                  const cp = user.custom_permissions || {};
+                                  const boolCount = Object.keys(cp).filter(k => typeof cp[k] === 'boolean').length;
+                                  const hasScopes = Object.keys(cp._module_scopes || {}).length > 0;
+                                  const hasSecConfig = cp._seccionales_socorristas?.mode && cp._seccionales_socorristas.mode !== 'default';
+                                  const customCount = boolCount + (hasScopes ? 1 : 0) + (hasSecConfig ? 1 : 0);
                                   if (customCount > 0) {
                                     return (
                                       <span className="inline-flex items-center px-1.5 py-0.2 rounded text-3xs font-black bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
@@ -1753,6 +1814,26 @@ END $$;`;
                       {sql22Copied ? <><Check className="w-3 h-3 mr-1 text-indigo-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
                     </button>
                   </div>
+
+                  {/* Migración 31 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-teal-50 text-teal-700 text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        31
+                      </span>
+                      <div>
+                        <span className="text-xs font-semibold text-gray-900 block">Permisos por Seccional, Alcances y Solicitudes de Carnet</span>
+                        <span className="text-3xs text-gray-400">Columnas de seccional, observaciones y estados en solicitudes_carnet + permisos granulares</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration31}
+                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql31Copied ? <><Check className="w-3 h-3 mr-1 text-teal-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2017,6 +2098,7 @@ END $$;`;
           roles={roles}
           rolePermissions={rolePermissions}
           permissionLabels={permissionLabels}
+          seccionales={seccionales}
           onClose={() => setSelectedUserForPermisos(null)}
           onSave={handleSaveCustomPermissions}
         />

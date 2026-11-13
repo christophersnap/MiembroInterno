@@ -10,8 +10,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 
 export default function Meritos() {
-  const { role, userName } = useAuth();
-  const canManageMeritos = role === 'admin' || role === 'director';
+  const { role, userName, permissions } = useAuth();
+  const canManageMeritos = role === 'admin' || Boolean(permissions?.edit_meritos);
 
   const [meritos, setMeritos] = useState<Merito[]>([]);
   const [loading, setLoading] = useState(true);
