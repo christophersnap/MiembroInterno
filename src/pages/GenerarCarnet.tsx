@@ -1322,16 +1322,27 @@ export default function GenerarCarnet() {
         console.error('Error saving to historial_carnet:', historyError);
       }
       
-      if (selectedSocorrista.solicitud) {
+      try {
+        await supabase
+          .from('solicitudes_carnet')
+          .update({
+            estado_solicitud: 'Completada',
+            revisado_por: userName || 'Administración',
+            fecha_revision: new Date().toISOString(),
+          })
+          .eq('socorrista_id', selectedSocorrista.id)
+          .in('estado_solicitud', ['Pendiente', 'En revisión', 'Aprobada', 'En impresión', 'Lista para entrega']);
+      } catch (e) {
+        console.warn('Could not update solicitud', e);
+      }
+
+      if (selectedSocorrista.solicitud?.backup_key) {
         try {
           await supabase
-            .from('solicitudes_carnet')
-            .update({ estado_solicitud: 'Aprobada' })
-            .eq('socorrista_id', selectedSocorrista.id)
-            .eq('estado_solicitud', 'Pendiente');
-        } catch(e) {
-          console.warn('Could not update solicitud', e);
-        }
+            .from('configuracion')
+            .delete()
+            .eq('clave', selectedSocorrista.solicitud.backup_key);
+        } catch (e) {}
       }
 
       // Guardar todos los ajustes específicos para este socorrista (para recargarlos al volver a seleccionarlo)

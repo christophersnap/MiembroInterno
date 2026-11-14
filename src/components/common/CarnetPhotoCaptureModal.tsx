@@ -27,7 +27,7 @@ interface CarnetPhotoCaptureModalProps {
   initialStep?: 'guidelines' | 'camera';
 }
 
-const GUIDE_IMAGE_URL = '/assets/aistudio/Gu_a_para_Fotograf_a_de_Carnet_Cruz_Verde_6c51e8c9.png';
+const GUIDE_IMAGE_URL = '/assets/aistudio/Requisitos_para_fotograf_a_de_carnet__1__90eb9817.png';
 
 const PHOTO_RULES = [
   {

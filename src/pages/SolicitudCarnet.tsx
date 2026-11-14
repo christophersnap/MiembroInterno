@@ -1,20 +1,47 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Link, useNavigate } from 'react-router-dom';
-import { IdCard, CheckCircle, AlertCircle, Loader2, ArrowLeft, Send, Camera, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import {
+  IdCard,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  Send,
+  Camera,
+  RefreshCw,
+  ShieldCheck,
+  Clock,
+  Layers,
+  AlertTriangle,
+} from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
+import CarnetSubmitConfirmModal from '../components/common/CarnetSubmitConfirmModal';
+import {
+  CarnetRequestStatusInfo,
+  createCarnetSolicitudSafe,
+  fetchLatestCarnetRequestsMap,
+  formatCarnetRequestDate,
+  isBlockingCarnetState,
+} from '../utils/solicitudesCarnet';
 
 export default function SolicitudCarnet() {
   const { user, userName } = useAuth();
-  const navigate = useNavigate();
   const { logos } = useSettings();
 
   const [carnet, setCarnet] = useState('');
   const [socorrista, setSocorrista] = useState<any>(null);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [blockedRequestInfo, setBlockedRequestInfo] = useState<{
+    request: CarnetRequestStatusInfo;
+    nombreCompleto: string;
+    seccionalNombre: string;
+    carnet: string;
+  } | null>(null);
+  const [observedRequestInfo, setObservedRequestInfo] = useState<CarnetRequestStatusInfo | null>(null);
   
   const [tipoSolicitud, setTipoSolicitud] = useState('Nuevo');
   const [motivo, setMotivo] = useState('');
@@ -29,6 +56,8 @@ export default function SolicitudCarnet() {
   const [confirmTime, setConfirmTime] = useState(false);
 
   const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
   // Auto-format carnet: CVS-1234-AB
@@ -54,6 +83,8 @@ export default function SolicitudCarnet() {
 
     setLoadingSearch(true);
     setSearchError('');
+    setBlockedRequestInfo(null);
+    setObservedRequestInfo(null);
     setSocorrista(null);
 
     try {
@@ -62,6 +93,7 @@ export default function SolicitudCarnet() {
         .select(`
           id,
           carnet,
+          dui,
           primer_nombre,
           segundo_nombre,
           primer_apellido,
@@ -80,22 +112,29 @@ export default function SolicitudCarnet() {
       } else if (data.estado !== 'Activo') {
         setSearchError("Socorrista inactivo. Debe solicitar a su director el cambio de estado a Activo.");
       } else {
-        setSocorrista(data);
-        setFotoFile(null);
-        setFotoPreview(null);
-        setPhotoDecision(data.foto_url ? 'keep' : 'replace');
-        if (tipoSolicitud === 'Nuevo') {
-            // Check if already has a request pending
-            const { data: requestData } = await supabase
-              .from('solicitudes_carnet')
-              .select('id, estado_solicitud')
-              .eq('socorrista_id', data.id)
-              .in('estado_solicitud', ['Pendiente', 'En revisión', 'Aprobada', 'En impresión', 'Lista para entrega'])
-              .limit(1);
-            if (requestData && requestData.length > 0) {
-              setSearchError(`Ya existe una solicitud en proceso (${requestData[0].estado_solicitud}).`);
-              setSocorrista(null);
-            }
+        const reqMap = await fetchLatestCarnetRequestsMap([data.id]);
+        const latestReq = reqMap[data.id];
+        const secObj = Array.isArray(data.seccionales) ? data.seccionales[0] : data.seccionales;
+        const nombreCompleto = `${data.primer_nombre || ''} ${data.segundo_nombre || ''} ${data.primer_apellido || ''} ${data.segundo_apellido || ''}`
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (latestReq && isBlockingCarnetState(latestReq.estado_solicitud)) {
+          setBlockedRequestInfo({
+            request: latestReq,
+            nombreCompleto,
+            seccionalNombre: secObj?.nombre || 'N/A',
+            carnet: data.carnet || carnet,
+          });
+          setSocorrista(null);
+        } else {
+          setSocorrista(data);
+          setFotoFile(null);
+          setFotoPreview(null);
+          setPhotoDecision(data.foto_url ? 'keep' : 'replace');
+          if (latestReq && latestReq.estado_solicitud === 'Observada') {
+            setObservedRequestInfo(latestReq);
+          }
         }
       }
     } catch (err: any) {
@@ -111,26 +150,49 @@ export default function SolicitudCarnet() {
     setPhotoDecision('replace');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setSubmitError('');
+
     if (!socorrista) return;
     if (['Cambio', 'Reposición'].includes(tipoSolicitud) && !motivo) {
-      alert("Por favor seleccione el motivo de la reposición/cambio.");
+      setSubmitError("Por favor seleccione el motivo de la reposición/cambio.");
       return;
     }
     if (motivo === 'Otro' && !detallesMotivo) {
-      alert("Por favor detalle el motivo.");
+      setSubmitError("Por favor detalle el motivo.");
       return;
     }
     if (!confirmInformation || !confirmValidation || !confirmTime) {
-      alert("Debe confirmar todos los términos para continuar.");
+      setSubmitError("Debe confirmar todos los términos para continuar.");
       return;
     }
 
+    setShowSubmitConfirmModal(true);
+  };
+
+  const executeSubmit = async () => {
+    if (!socorrista) return;
+    setSubmitError('');
     setLoadingSubmit(true);
 
     try {
+      // Re-verificar que no haya entrado una solicitud activa (individual o en lote) entretanto
+      const latestMap = await fetchLatestCarnetRequestsMap([socorrista.id]);
+      const latestReq = latestMap[socorrista.id];
+      if (latestReq && isBlockingCarnetState(latestReq.estado_solicitud)) {
+        const secObjCheck = Array.isArray(socorrista.seccionales) ? socorrista.seccionales[0] : socorrista.seccionales;
+        setBlockedRequestInfo({
+          request: latestReq,
+          nombreCompleto: `${socorrista.primer_nombre} ${socorrista.primer_apellido}`.trim(),
+          seccionalNombre: secObjCheck?.nombre || 'N/A',
+          carnet: socorrista.carnet || carnet,
+        });
+        setSocorrista(null);
+        setLoadingSubmit(false);
+        return;
+      }
+
       let fotoUrl: string | null = null;
       if (photoDecision === 'keep' && socorrista.foto_url && !fotoFile) {
         fotoUrl = socorrista.foto_url;
@@ -160,61 +222,37 @@ export default function SolicitudCarnet() {
       const seccionalNombreResolved = secObj?.nombre || null;
       const nombreElemento = `${socorrista.primer_nombre} ${socorrista.primer_apellido}`.trim();
 
-      const corePayload = {
+      const saveRes = await createCarnetSolicitudSafe({
         socorrista_id: socorrista.id,
+        carnet: socorrista.carnet || carnet,
+        nombre_completo: nombreElemento,
+        seccional_id: seccionalIdResolved,
+        seccional_nombre: seccionalNombreResolved,
         tipo_solicitud: tipoSolicitud,
         motivo: ['Cambio', 'Reposición'].includes(tipoSolicitud) ? motivo : null,
         detalles_motivo: motivo === 'Otro' ? detallesMotivo : null,
         foto_url: fotoUrl,
-        estado_solicitud: 'Pendiente'
-      };
-
-      const extendedPayload = {
-        ...corePayload,
-        seccional_id: seccionalIdResolved,
-        seccional_nombre: seccionalNombreResolved,
         solicitado_por: userName || nombreElemento,
         solicitado_por_email: user?.email || null,
-      };
+        es_lote: false,
+      });
 
-      let { error: insertError } = await supabase
-        .from('solicitudes_carnet')
-        .insert([extendedPayload]);
-
-      // Retry without extended columns if migration 31 hasn't been executed yet
-      if (insertError) {
-        const retry = await supabase.from('solicitudes_carnet').insert([corePayload]);
-        insertError = retry.error;
-      }
-
-      if (insertError) {
-        console.warn("Aviso insertando en solicitudes_carnet (posible RLS):", insertError);
-        try {
-          await supabase.from('configuracion').insert({
-            clave: `solicitud_carnet_${socorrista.id}_${Date.now()}`,
-            valor: JSON.stringify({
-              ...extendedPayload,
-              carnet: socorrista.carnet || carnet,
-              nombre_completo: nombreElemento,
-              fecha_solicitud: new Date().toISOString()
-            })
-          });
-        } catch (backupErr) {
-          console.warn('Fallback configuracion solicitud:', backupErr);
-        }
+      if (!saveRes.ok) {
+        throw new Error(saveRes.error || 'No se pudo registrar la solicitud.');
       }
 
       window.dispatchEvent(new Event('solicitudes_updated'));
+      setShowSubmitConfirmModal(false);
       setSubmitSuccess(true);
-      window.scrollTo(0,0);
+      window.scrollTo(0, 0);
     } catch (error: any) {
       console.error("Error submitting request:", error);
-      // Si la foto se guardó o la tabla tiene RLS, no frustrar al socorrista si la foto ya fue preservada
+      setShowSubmitConfirmModal(false);
       if (fotoFile) {
         setSubmitSuccess(true);
-        window.scrollTo(0,0);
+        window.scrollTo(0, 0);
       } else {
-        alert("Ocurrió un error al enviar la solicitud: " + (error?.message || "Error de red"));
+        setSubmitError("Ocurrió un error al enviar la solicitud: " + (error?.message || "Error de red"));
       }
     } finally {
       setLoadingSubmit(false);
@@ -318,6 +356,45 @@ export default function SolicitudCarnet() {
                 </div>
               )}
 
+              {blockedRequestInfo && (
+                <div className="rounded-xl bg-amber-50 border border-amber-300 p-4 space-y-2.5">
+                  <div className="flex items-start gap-3">
+                    <Clock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-bold text-amber-950">
+                          Solicitud de Carnet Activa en Proceso
+                        </h3>
+                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-amber-900 border border-amber-300">
+                          {blockedRequestInfo.request.es_lote
+                            ? `Incluido en Lote${blockedRequestInfo.request.lote_id ? ` (${blockedRequestInfo.request.lote_id})` : ''}`
+                            : 'Solicitud Individual'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-900">
+                        <strong>{blockedRequestInfo.nombreCompleto}</strong> ({blockedRequestInfo.carnet}) — Seccional {blockedRequestInfo.seccionalNombre}
+                      </p>
+                      <div className="text-xs text-amber-900 bg-white/80 rounded-lg p-2.5 border border-amber-200 space-y-1">
+                        <p>
+                          <strong>Fecha de solicitud:</strong> {formatCarnetRequestDate(blockedRequestInfo.request.fecha_solicitud)}
+                        </p>
+                        <p>
+                          <strong>Estado actual:</strong> {blockedRequestInfo.request.estado_solicitud} ({blockedRequestInfo.request.tipo_solicitud})
+                        </p>
+                        {blockedRequestInfo.request.solicitado_por && (
+                          <p>
+                            <strong>Solicitado por:</strong> {blockedRequestInfo.request.solicitado_por}
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-xs font-medium text-amber-900 leading-relaxed pt-0.5">
+                        Ya existe una solicitud reciente para este elemento. Debe esperar hasta que un usuario autorizado complete o finalice el trámite, o registre una observación en la solicitud para poder enviar una nueva.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <button
                   type="submit"
@@ -330,12 +407,33 @@ export default function SolicitudCarnet() {
             </form>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
+              {observedRequestInfo && (
+                <div className="rounded-xl bg-orange-50 border border-orange-300 p-4 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-orange-950 space-y-1">
+                    <p className="font-bold">Tu solicitud anterior recibió una observación</p>
+                    <p>
+                      Fecha previa: <strong>{formatCarnetRequestDate(observedRequestInfo.fecha_solicitud)}</strong>
+                    </p>
+                    {observedRequestInfo.observaciones && (
+                      <p>
+                        <strong>Observación:</strong> {observedRequestInfo.observaciones}
+                      </p>
+                    )}
+                    <p className="text-orange-800">Puedes corregir tu fotografía o información y volver a enviarla.</p>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-6">
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="text-sm font-bold text-blue-900 border-b border-blue-200 pb-1 mb-2">Elemento Identificado</h3>
                     <p className="text-sm text-blue-800">
                       <strong>Nombre:</strong> {socorrista.primer_nombre} {socorrista.segundo_nombre} {socorrista.primer_apellido} {socorrista.segundo_apellido}
+                    </p>
+                    <p className="text-sm text-blue-800">
+                      <strong>DUI / Carnet Minoridad:</strong> {socorrista.dui || 'No registrado'}
                     </p>
                     <p className="text-sm text-blue-800">
                       <strong>Seccional:</strong> {socorrista.seccionales?.nombre || 'N/A'}
@@ -540,6 +638,13 @@ export default function SolicitudCarnet() {
                 </div>
               </div>
 
+              {submitError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs font-semibold text-red-800 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <span>{submitError}</span>
+                </div>
+              )}
+
               <div className="flex space-x-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
@@ -564,6 +669,30 @@ export default function SolicitudCarnet() {
             </form>
           )}
         </div>
+
+        {/* Botón de Solicitud en Lote: visible ÚNICAMENTE cuando el usuario ha iniciado sesión */}
+        {user && (
+          <div className="mt-5 bg-white rounded-xl border border-emerald-200 shadow-xs p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">¿Necesitas solicitar varios carnets a la vez?</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Usa la solicitud en lote para seleccionar elementos de tu(s) seccional(es) habilitada(s) desde una sola tabla.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/solicitud-carnet/lote"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition-colors shrink-0"
+            >
+              <Layers className="w-4 h-4" />
+              Solicitud de Carnet en Lote
+            </Link>
+          </div>
+        )}
       </div>
       </div>
 
@@ -572,6 +701,31 @@ export default function SolicitudCarnet() {
         onClose={() => setShowPhotoModal(false)}
         onPhotoReady={handlePhotoReady}
         title="Fotografía para Solicitud de Carnet"
+      />
+
+      <CarnetSubmitConfirmModal
+        isOpen={showSubmitConfirmModal}
+        onClose={() => setShowSubmitConfirmModal(false)}
+        onConfirmFinal={executeSubmit}
+        loading={loadingSubmit}
+        isBatch={false}
+        items={
+          socorrista
+            ? [
+                {
+                  id: socorrista.id,
+                  nombre: `${socorrista.primer_nombre || ''} ${socorrista.segundo_nombre || ''} ${socorrista.primer_apellido || ''} ${socorrista.segundo_apellido || ''}`
+                    .replace(/\s+/g, ' ')
+                    .trim(),
+                  carnet: socorrista.carnet || carnet,
+                  dui: socorrista.dui || null,
+                  fotoUrl:
+                    fotoPreview ||
+                    (photoDecision === 'keep' ? socorrista.foto_url : null),
+                },
+              ]
+            : []
+        }
       />
 
       {/* Footer */}

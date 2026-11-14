@@ -12,6 +12,7 @@ import Login from './pages/Login';
 
 import SolicitudCarnet from './pages/SolicitudCarnet';
 import VerificarCodigo from './pages/VerificarCodigo';
+const SolicitudCarnetLote = React.lazy(() => import('./pages/SolicitudCarnetLote'));
 
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Socorristas = React.lazy(() => import('./pages/Socorristas'));
@@ -92,6 +93,7 @@ export default function App() {
             <Route path="/verificar/:carnetId" element={<VerificacionCarnet />} />
             <Route path="/v/:carnetId" element={<VerificacionCarnet />} />
             <Route path="/solicitud-carnet" element={<SolicitudCarnet />} />
+            <Route path="/solicitud-carnet/lote" element={<ProtectedRoute><SolicitudCarnetLote /></ProtectedRoute>} />
             <Route path="/solicitar-carnet" element={<Navigate to="/solicitud-carnet" replace />} />
             <Route path="/f/:slug" element={<PublicFormulario />} />
             <Route path="/formularios/:slug/responder" element={<PublicFormulario />} />

@@ -43,6 +43,8 @@ export interface SolicitudCarnetRecord {
   fecha_revision: string | null;
   estado_solicitud: string;
   fecha_solicitud: string;
+  lote_id?: string | null;
+  es_lote?: boolean;
   source: 'db' | 'config';
   config_clave?: string;
 }
@@ -55,6 +57,7 @@ const ESTADOS_CARNET = [
   'En impresión',
   'Lista para entrega',
   'Completada',
+  'Finalizada',
   'Rechazada',
 ];
 
@@ -201,6 +204,8 @@ export default function SolicitudesCarnetTab() {
               fecha_revision: row.fecha_revision || null,
               estado_solicitud: row.estado_solicitud || 'Pendiente',
               fecha_solicitud: row.fecha_solicitud || row.created_at || new Date().toISOString(),
+              lote_id: row.lote_id || null,
+              es_lote: Boolean(row.es_lote || row.lote_id),
               source: 'db',
             };
           });
@@ -245,6 +250,8 @@ export default function SolicitudesCarnetTab() {
                   fecha_revision: parsed.fecha_revision || null,
                   estado_solicitud: parsed.estado_solicitud || 'Pendiente',
                   fecha_solicitud: parsed.fecha_solicitud || new Date().toISOString(),
+                  lote_id: parsed.lote_id || null,
+                  es_lote: Boolean(parsed.es_lote || parsed.lote_id),
                   source: 'config' as const,
                   config_clave: r.clave,
                 };
@@ -356,7 +363,7 @@ export default function SolicitudesCarnetTab() {
       total: filteredRecords.length,
       pendientes: filteredRecords.filter((r) => r.estado_solicitud === 'Pendiente' || r.estado_solicitud === 'En revisión').length,
       observadas: filteredRecords.filter((r) => r.estado_solicitud === 'Observada').length,
-      completadas: filteredRecords.filter((r) => r.estado_solicitud === 'Completada' || r.estado_solicitud === 'Aprobada').length,
+      completadas: filteredRecords.filter((r) => r.estado_solicitud === 'Completada' || r.estado_solicitud === 'Finalizada' || r.estado_solicitud === 'Aprobada').length,
     };
   }, [filteredRecords]);
 
@@ -474,6 +481,7 @@ export default function SolicitudesCarnetTab() {
         Socorrista: r.socorrista_nombre,
         Seccional: r.seccional_nombre,
         'Tipo Solicitud': r.tipo_solicitud,
+        Origen: r.es_lote ? `Lote (${r.lote_id || 'LOTE'})` : 'Individual',
         Motivo: r.motivo || (r.tipo_solicitud === 'Nuevo' ? 'Emisión inicial' : 'N/A'),
         'Detalle Motivo': r.detalles_motivo || '',
         Estado: r.estado_solicitud,
@@ -529,6 +537,7 @@ export default function SolicitudesCarnetTab() {
       case 'Lista para entrega':
         return 'bg-indigo-50 text-indigo-800 border-indigo-200';
       case 'Completada':
+      case 'Finalizada':
         return 'bg-emerald-50 text-emerald-800 border-emerald-200';
       case 'Rechazada':
         return 'bg-rose-50 text-rose-800 border-rose-200';
@@ -827,7 +836,14 @@ export default function SolicitudesCarnetTab() {
                     </td>
 
                     <td className="px-4 py-3.5">
-                      <span className="text-xs font-semibold text-slate-900 block">{rec.tipo_solicitud}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-semibold text-slate-900">{rec.tipo_solicitud}</span>
+                        {rec.es_lote && (
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                            Lote{rec.lote_id ? ` · ${rec.lote_id}` : ''}
+                          </span>
+                        )}
+                      </div>
                       {rec.motivo && <span className="text-[11px] text-slate-500 block">{rec.motivo}</span>}
                       {rec.observaciones && (
                         <span className="text-[11px] text-orange-700 inline-flex items-center gap-1 mt-0.5 max-w-xs truncate">
