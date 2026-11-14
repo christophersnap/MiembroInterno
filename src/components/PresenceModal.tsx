@@ -105,7 +105,7 @@ export default function PresenceModal({
             <div className="flex items-center justify-between mb-2 px-1">
               <span className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center">
                 <Activity className="w-3.5 h-3.5 mr-1.5 text-primary" />
-                Sesiones Activas Detectadas ({activeUsers.length})
+                Usuarios Conectados ({activeUsers.length})
               </span>
               {onRefresh && (
                 <button
@@ -120,8 +120,8 @@ export default function PresenceModal({
 
             <div className="bg-white rounded-2xl border border-gray-200/80 divide-y divide-gray-100 max-h-48 overflow-y-auto">
               {activeUsers.length > 0 ? (
-                activeUsers.map((u, i) => (
-                  <div key={`${u.id}-${i}`} className="px-4 py-2.5 flex items-center justify-between hover:bg-gray-50/80 transition-colors">
+                activeUsers.map((u) => (
+                  <div key={u.userId || u.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-gray-50/80 transition-colors">
                     <div className="flex items-center space-x-3 truncate">
                       <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center flex-shrink-0">
                         {u.name.charAt(0).toUpperCase()}
@@ -153,7 +153,7 @@ export default function PresenceModal({
         <div className="px-6 py-3.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between">
           <span className="text-[11px] text-gray-400 font-medium flex items-center">
             <Globe className="w-3 h-3 mr-1" />
-            Sincronización en vivo por dispositivo
+            Sincronización global en vivo por usuario
           </span>
           <button
             onClick={onClose}

@@ -668,17 +668,26 @@ async function startServer() {
 
   app.post('/api/presence/ping', (req, res) => {
     try {
-      const { id = `anon_${Date.now()}`, userId, name = 'Usuario', role = 'usuario', device, path = '/' } = req.body || {};
+      const { id, userId, name = 'Usuario', role = 'usuario', device, path = '/' } = req.body || {};
+      const rawKey = String(userId || id || '').trim();
+      const canonicalId = rawKey.includes('::') ? rawKey.split('::')[0].trim() : rawKey;
       const now = Date.now();
-      activeUsersMap.set(id, {
-        id,
-        userId,
-        name,
-        role,
-        device,
-        lastSeen: now,
-        path
-      });
+
+      if (canonicalId && !canonicalId.startsWith('dev_') && !canonicalId.startsWith('anon_')) {
+        const existing = activeUsersMap.get(canonicalId);
+        const mergedDevice = existing?.device && device && existing.device !== device
+          ? Array.from(new Set([...existing.device.split(',').map((d) => d.trim()), device])).filter(Boolean).join(', ')
+          : (device || existing?.device);
+        activeUsersMap.set(canonicalId, {
+          id: canonicalId,
+          userId: canonicalId,
+          name: (name && name !== 'Personal Cruz Verde') ? name : (existing?.name || name),
+          role: role || existing?.role || 'usuario',
+          device: mergedDevice,
+          lastSeen: now,
+          path
+        });
+      }
 
       const activeThreshold = now - 65000;
       const activeList: ActiveUserSession[] = [];
