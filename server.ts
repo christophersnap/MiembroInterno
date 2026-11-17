@@ -587,7 +587,7 @@ async function startServer() {
   // --- Enviar Correo de Notificación (Aprobación de usuario, solicitudes con PDF adjunto, etc.) ---
   app.post('/api/send-email', async (req, res) => {
     try {
-      const { remitente, destinatario, cc, replyTo, asunto, cuerpoHtml, tipo, adjuntos, nombreArchivoPdf } = req.body;
+      const { remitente, destinatario, cc, replyTo, asunto, cuerpoHtml, cuerpoTexto, soloTextoPlano, tipo, adjuntos, nombreArchivoPdf } = req.body;
       const countAdjuntos = Array.isArray(adjuntos) ? adjuntos.length : (nombreArchivoPdf ? 1 : 0);
       
       const config = getMailConfig();
@@ -609,14 +609,20 @@ async function startServer() {
         try {
           const fromAddress = remitente || config.from;
           const replyToAddress = replyTo || config.replyTo;
-          
+          const isPlainOnly = soloTextoPlano === true || (!cuerpoHtml && !!cuerpoTexto);
+          const plainTextContent = typeof cuerpoTexto === 'string' && cuerpoTexto.trim()
+            ? cuerpoTexto
+            : String(cuerpoHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
           const mailOptions: any = {
             from: fromAddress,
             to: destinatario,
             replyTo: replyToAddress,
             cc: cc || undefined,
             subject: asunto,
-            html: cuerpoHtml
+            ...(isPlainOnly
+              ? { text: plainTextContent }
+              : { html: cuerpoHtml, ...(plainTextContent ? { text: plainTextContent } : {}) })
           };
 
           if (Array.isArray(adjuntos) && adjuntos.length > 0) {

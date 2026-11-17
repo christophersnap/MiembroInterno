@@ -26,7 +26,9 @@ export interface EmailAttachment {
 export interface SendEmailPayload {
   destinatario: string;
   asunto: string;
-  cuerpoHtml: string;
+  cuerpoHtml?: string;
+  cuerpoTexto?: string;
+  soloTextoPlano?: boolean;
   remitente?: string;
   replyTo?: string;
   cc?: string;

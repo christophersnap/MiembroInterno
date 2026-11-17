@@ -26,6 +26,7 @@ import {
   Eye,
   Edit3,
   Plus,
+  Copy,
 } from 'lucide-react';
 import {
   ModuleScope,
@@ -37,6 +38,7 @@ import {
 
 interface PermisosIndividualesModalProps {
   user: any;
+  allUsers?: any[];
   roles: string[];
   rolePermissions: any[];
   permissionLabels: Record<string, string>;
@@ -45,7 +47,8 @@ interface PermisosIndividualesModalProps {
   onSave: (
     userId: string,
     updatedCustomPermissions: Record<string, any>,
-    updatedCanUploadFiles: boolean
+    updatedCanUploadFiles: boolean,
+    updatedRole?: string
   ) => Promise<void>;
 }
 
@@ -259,17 +262,21 @@ const SIMPLE_VIEW_EDIT_MODULES: {
 
 export default function PermisosIndividualesModal({
   user,
+  allUsers = [],
+  roles,
   rolePermissions,
   permissionLabels,
   seccionales,
   onClose,
   onSave,
 }: PermisosIndividualesModalProps) {
-  const baseRolePermissions = useMemo(() => {
-    const found = rolePermissions.find((rp) => rp.role === user.role);
+  const [selectedRole, setSelectedRole] = useState<string>(user.role || 'socorrista');
+
+  const getRolePermsMap = (roleName: string): Record<string, boolean> => {
+    const found = rolePermissions.find((rp) => rp.role === roleName);
     if (found && found.permissions) return found.permissions;
 
-    if (user.role === 'admin') {
+    if (roleName === 'admin') {
       const allTrue: Record<string, boolean> = {};
       Object.keys(permissionLabels).forEach((k) => (allTrue[k] = true));
       return allTrue;
@@ -299,7 +306,12 @@ export default function PermisosIndividualesModal({
       view_formularios: true,
       view_soporte: true,
     };
-  }, [user.role, rolePermissions, permissionLabels]);
+  };
+
+  const baseRolePermissions = useMemo(
+    () => getRolePermsMap(selectedRole),
+    [selectedRole, rolePermissions, permissionLabels]
+  );
 
   const userDefaultSeccionalId = user?.socorristas?.seccional_id ? Number(user.socorristas.seccional_id) : null;
 
@@ -387,6 +399,128 @@ export default function PermisosIndividualesModal({
   const [activeFilter, setActiveFilter] = useState<'todos' | 'permitidos' | 'denegados' | 'personalizados'>('todos');
   const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Copiar accesos desde otro usuario
+  const [copySourceUserId, setCopySourceUserId] = useState<string>('');
+  const [copyIncludeBaseRole, setCopyIncludeBaseRole] = useState<boolean>(true);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+
+  const otherUsers = useMemo(
+    () => (allUsers || []).filter((u) => u && u.id !== user.id),
+    [allUsers, user.id]
+  );
+
+  const getOtherUserLabel = (u: any) => {
+    const name =
+      String(u.nombre_usuario || u.nombre_completo || '').trim() ||
+      (u.socorristas ? `${u.socorristas.primer_nombre} ${u.socorristas.primer_apellido}` : '') ||
+      u.email ||
+      u.id;
+    return `${name} (${u.email || 'sin correo'}) — Rol: ${u.role}`;
+  };
+
+  const handleCopyFromUser = () => {
+    if (!copySourceUserId) return;
+    const source = otherUsers.find((u) => u.id === copySourceUserId);
+    if (!source) return;
+
+    const srcCp = source.custom_permissions || {};
+    const srcRole = source.role || 'socorrista';
+    const srcRolePerms = getRolePermsMap(srcRole);
+    const targetRoleForOverrides = copyIncludeBaseRole ? srcRole : selectedRole;
+    const targetBasePerms = getRolePermsMap(targetRoleForOverrides);
+
+    if (copyIncludeBaseRole) {
+      setSelectedRole(srcRole);
+    }
+
+    // Construir overrides booleanos
+    const nextOverrides: Record<string, boolean> = {};
+    if (copyIncludeBaseRole) {
+      Object.keys(srcCp).forEach((k) => {
+        if (typeof srcCp[k] === 'boolean') {
+          nextOverrides[k] = srcCp[k];
+        }
+      });
+      if (source.can_upload_files && nextOverrides.subir_archivos === undefined) {
+        nextOverrides.subir_archivos = true;
+      }
+    } else {
+      // Materializar cualquier permiso efectivo del usuario origen que difiera del rol destino actual
+      Object.keys(permissionLabels).forEach((k) => {
+        const srcEffective =
+          typeof srcCp[k] === 'boolean' ? Boolean(srcCp[k]) : Boolean(srcRolePerms[k]);
+        const targetBase = Boolean(targetBasePerms[k]);
+        if (srcEffective !== targetBase) {
+          nextOverrides[k] = srcEffective;
+        }
+      });
+      if (source.can_upload_files && !targetBasePerms.subir_archivos) {
+        nextOverrides.subir_archivos = true;
+      }
+    }
+    setCustomOverrides(nextOverrides);
+
+    // Copiar alcances de módulos
+    const srcScopes = srcCp._module_scopes || {};
+    setModuleScopes({
+      formularios: srcScopes.formularios || (srcRolePerms.ver_todos_formularios ? 'global' : 'usuario'),
+      solicitudes_combustible: srcScopes.solicitudes_combustible || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_compra: srcScopes.solicitudes_compra || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_carnet: srcScopes.solicitudes_carnet || (srcRolePerms.ver_todas_seccionales ? 'global' : 'seccional'),
+    });
+
+    // Copiar seccionales por módulo
+    const srcModSeccs = srcCp._module_seccionales || {};
+    const parseArr = (val: any) =>
+      Array.isArray(val) ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0))) : [];
+    setModuleSeccionales({
+      formularios: parseArr(srcModSeccs.formularios),
+      solicitudes_combustible: parseArr(srcModSeccs.solicitudes_combustible),
+      solicitudes_compra: parseArr(srcModSeccs.solicitudes_compra),
+      solicitudes_carnet: parseArr(srcModSeccs.solicitudes_carnet),
+    });
+
+    // Copiar alcances de creación
+    const srcCreate = srcCp._create_scopes || {};
+    const resolveCreate = (k: CreateSolicitudModuleKey): CreateSolicitudScope => {
+      if (srcCreate[k] === 'global' || srcCreate[k] === 'seccional') return srcCreate[k];
+      if (srcScopes[k] === 'global' || srcRolePerms.ver_todas_seccionales) return 'global';
+      return 'seccional';
+    };
+    setCreateScopes({
+      solicitudes_combustible: resolveCreate('solicitudes_combustible'),
+      solicitudes_compra: resolveCreate('solicitudes_compra'),
+    });
+
+    const srcCreateSeccs = srcCp._create_seccionales || {};
+    const parseSingleSec = (k: CreateSolicitudModuleKey): number | null => {
+      const parsed = Number(srcCreateSeccs[k]);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+      return userDefaultSeccionalId ?? seccionales[0]?.id ?? null;
+    };
+    setCreateSeccionales({
+      solicitudes_combustible: parseSingleSec('solicitudes_combustible'),
+      solicitudes_compra: parseSingleSec('solicitudes_compra'),
+    });
+
+    // Copiar permisos por seccional (Socorristas)
+    const srcSecCfg = srcCp._seccionales_socorristas;
+    if (srcSecCfg && (srcSecCfg.mode === 'all' || srcSecCfg.mode === 'custom' || srcSecCfg.mode === 'default')) {
+      setSecConfig({
+        mode: srcSecCfg.mode,
+        seccionales: srcSecCfg.seccionales ? JSON.parse(JSON.stringify(srcSecCfg.seccionales)) : {},
+      });
+    } else {
+      setSecConfig({ mode: 'default', seccionales: {} });
+    }
+
+    const srcName =
+      String(source.nombre_usuario || source.nombre_completo || '').trim() ||
+      (source.socorristas ? `${source.socorristas.primer_nombre} ${source.socorristas.primer_apellido}` : '') ||
+      source.email;
+    setCopyNotice(`Configuración de acceso copiada de "${srcName}". Ya puedes modificar cualquier permiso abajo antes de guardar.`);
+  };
 
   const getPermissionStatus = (key: string) => {
     const isOverridden = customOverrides[key] !== undefined && customOverrides[key] !== null;
@@ -631,7 +765,12 @@ export default function PermisosIndividualesModal({
         _seccionales_socorristas: secConfig,
       };
 
-      await onSave(user.id, finalPayload, canUploadFiles);
+      await onSave(
+        user.id,
+        finalPayload,
+        canUploadFiles,
+        selectedRole !== user.role ? selectedRole : undefined
+      );
       onClose();
     } catch (err) {
       console.error('Error saving user permissions:', err);
@@ -640,29 +779,40 @@ export default function PermisosIndividualesModal({
     }
   };
 
-  const nombreUsuario = user.socorristas
-    ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}`
-    : user.email || 'Usuario';
+  const nombreUsuario =
+    String(user.nombre_usuario || user.nombre_completo || '').trim() ||
+    (user.socorristas
+      ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}`
+      : user.email || 'Usuario');
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/45 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
       <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150">
         {/* HEADER */}
-        <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-3.5">
-            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center border border-slate-200/60 shadow-2xs">
+        <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center space-x-3.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center border border-slate-200/60 shadow-2xs shrink-0">
               <Sliders className="w-4 h-4 text-emerald-600" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold text-gray-900 tracking-tight">
                   Permisos Individuales y Alcance por Seccional
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-3xs font-medium bg-slate-100 text-slate-700 border border-slate-200/60 uppercase">
-                  Rol: {user.role}
-                </span>
+                <select
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  className="px-2 py-0.5 rounded-lg text-3xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 uppercase cursor-pointer outline-none focus:border-emerald-500"
+                  title="Rol base asignado al usuario"
+                >
+                  {Array.from(new Set([...(roles || []), selectedRole])).map((r) => (
+                    <option key={r} value={r}>
+                      Rol: {r}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <p className="text-2xs text-gray-400">
+              <p className="text-2xs text-gray-400 truncate">
                 {nombreUsuario} &bull; <span className="font-mono text-gray-500">{user.email}</span>
               </p>
             </div>
@@ -670,11 +820,61 @@ export default function PermisosIndividualesModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* COPIAR CONFIGURACIÓN DE OTRO USUARIO */}
+        {otherUsers.length > 0 && (
+          <div className="px-6 py-2.5 bg-emerald-50/60 border-b border-emerald-200/60 shrink-0 space-y-1.5">
+            <div className="flex flex-col md:flex-row md:items-center gap-2 justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-950 shrink-0">
+                <Copy className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Copiar configuración de otro usuario:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 flex-1 md:justify-end">
+                <select
+                  value={copySourceUserId}
+                  onChange={(e) => setCopySourceUserId(e.target.value)}
+                  className="flex-1 min-w-[220px] max-w-md bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                >
+                  <option value="">-- Seleccionar usuario origen --</option>
+                  {otherUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {getOtherUserLabel(u)}
+                    </option>
+                  ))}
+                </select>
+                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={copyIncludeBaseRole}
+                    onChange={(e) => setCopyIncludeBaseRole(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                  />
+                  <span>Incluir su rol base</span>
+                </label>
+                <button
+                  type="button"
+                  disabled={!copySourceUserId}
+                  onClick={handleCopyFromUser}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-lg disabled:opacity-40 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1.5"
+                >
+                  <Copy className="w-3 h-3" />
+                  Copiar aquí
+                </button>
+              </div>
+            </div>
+            {copyNotice && (
+              <p className="text-[11px] font-medium text-emerald-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>{copyNotice}</span>
+              </p>
+            )}
+          </div>
+        )}
 
         {/* QUICK STATS + TOP NAVIGATION TABS */}
         <div className="px-6 py-3 bg-slate-50/80 border-b border-slate-200/70 space-y-3 shrink-0">

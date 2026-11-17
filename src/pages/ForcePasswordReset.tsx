@@ -2,9 +2,12 @@ import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Shield, Lock } from 'lucide-react';
+import { sendEmailNotification } from '../lib/api';
+import { generarTextoCorreoCambioPassword } from '../lib/emailNotification';
+import { getOfficialLoginUrl } from '../utils/appUrl';
 
 export default function ForcePasswordReset() {
-  const { user, signOut } = useAuth();
+  const { user, userName, signOut } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -46,6 +49,43 @@ export default function ForcePasswordReset() {
           .eq('id', user.id);
           
          if (fallbackError && roleError) throw new Error("No se pudo actualizar el estado de reset. Contacte a un administrador. Error: " + roleError.message);
+
+        // Enviar confirmación en texto plano usando el correo de notificaciones
+        if (user.email) {
+          try {
+            let remitenteNombre = 'Cruz Verde Salvadoreña - Sistema Interno';
+            let remitenteCorreo = 'notificaciones@cruzverdesv.org';
+            const { data: cfgRows } = await supabase
+              .from('configuracion')
+              .select('clave, valor')
+              .in('clave', ['email_remitente_nombre', 'email_remitente_correo', 'email_remitente_global']);
+            if (cfgRows) {
+              cfgRows.forEach((r: any) => {
+                if (r.clave === 'email_remitente_nombre' && r.valor) remitenteNombre = r.valor;
+                if ((r.clave === 'email_remitente_correo' || r.clave === 'email_remitente_global') && r.valor) remitenteCorreo = r.valor;
+              });
+            }
+
+            const textoConfirmacion = generarTextoCorreoCambioPassword({
+              remitenteNombre,
+              remitenteCorreo,
+              destinatarioCorreo: user.email,
+              destinatarioNombre: userName || user.email.split('@')[0],
+              loginUrl: getOfficialLoginUrl(),
+            });
+
+            await sendEmailNotification({
+              remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+              destinatario: user.email,
+              asunto: 'Confirmacion de cambio de contrasena - Cruz Verde Salvadorena',
+              cuerpoTexto: textoConfirmacion,
+              soloTextoPlano: true,
+              tipo: 'password_changed'
+            });
+          } catch (mailErr) {
+            console.warn('No se pudo enviar correo de confirmación de cambio de contraseña:', mailErr);
+          }
+        }
       }
 
       setSuccess(true);

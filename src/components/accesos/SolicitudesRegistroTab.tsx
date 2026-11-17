@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
-import { generarHtmlCorreoAprobacion } from '../../lib/emailNotification';
+import { generarTextoCorreoAprobacion } from '../../lib/emailNotification';
 import { sendEmailNotification, getApiUrl } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
 
@@ -126,7 +126,7 @@ export default function SolicitudesRegistroTab({
         }
       }
 
-      // 3. Activar usuario y asignar rol en public.user_roles
+      // 3. Activar usuario y asignar rol + nombre en public.user_roles
       if (targetAuthId) {
         const { error: roleUpdateError } = await supabase
           .from('user_roles')
@@ -135,6 +135,8 @@ export default function SolicitudesRegistroTab({
             role: assignedRole,
             activo: true,
             estado: 'activo',
+            nombre_completo: solNombre || null,
+            nombre_usuario: solNombre || null,
             seccional_id: assignedSeccionalId ? Number(assignedSeccionalId) : null,
           });
 
@@ -145,8 +147,13 @@ export default function SolicitudesRegistroTab({
             .upsert({
               id: targetAuthId,
               role: assignedRole,
+              nombre_completo: solNombre || null,
             });
         }
+
+        try {
+          await supabase.rpc('admin_confirm_user_email', { target_user_id: targetAuthId });
+        } catch (confirmErr) {}
 
         // Si estaba en la lista de inactivos de configuracion, removerlo
         try {
@@ -217,14 +224,14 @@ export default function SolicitudesRegistroTab({
         console.warn('Aviso sincronizando aprobación con backend SQLite:', beErr);
       }
 
-      // 7. Enviar correo al usuario si está seleccionado
+      // 7. Enviar correo en texto plano al usuario si está seleccionado
       if (sendNotificationEmail) {
-        const emailHtml = generarHtmlCorreoAprobacion({
+        const emailTexto = generarTextoCorreoAprobacion({
           remitenteNombre,
           remitenteCorreo,
           destinatarioCorreo: solEmail,
           destinatarioNombre: solNombre,
-          asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
+          asunto: 'Cuenta aprobada - Cruz Verde Salvadorena',
           seccionalNombre,
           rolAsignado: assignedRole,
           loginUrl: getOfficialLoginUrl(),
@@ -234,8 +241,9 @@ export default function SolicitudesRegistroTab({
           await sendEmailNotification({
             remitente: `${remitenteNombre} <${remitenteCorreo}>`,
             destinatario: solEmail,
-            asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
-            cuerpoHtml: emailHtml,
+            asunto: 'Cuenta aprobada - Cruz Verde Salvadorena',
+            cuerpoTexto: emailTexto,
+            soloTextoPlano: true,
             tipo: 'aprobacion_cuenta'
           });
         } catch (mailErr) {
@@ -789,21 +797,23 @@ export default function SolicitudesRegistroTab({
             </div>
 
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-100/70">
-              <div 
-                className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden"
-                dangerouslySetInnerHTML={{
-                  __html: generarHtmlCorreoAprobacion({
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80">
+                <p className="text-3xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                  Formato de envío: Texto plano (sin interfaz HTML)
+                </p>
+                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-800 leading-relaxed">
+                  {generarTextoCorreoAprobacion({
                     remitenteNombre,
                     remitenteCorreo,
                     destinatarioCorreo: selectedSolicitud.email,
                     destinatarioNombre: selectedSolicitud.nombre_completo,
-                    asunto: '¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña',
+                    asunto: 'Cuenta aprobada - Cruz Verde Salvadorena',
                     seccionalNombre: seccionales.find(s => s.id === Number(assignedSeccionalId))?.nombre || 'Cruz Verde Salvadoreña',
                     rolAsignado: assignedRole,
                     loginUrl: getOfficialLoginUrl()
-                  })
-                }}
-              />
+                  })}
+                </pre>
+              </div>
             </div>
 
             <div className="px-6 py-3.5 border-t border-slate-100 flex justify-end bg-white">

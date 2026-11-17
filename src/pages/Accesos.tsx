@@ -3,7 +3,7 @@ import {
   Shield, Users, Settings, Save, Check, X, UserPlus, Trash2, Edit, Globe, 
   MapPin, Building2, Fuel, FileText, Info, KeyRound, Key, Clock, CheckCircle2, 
   XCircle, AlertTriangle, Eye, Send, Mail, UserCheck, UserX, Copy, RefreshCw, Megaphone,
-  Sliders, Sparkles, Database
+  Sliders, Sparkles, Database, Search, Filter, Pencil
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -12,9 +12,12 @@ import { useSettings } from '../contexts/SettingsContext';
 import SolicitudesRegistroTab from '../components/accesos/SolicitudesRegistroTab';
 import ResetPasswordModal from '../components/accesos/ResetPasswordModal';
 import PermisosIndividualesModal from '../components/accesos/PermisosIndividualesModal';
-import { generarHtmlCorreoAprobacion } from '../lib/emailNotification';
+import {
+  generarTextoCorreoAprobacion,
+  generarTextoCorreoCreacionUsuario,
+} from '../lib/emailNotification';
 import { getOfficialLoginUrl } from '../utils/appUrl';
-import { getApiUrl } from '../lib/api';
+import { getApiUrl, sendEmailNotification } from '../lib/api';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -26,6 +29,10 @@ export default function Accesos() {
   const [roles, setRoles] = useState<any[]>([]);
   const [seccionales, setSeccionales] = useState<any[]>([]);
   const [inactiveUserIds, setInactiveUserIds] = useState<string[]>([]);
+  const [roleFilter, setRoleFilter] = useState<string>('todos');
+  const [userSearch, setUserSearch] = useState<string>('');
+  const [editingUserNameId, setEditingUserNameId] = useState<string | null>(null);
+  const [editingUserNameValue, setEditingUserNameValue] = useState<string>('');
   
   // Solicitudes state
   const [solicitudes, setSolicitudes] = useState<any[]>([]);
@@ -41,10 +48,15 @@ export default function Accesos() {
   const [newUserType, setNewUserType] = useState<'cruz_verde' | 'externo' | null>(null);
   const [newUserCarnet, setNewUserCarnet] = useState('');
   const [socorristaData, setSocorristaData] = useState<any>(null);
+  const [newUserNombre, setNewUserNombre] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [passwordOption, setPasswordOption] = useState<'manual' | 'generated'>('manual');
   const [newUserRole, setNewUserRole] = useState('socorrista');
+  const [copyFromUserId, setCopyFromUserId] = useState('');
+  const [openPermisosAfterCreate, setOpenPermisosAfterCreate] = useState(false);
+  const [newUserSendPlainEmail, setNewUserSendPlainEmail] = useState(true);
+  const [newUserAutoConfirmEmail, setNewUserAutoConfirmEmail] = useState(true);
   const [creatingUser, setCreatingUser] = useState(false);
   const [newUserRequiresPasswordReset, setNewUserRequiresPasswordReset] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -75,6 +87,7 @@ export default function Accesos() {
   const [sql21Copied, setSql21Copied] = useState(false);
   const [sql22Copied, setSql22Copied] = useState(false);
   const [sql31Copied, setSql31Copied] = useState(false);
+  const [sql42Copied, setSql42Copied] = useState(false);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
                             loginShowSolicitar !== originalAjustes.loginSolicitar || 
@@ -101,6 +114,8 @@ export default function Accesos() {
           id,
           role,
           socorrista_id,
+          nombre_completo,
+          nombre_usuario,
           activo,
           estado,
           can_upload_files,
@@ -116,7 +131,7 @@ export default function Accesos() {
         `);
 
       if (resCustom.error) {
-        // Fallback without custom_permissions column
+        // Fallback without custom_permissions or nombre_usuario column
         const resFallback = await supabase
           .from('user_roles')
           .select(`
@@ -151,7 +166,19 @@ export default function Accesos() {
       if (!viewError && viewData) {
         mergedUsers = mergedUsers.map(u => {
           const viewUser = viewData.find(v => v.id === u.id);
-          return { ...u, email: viewUser?.email || 'Email no disponible' };
+          const viewName =
+            String(viewUser?.nombre_usuario || viewUser?.nombre_completo || '').trim() ||
+            (viewUser?.primer_nombre &&
+            viewUser?.email &&
+            viewUser.primer_nombre !== viewUser.email.split('@')[0]
+              ? `${viewUser.primer_nombre} ${viewUser.primer_apellido || ''}`.trim()
+              : '');
+          return {
+            ...u,
+            email: viewUser?.email || 'Email no disponible',
+            view_nombre: viewName,
+            email_confirmed_at: viewUser?.email_confirmed_at || viewUser?.confirmed_at || null,
+          };
         });
       } else {
         mergedUsers = mergedUsers.map(u => ({ ...u, email: 'Requiere vista SQL' }));
@@ -422,6 +449,58 @@ export default function Accesos() {
     setNewUserCarnet(formatted);
   };
 
+  const getUserDisplayName = (u: any) => {
+    const explicit = String(u?.nombre_usuario || u?.nombre_completo || '').trim();
+    if (explicit) return explicit;
+    if (u?.socorristas) {
+      const full = `${u.socorristas.primer_nombre || ''} ${u.socorristas.primer_apellido || ''}`.trim();
+      if (full) return full;
+    }
+    if (u?.view_nombre && String(u.view_nombre).trim()) {
+      return String(u.view_nombre).trim();
+    }
+    return 'Usuario sin perfil';
+  };
+
+  const handleSaveUserName = async (targetUser: any) => {
+    const trimmed = editingUserNameValue.trim();
+    if (!trimmed) {
+      setEditingUserNameId(null);
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('user_roles')
+        .update({ nombre_usuario: trimmed, nombre_completo: trimmed })
+        .eq('id', targetUser.id);
+
+      if (error) {
+        await supabase
+          .from('user_roles')
+          .update({ nombre_completo: trimmed })
+          .eq('id', targetUser.id);
+      }
+
+      setUsuarios(prev =>
+        prev.map(u =>
+          u.id === targetUser.id
+            ? { ...u, nombre_usuario: trimmed, nombre_completo: trimmed }
+            : u
+        )
+      );
+      await logActivity('Actualizó nombre de usuario', 'Usuario', targetUser.id, {
+        nombre_usuario: trimmed,
+        email: targetUser.email
+      });
+    } catch (err) {
+      console.error('Error actualizando nombre de usuario:', err);
+      alert('No se pudo guardar el nombre del usuario.');
+    } finally {
+      setEditingUserNameId(null);
+      setEditingUserNameValue('');
+    }
+  };
+
   const handleSearchCarnet = async () => {
     if (!newUserCarnet) return;
     setSearchLoading(true);
@@ -438,6 +517,10 @@ export default function Accesos() {
         setSocorristaData(null);
       } else {
         setSocorristaData(data);
+        const fullSocName = `${data.primer_nombre || ''} ${data.primer_apellido || ''}`.trim();
+        if (fullSocName) {
+          setNewUserNombre(fullSocName);
+        }
         if (data.email) {
           setNewUserEmail(data.email);
         } else {
@@ -466,19 +549,38 @@ export default function Accesos() {
     setNewUserType(null);
     setNewUserCarnet('');
     setSocorristaData(null);
+    setNewUserNombre('');
     setNewUserEmail('');
     setNewUserPassword('');
     setPasswordOption('manual');
     setNewUserRole('socorrista');
+    setCopyFromUserId('');
+    setOpenPermisosAfterCreate(false);
+    setNewUserSendPlainEmail(true);
+    setNewUserAutoConfirmEmail(true);
     setNewUserRequiresPasswordReset(true);
     setShowNewUserModal(false);
     setSearchError('');
     setFormError('');
   };
 
+  const handleCopyUserTemplateChange = (sourceId: string) => {
+    setCopyFromUserId(sourceId);
+    if (!sourceId) return;
+    const tplUser = usuarios.find(u => u.id === sourceId);
+    if (tplUser?.role && tplUser.role !== 'inactivo' && tplUser.role !== 'pendiente') {
+      setNewUserRole(tplUser.role);
+    }
+  };
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
+    const trimmedNombre = newUserNombre.trim();
+    if (!trimmedNombre) {
+      setFormError('El nombre de usuario es requerido para poder identificarlo en la lista.');
+      return;
+    }
     if (!newUserEmail) {
       setFormError('El correo electrónico es requerido.');
       return;
@@ -499,7 +601,7 @@ export default function Accesos() {
         socorristaId = socorristaData.id;
       }
 
-      // 1. Create user in auth.users using secondary client
+      // 1. Create user in auth.users using secondary client with metadata
       const secondarySupabase = createClient(
         import.meta.env.VITE_SUPABASE_URL || '',
         import.meta.env.VITE_SUPABASE_ANON_KEY || '',
@@ -513,8 +615,16 @@ export default function Accesos() {
       );
 
       const { data: authData, error: authError } = await secondarySupabase.auth.signUp({
-        email: newUserEmail,
+        email: newUserEmail.trim(),
         password: newUserPassword,
+        options: {
+          data: {
+            full_name: trimmedNombre,
+            nombre_completo: trimmedNombre,
+            nombre_usuario: trimmedNombre,
+          },
+          emailRedirectTo: getOfficialLoginUrl(),
+        }
       });
       
       if (authError) throw authError;
@@ -524,25 +634,133 @@ export default function Accesos() {
         throw new Error('No se pudo obtener el ID del usuario creado. Es posible que el correo ya esté registrado o que se requiera confirmación de correo electrónico.');
       }
 
-      // 2. Assign role in user_roles
+      // Preparar permisos copiados si seleccionó usuario plantilla
+      const templateUser = copyFromUserId ? usuarios.find(u => u.id === copyFromUserId) : null;
+      const copiedCustomPermissions = templateUser?.custom_permissions
+        ? JSON.parse(JSON.stringify(templateUser.custom_permissions))
+        : {};
+      const copiedCanUploadFiles = Boolean(templateUser?.can_upload_files);
+
+      // 2. Assign role, nombre_usuario and copied permissions in user_roles
+      const insertPayload: Record<string, any> = {
+        id: newUserId,
+        role: newUserRole,
+        activo: true,
+        estado: 'activo',
+        socorrista_id: socorristaId,
+        nombre_completo: trimmedNombre,
+        nombre_usuario: trimmedNombre,
+        can_upload_files: copiedCanUploadFiles,
+        custom_permissions: copiedCustomPermissions,
+        requires_password_reset: newUserRequiresPasswordReset,
+      };
+
       const { error: roleError } = await supabase
         .from('user_roles')
-        .insert({ 
-          id: newUserId, 
-          role: newUserRole,
-          activo: true,
-          estado: 'activo',
-          socorrista_id: socorristaId,
-          requires_password_reset: newUserRequiresPasswordReset
-        });
+        .upsert(insertPayload);
         
-      if (roleError) throw roleError;
+      if (roleError) {
+        // Fallback si alguna columna nueva aún no fue migrada
+        const { error: fallbackErr } = await supabase
+          .from('user_roles')
+          .upsert({
+            id: newUserId,
+            role: newUserRole,
+            activo: true,
+            estado: 'activo',
+            socorrista_id: socorristaId,
+            nombre_completo: trimmedNombre,
+            can_upload_files: copiedCanUploadFiles,
+            requires_password_reset: newUserRequiresPasswordReset,
+          });
+        if (fallbackErr) throw fallbackErr;
+      }
+
+      // 3. Auto-confirmar correo en SQL si está marcado y existe el RPC
+      let confirmedViaSql = Boolean(authData.session);
+      if (newUserAutoConfirmEmail && !confirmedViaSql) {
+        try {
+          const { data: confirmOk, error: confirmErr } = await supabase.rpc('admin_confirm_user_email', {
+            target_user_id: newUserId
+          });
+          if (!confirmErr && confirmOk !== false) {
+            confirmedViaSql = true;
+          }
+        } catch (confirmEx) {
+          console.warn('RPC admin_confirm_user_email no disponible aún:', confirmEx);
+        }
+      }
+
+      // 4. Enviar correo de bienvenida / credenciales en TEXTO PLANO vía notificaciones
+      let plainEmailSent = false;
+      if (newUserSendPlainEmail) {
+        try {
+          const seccionalObj = socorristaData?.seccional_id
+            ? seccionales.find(s => s.id === socorristaData.seccional_id)
+            : null;
+          const textoCorreo = generarTextoCorreoCreacionUsuario({
+            remitenteNombre,
+            remitenteCorreo,
+            destinatarioCorreo: newUserEmail.trim(),
+            destinatarioNombre: trimmedNombre,
+            rolAsignado: newUserRole,
+            temporalPassword: newUserPassword,
+            requiereCambioPassword: newUserRequiresPasswordReset,
+            seccionalNombre: seccionalObj?.nombre,
+            cuentaConfirmada: confirmedViaSql,
+            loginUrl: getOfficialLoginUrl(),
+          });
+
+          await sendEmailNotification({
+            remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+            destinatario: newUserEmail.trim(),
+            asunto: 'Creacion de cuenta - Cruz Verde Salvadorena',
+            cuerpoTexto: textoCorreo,
+            soloTextoPlano: true,
+            tipo: 'creacion_usuario'
+          });
+          plainEmailSent = true;
+        } catch (mailErr) {
+          console.warn('No se pudo enviar correo en texto plano al crear usuario:', mailErr);
+        }
+      }
       
-      await logActivity('Creó nuevo usuario', 'Usuario', newUserId, { email: newUserEmail, rol: newUserRole, carnet: newUserCarnet });
+      await logActivity('Creó nuevo usuario', 'Usuario', newUserId, {
+        nombre_usuario: trimmedNombre,
+        email: newUserEmail.trim(),
+        rol: newUserRole,
+        carnet: newUserCarnet,
+        copiado_de: templateUser?.email || null,
+        correo_plano_enviado: plainEmailSent,
+      });
       
+      const shouldOpenPermisos = openPermisosAfterCreate;
+      const createdPreviewUser = {
+        id: newUserId,
+        email: newUserEmail.trim(),
+        nombre_usuario: trimmedNombre,
+        nombre_completo: trimmedNombre,
+        role: newUserRole,
+        activo: true,
+        estado: 'activo',
+        socorrista_id: socorristaId,
+        socorristas: socorristaData || null,
+        can_upload_files: copiedCanUploadFiles,
+        custom_permissions: copiedCustomPermissions,
+        requires_password_reset: newUserRequiresPasswordReset,
+      };
+
       resetNewUserModal();
-      fetchData();
-      alert('Usuario creado exitosamente');
+      await fetchData();
+      if (shouldOpenPermisos) {
+        setSelectedUserForPermisos(createdPreviewUser);
+      } else {
+        alert(
+          plainEmailSent
+            ? 'Usuario creado y notificación en texto plano enviada desde el correo institucional.'
+            : 'Usuario creado exitosamente.'
+        );
+      }
       
     } catch (error: any) {
       console.error('Error creating user:', error);
@@ -662,24 +880,36 @@ export default function Accesos() {
   const handleSaveCustomPermissions = async (
     targetUserId: string, 
     updatedCustomPermissions: Record<string, any>, 
-    updatedCanUploadFiles: boolean
+    updatedCanUploadFiles: boolean,
+    updatedRole?: string
   ) => {
     try {
-      // 1. Intentar actualizar en Supabase con custom_permissions y can_upload_files
+      const updatePayload: Record<string, any> = {
+        custom_permissions: updatedCustomPermissions,
+        can_upload_files: updatedCanUploadFiles,
+      };
+      if (updatedRole) {
+        updatePayload.role = updatedRole;
+        updatePayload.activo = updatedRole !== 'inactivo' && updatedRole !== 'pendiente';
+        updatePayload.estado = updatedRole === 'inactivo' ? 'inactivo' : (updatedRole === 'pendiente' ? 'pendiente' : 'activo');
+      }
+
+      // 1. Intentar actualizar en Supabase con custom_permissions y can_upload_files (+ role si cambió)
       const { error } = await supabase
         .from('user_roles')
-        .update({ 
-          custom_permissions: updatedCustomPermissions,
-          can_upload_files: updatedCanUploadFiles 
-        })
+        .update(updatePayload)
         .eq('id', targetUserId);
 
       if (error) {
         console.warn('Advertencia en Supabase (la columna custom_permissions puede requerir migración 22):', error);
-        // Fallback: actualizar al menos can_upload_files
+        // Fallback: actualizar al menos can_upload_files (y role si cambió)
+        const fallbackUpdate: Record<string, any> = { can_upload_files: updatedCanUploadFiles };
+        if (updatedRole) {
+          fallbackUpdate.role = updatedRole;
+        }
         await supabase
           .from('user_roles')
-          .update({ can_upload_files: updatedCanUploadFiles })
+          .update(fallbackUpdate)
           .eq('id', targetUserId);
       }
 
@@ -689,7 +919,14 @@ export default function Accesos() {
           return {
             ...u,
             custom_permissions: updatedCustomPermissions,
-            can_upload_files: updatedCanUploadFiles
+            can_upload_files: updatedCanUploadFiles,
+            ...(updatedRole
+              ? {
+                  role: updatedRole,
+                  activo: updatedRole !== 'inactivo' && updatedRole !== 'pendiente',
+                  estado: updatedRole === 'inactivo' ? 'inactivo' : (updatedRole === 'pendiente' ? 'pendiente' : 'activo'),
+                }
+              : {}),
           };
         }
         return u;
@@ -697,7 +934,8 @@ export default function Accesos() {
 
       await logActivity('Actualizó accesos individuales', 'Usuario', targetUserId, {
         custom_permissions: updatedCustomPermissions,
-        can_upload_files: updatedCanUploadFiles
+        can_upload_files: updatedCanUploadFiles,
+        ...(updatedRole ? { nuevo_rol: updatedRole } : {}),
       });
 
       alert('Accesos individuales del usuario guardados exitosamente.');
@@ -1052,6 +1290,153 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql31Copied(false), 3000);
   };
 
+  const handleCopySqlMigration42 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 42: NOMBRE DE USUARIO EN ACCESOS, CONFIRMACIÓN Y RESETEO SEGURO POR ADMIN
+-- =========================================================================================
+ALTER TABLE IF EXISTS public.user_roles
+  ADD COLUMN IF NOT EXISTS nombre_completo TEXT,
+  ADD COLUMN IF NOT EXISTS nombre_usuario TEXT;
+
+UPDATE public.user_roles
+SET
+  nombre_usuario = COALESCE(NULLIF(TRIM(nombre_usuario), ''), NULLIF(TRIM(nombre_completo), '')),
+  nombre_completo = COALESCE(NULLIF(TRIM(nombre_completo), ''), NULLIF(TRIM(nombre_usuario), ''))
+WHERE (nombre_usuario IS NULL OR TRIM(nombre_usuario) = '' OR nombre_completo IS NULL OR TRIM(nombre_completo) = '')
+  AND (nombre_usuario IS NOT NULL OR nombre_completo IS NOT NULL);
+
+UPDATE public.user_roles ur
+SET
+  nombre_usuario = COALESCE(
+    NULLIF(TRIM(ur.nombre_usuario), ''),
+    NULLIF(TRIM(ur.nombre_completo), ''),
+    NULLIF(TRIM(src.socorrista_nombre), ''),
+    NULLIF(TRIM(src.meta_nombre_usuario), ''),
+    NULLIF(TRIM(src.meta_nombre_completo), ''),
+    NULLIF(TRIM(src.meta_full_name), '')
+  ),
+  nombre_completo = COALESCE(
+    NULLIF(TRIM(ur.nombre_completo), ''),
+    NULLIF(TRIM(ur.nombre_usuario), ''),
+    NULLIF(TRIM(src.socorrista_nombre), ''),
+    NULLIF(TRIM(src.meta_nombre_completo), ''),
+    NULLIF(TRIM(src.meta_full_name), ''),
+    NULLIF(TRIM(src.meta_nombre_usuario), '')
+  )
+FROM (
+  SELECT
+    ur_inner.id AS role_id,
+    NULLIF(TRIM(COALESCE(s.primer_nombre, '') || ' ' || COALESCE(s.primer_apellido, '')), '') AS socorrista_nombre,
+    au.raw_user_meta_data ->> 'nombre_usuario' AS meta_nombre_usuario,
+    au.raw_user_meta_data ->> 'nombre_completo' AS meta_nombre_completo,
+    au.raw_user_meta_data ->> 'full_name' AS meta_full_name
+  FROM public.user_roles ur_inner
+  LEFT JOIN auth.users au ON au.id = ur_inner.id
+  LEFT JOIN public.socorristas s ON s.id = ur_inner.socorrista_id
+) src
+WHERE ur.id = src.role_id
+  AND (
+    ur.nombre_usuario IS NULL OR TRIM(ur.nombre_usuario) = ''
+    OR ur.nombre_completo IS NULL OR TRIM(ur.nombre_completo) = ''
+  );
+
+DROP VIEW IF EXISTS public.usuarios_view CASCADE;
+
+CREATE VIEW public.usuarios_view AS
+SELECT
+  u.id,
+  u.email,
+  COALESCE(
+    NULLIF(TRIM(r.nombre_usuario), ''),
+    NULLIF(TRIM(r.nombre_completo), ''),
+    NULLIF(TRIM(s.primer_nombre), ''),
+    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_usuario'), ''),
+    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_completo'), ''),
+    NULLIF(TRIM(u.raw_user_meta_data ->> 'full_name'), ''),
+    split_part(u.email, '@', 1)
+  ) AS primer_nombre,
+  COALESCE(s.primer_apellido, '') AS primer_apellido,
+  r.nombre_usuario,
+  r.nombre_completo,
+  r.role,
+  r.activo,
+  r.estado,
+  s.carnet,
+  s.seccional_id,
+  u.created_at,
+  u.confirmed_at,
+  u.email_confirmed_at,
+  u.last_sign_in_at
+FROM auth.users u
+LEFT JOIN public.user_roles r ON u.id = r.id
+LEFT JOIN public.socorristas s ON r.socorrista_id = s.id;
+
+GRANT SELECT ON public.usuarios_view TO anon, authenticated, service_role;
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
+CREATE OR REPLACE FUNCTION public.admin_confirm_user_email(target_user_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+BEGIN
+  IF NOT (public.is_admin() OR (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com') THEN
+    RAISE EXCEPTION 'Acceso denegado';
+  END IF;
+  UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, NOW()), updated_at = NOW() WHERE id = target_user_id;
+  RETURN FOUND;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_confirm_user_email(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_reset_user_password(target_user_id UUID, new_password TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, extensions AS $$
+BEGIN
+  IF NOT (public.is_admin() OR (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com') THEN
+    RAISE EXCEPTION 'Acceso denegado';
+  END IF;
+  IF new_password IS NULL OR length(trim(new_password)) < 6 THEN
+    RAISE EXCEPTION 'La contraseña debe tener al menos 6 caracteres';
+  END IF;
+  UPDATE auth.users
+  SET encrypted_password = extensions.crypt(new_password, extensions.gen_salt('bf')),
+      email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
+      updated_at = NOW()
+  WHERE id = target_user_id;
+  RETURN FOUND;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_reset_user_password(UUID, TEXT) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql42Copied(true);
+    setTimeout(() => setSql42Copied(false), 3000);
+  };
+
+  const availableFilterRoles = Array.from(
+    new Set([
+      ...(roles || []),
+      ...usuarios.map((u) => u.role).filter(Boolean),
+      'inactivo',
+      'pendiente',
+    ])
+  );
+
+  const filteredUsuarios = usuarios.filter((u) => {
+    const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
+    if (!matchesRole) return false;
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return true;
+    const display = getUserDisplayName(u).toLowerCase();
+    return (
+      display.includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.socorristas?.carnet || '').toLowerCase().includes(q) ||
+      (u.role || '').toLowerCase().includes(q) ||
+      (u.id || '').toLowerCase().includes(q)
+    );
+  });
+
   const pendingSolicitudesCount = solicitudes.filter(s => s.estado === 'pendiente').length;
 
   const permissionLabels: Record<string, string> = {
@@ -1213,7 +1598,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <div>
                   <h3 className="text-base font-bold tracking-tight text-gray-900">Usuarios del Sistema</h3>
                   <p className="text-2xs text-gray-400">
-                    Control de acceso, activación/desactivación y contraseñas
+                    Control de acceso, activación/desactivación, nombres de usuario y contraseñas
                   </p>
                 </div>
                 <button
@@ -1223,6 +1608,59 @@ NOTIFY pgrst, 'reload schema';`;
                   <UserPlus className="mr-1.5 h-3.5 w-3.5 text-emerald-400" />
                   Nuevo Usuario Manual
                 </button>
+              </div>
+
+              {/* Barra de filtro por rol y búsqueda */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50/90 border border-slate-200/80 rounded-xl p-2.5">
+                <div className="flex flex-wrap items-center gap-2 flex-1">
+                  <div className="relative flex-1 min-w-[200px] max-w-xs">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Buscar por nombre, correo o carnet..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <select
+                      value={roleFilter}
+                      onChange={(e) => setRoleFilter(e.target.value)}
+                      aria-label="Filtrar tabla por rol"
+                      className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none cursor-pointer tabular-nums"
+                    >
+                      <option value="todos">Todos los roles ({usuarios.length})</option>
+                      {availableFilterRoles.map((r) => {
+                        const count = usuarios.filter((u) => u.role === r).length;
+                        return (
+                          <option key={r} value={r}>
+                            {r} ({count})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {(roleFilter !== 'todos' || userSearch.trim() !== '') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRoleFilter('todos');
+                        setUserSearch('');
+                      }}
+                      className="px-2.5 py-1.5 text-2xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg cursor-pointer"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+
+                <span className="text-2xs text-slate-500 font-medium tabular-nums px-1">
+                  Mostrando {filteredUsuarios.length} de {usuarios.length} usuarios
+                </span>
               </div>
 
               <div className="overflow-x-auto border border-slate-200/80 rounded-xl">
@@ -1240,21 +1678,80 @@ NOTIFY pgrst, 'reload schema';`;
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200 text-xs">
-                    {usuarios.map((user) => {
+                    {filteredUsuarios.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-5 py-10 text-center text-gray-400">
+                          No se encontraron usuarios con el filtro de rol o búsqueda seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredUsuarios.map((user) => {
                       const isInactive = user.role === 'inactivo' || 
                                          user.activo === false || 
                                          user.estado === 'inactivo' || 
                                          inactiveUserIds.includes(user.id);
                       const isPending = user.role === 'pendiente' || user.estado === 'pendiente';
+                      const displayName = getUserDisplayName(user);
+                      const isEditingName = editingUserNameId === user.id;
 
                       return (
                         <tr key={user.id} className={isInactive ? 'bg-red-50/40 opacity-80' : (isPending ? 'bg-amber-50/40' : 'hover:bg-gray-50/80 transition-colors')}>
                           
                           {/* Identidad Usuario */}
                           <td className="px-5 py-4 whitespace-nowrap">
-                            <div className="font-bold text-gray-900">
-                              {user.socorristas ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}` : 'Usuario sin perfil'}
-                            </div>
+                            {isEditingName ? (
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <input
+                                  type="text"
+                                  value={editingUserNameValue}
+                                  onChange={(e) => setEditingUserNameValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleSaveUserName(user);
+                                    } else if (e.key === 'Escape') {
+                                      setEditingUserNameId(null);
+                                    }
+                                  }}
+                                  autoFocus
+                                  placeholder="Nombre del usuario"
+                                  className="px-2 py-1 text-xs border border-emerald-400 rounded-lg bg-white text-gray-900 outline-none w-44"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveUserName(user)}
+                                  className="p-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 cursor-pointer"
+                                  title="Guardar nombre"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingUserNameId(null)}
+                                  className="p-1 bg-slate-200 text-slate-600 rounded-md hover:bg-slate-300 cursor-pointer"
+                                  title="Cancelar"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-bold ${displayName === 'Usuario sin perfil' ? 'text-amber-700' : 'text-gray-900'}`}>
+                                  {displayName}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingUserNameId(user.id);
+                                    setEditingUserNameValue(displayName === 'Usuario sin perfil' ? '' : displayName);
+                                  }}
+                                  className="p-0.5 text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
+                                  title="Editar nombre de usuario"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
                             <div className="text-gray-500 font-mono text-2xs">{user.email}</div>
                             <div className="text-3xs text-gray-400 font-mono">{user.id}</div>
                           </td>
@@ -1451,7 +1948,8 @@ NOTIFY pgrst, 'reload schema';`;
 
                         </tr>
                       );
-                    })}
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1724,13 +2222,15 @@ NOTIFY pgrst, 'reload schema';`;
                   </button>
                 </div>
 
-                {/* Vista previa desplegable */}
+                {/* Vista previa desplegable (Texto Plano) */}
                 {showAjustesPreview && (
                   <div className="p-5 border-t border-slate-100 bg-slate-50/60">
-                    <div 
-                      className="bg-white p-4 rounded-xl shadow-xs border border-slate-200"
-                      dangerouslySetInnerHTML={{
-                        __html: generarHtmlCorreoAprobacion({
+                    <div className="bg-white p-4 rounded-xl shadow-xs border border-slate-200">
+                      <p className="text-3xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                        Formato de envío: Texto plano (sin diseño ni interfaz HTML)
+                      </p>
+                      <pre className="whitespace-pre-wrap font-mono text-xs text-slate-800 leading-relaxed">
+                        {generarTextoCorreoAprobacion({
                           remitenteNombre,
                           remitenteCorreo,
                           destinatarioCorreo: 'ejemplo.usuario@cruzverdesv.org',
@@ -1739,9 +2239,9 @@ NOTIFY pgrst, 'reload schema';`;
                           seccionalNombre: 'Seccional Santa Ana',
                           rolAsignado: 'socorrista',
                           loginUrl: getOfficialLoginUrl()
-                        })
-                      }}
-                    />
+                        })}
+                      </pre>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1842,6 +2342,26 @@ NOTIFY pgrst, 'reload schema';`;
                       className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
                     >
                       {sql31Copied ? <><Check className="w-3 h-3 mr-1 text-teal-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
+                    </button>
+                  </div>
+
+                  {/* Migración 42 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-slate-900 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        42
+                      </span>
+                      <div>
+                        <span className="text-xs font-semibold text-gray-900 block">Nombre de Usuario, Confirmación y Reseteo Seguro</span>
+                        <span className="text-3xs text-gray-400">Columna nombre_usuario, vista usuarios_view actualizada y funciones de confirmación/clave</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration42}
+                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql42Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
                     </button>
                   </div>
                 </div>
@@ -1975,6 +2495,20 @@ NOTIFY pgrst, 'reload schema';`;
                       )}
 
                       <div>
+                        <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                          Nombre de Usuario / Identificador <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newUserNombre}
+                          onChange={(e) => setNewUserNombre(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                          placeholder={newUserType === 'externo' ? 'Ej. Juan Pérez (Externo / Proveedor)' : 'Ej. Juan Pérez'}
+                        />
+                      </div>
+
+                      <div>
                         <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Correo Electrónico</label>
                         <input
                           type="email"
@@ -2046,21 +2580,39 @@ NOTIFY pgrst, 'reload schema';`;
                         )}
                       </div>
 
-                      <div>
-                        <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Rol en el Sistema</label>
-                        <select
-                          value={newUserRole}
-                          onChange={(e) => setNewUserRole(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all cursor-pointer"
-                        >
-                          {roles?.map(r => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Rol en el Sistema</label>
+                          <select
+                            value={newUserRole}
+                            onChange={(e) => setNewUserRole(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all cursor-pointer"
+                          >
+                            {roles?.map(r => (
+                              <option key={r} value={r}>{r}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Copiar Accesos De (Opcional)</label>
+                          <select
+                            value={copyFromUserId}
+                            onChange={(e) => handleCopyUserTemplateChange(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all cursor-pointer"
+                          >
+                            <option value="">-- Ninguno (según rol) --</option>
+                            {usuarios.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {getUserDisplayName(u)} ({u.role})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
-                      {/* Inset Checkbox Apple Style */}
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5">
+                      {/* Opciones de Seguridad y Correo Plano */}
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
                         <label className="flex items-center space-x-2.5 cursor-pointer">
                           <input
                             id="require-password-reset"
@@ -2073,6 +2625,44 @@ NOTIFY pgrst, 'reload schema';`;
                             Obligar a cambiar la contraseña en su primer inicio de sesión
                           </span>
                         </label>
+
+                        <label className="flex items-center space-x-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newUserSendPlainEmail}
+                            onChange={(e) => setNewUserSendPlainEmail(e.target.checked)}
+                            className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
+                          />
+                          <span className="text-2xs text-gray-700 font-medium leading-tight">
+                            Enviar credenciales en texto plano vía {remitenteCorreo}
+                          </span>
+                        </label>
+
+                        <label className="flex items-center space-x-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newUserAutoConfirmEmail}
+                            onChange={(e) => setNewUserAutoConfirmEmail(e.target.checked)}
+                            className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
+                          />
+                          <span className="text-2xs text-gray-700 font-medium leading-tight">
+                            Confirmar correo automáticamente en la base de datos (SQL)
+                          </span>
+                        </label>
+
+                        {copyFromUserId && (
+                          <label className="flex items-center space-x-2.5 cursor-pointer pt-1 border-t border-slate-200/70">
+                            <input
+                              type="checkbox"
+                              checked={openPermisosAfterCreate}
+                              onChange={(e) => setOpenPermisosAfterCreate(e.target.checked)}
+                              className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
+                            />
+                            <span className="text-2xs text-emerald-800 font-semibold leading-tight">
+                              Abrir editor de permisos individuales después de crear para ajustar lo copiado
+                            </span>
+                          </label>
+                        )}
                       </div>
                     </>
                   )}
@@ -2105,6 +2695,7 @@ NOTIFY pgrst, 'reload schema';`;
       {selectedUserForPermisos && (
         <PermisosIndividualesModal
           user={selectedUserForPermisos}
+          allUsers={usuarios}
           roles={roles}
           rolePermissions={rolePermissions}
           permissionLabels={permissionLabels}

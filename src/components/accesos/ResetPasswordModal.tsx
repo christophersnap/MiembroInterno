@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { KeyRound, X, Mail, CheckCircle2, Copy, AlertCircle, Lock } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/logger';
-import { generarHtmlCorreoPasswordTemporal } from '../../lib/emailNotification';
+import { generarTextoCorreoPasswordTemporal } from '../../lib/emailNotification';
 import { sendEmailNotification } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
 
@@ -52,7 +52,20 @@ export default function ResetPasswordModal({
     }
 
     try {
-      // 1. Actualizar requires_password_reset en user_roles
+      // 1. Actualizar contraseña en auth.users vía RPC segura de administrador (Migración 42)
+      try {
+        const { error: rpcResetError } = await supabase.rpc('admin_reset_user_password', {
+          target_user_id: user.id,
+          new_password: targetPassword,
+        });
+        if (rpcResetError) {
+          console.warn('RPC admin_reset_user_password aún no aplicada o advertencia:', rpcResetError.message);
+        }
+      } catch (rpcErr) {
+        console.warn('No se pudo ejecutar RPC admin_reset_user_password:', rpcErr);
+      }
+
+      // 2. Actualizar requires_password_reset en user_roles
       const { error: roleUpdateError } = await supabase
         .from('user_roles')
         .update({
@@ -64,15 +77,21 @@ export default function ResetPasswordModal({
         console.warn('Advertencia actualizando requires_password_reset en user_roles:', roleUpdateError);
       }
 
-      // 2. Enviar correo con la clave si está marcado
+      // 3. Enviar correo en texto plano con la clave si está marcado
       let emailSent = false;
       if (sendNotification && user.email) {
-        const emailHtml = generarHtmlCorreoPasswordTemporal({
+        const displayDestName =
+          user.nombre_usuario ||
+          user.nombre_completo ||
+          (user.socorristas ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}` : '') ||
+          user.email.split('@')[0];
+
+        const emailTexto = generarTextoCorreoPasswordTemporal({
           remitenteNombre,
           remitenteCorreo,
           destinatarioCorreo: user.email,
-          destinatarioNombre: user.socorristas ? `${user.socorristas.primer_nombre} ${user.socorristas.primer_apellido}` : user.email.split('@')[0],
-          asunto: 'Restablecimiento de Contraseña - Cruz Verde Salvadoreña',
+          destinatarioNombre: displayDestName,
+          asunto: 'Restablecimiento de Contrasena - Cruz Verde Salvadorena',
           temporalPassword: targetPassword,
           loginUrl: getOfficialLoginUrl()
         });
@@ -81,8 +100,9 @@ export default function ResetPasswordModal({
           await sendEmailNotification({
             remitente: `${remitenteNombre} <${remitenteCorreo}>`,
             destinatario: user.email,
-            asunto: 'Restablecimiento de Contraseña - Cruz Verde Salvadoreña',
-            cuerpoHtml: emailHtml,
+            asunto: 'Restablecimiento de Contrasena - Cruz Verde Salvadorena',
+            cuerpoTexto: emailTexto,
+            soloTextoPlano: true,
             tipo: 'password_reset'
           });
           emailSent = true;

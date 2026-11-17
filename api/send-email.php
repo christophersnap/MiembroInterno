@@ -68,7 +68,13 @@ if (!$body || empty($body['destinatario']) || empty($body['asunto'])) {
 
 $destinatario = trim($body['destinatario']);
 $asunto = trim($body['asunto']);
+$soloTextoPlano = !empty($body['soloTextoPlano']);
+$cuerpoTexto = isset($body['cuerpoTexto']) ? (string)$body['cuerpoTexto'] : '';
 $cuerpoHtml = $body['cuerpoHtml'] ?? '<p>Notificación institucional de Cruz Verde Salvadoreña</p>';
+$isPlainOnly = $soloTextoPlano || (empty($body['cuerpoHtml']) && !empty($cuerpoTexto));
+$bodyContent = $isPlainOnly
+    ? (!empty($cuerpoTexto) ? $cuerpoTexto : trim(strip_tags((string)$cuerpoHtml)))
+    : $cuerpoHtml;
 $remitente = !empty($body['remitente']) ? trim($body['remitente']) : $defaultConfig['from'];
 $replyTo = !empty($body['replyTo']) ? trim($body['replyTo']) : $defaultConfig['replyTo'];
 $cc = !empty($body['cc']) ? trim($body['cc']) : '';
@@ -87,7 +93,7 @@ $cleanFromEmail = extractEmail($remitente);
 $cleanReplyToEmail = extractEmail($replyTo);
 
 // Función de envío SMTP nativo mediante sockets
-function sendSmtpSocket($config, $cleanFromEmail, $fromName, $toEmails, $ccEmails, $replyTo, $subject, $htmlContent, $attachments = []) {
+function sendSmtpSocket($config, $cleanFromEmail, $fromName, $toEmails, $ccEmails, $replyTo, $subject, $bodyContent, $attachments = [], $isPlainOnly = false) {
     $host = $config['host'];
     $port = intval($config['port']);
     $user = $config['user'];
@@ -163,7 +169,6 @@ function sendSmtpSocket($config, $cleanFromEmail, $fromName, $toEmails, $ccEmail
 
     // 8. Construir mensaje MIME
     $boundary = "----=_Part_" . md5(uniqid(time()));
-    $boundaryAlt = "----=_Alt_" . md5(uniqid(time()));
 
     $headers = [];
     $headers[] = "From: =?UTF-8?B?" . base64_encode($fromName) . "?= <{$cleanFromEmail}>";
@@ -181,14 +186,15 @@ function sendSmtpSocket($config, $cleanFromEmail, $fromName, $toEmails, $ccEmail
     $headers[] = "X-Mailer: CruzVerde-HostingerMailer/1.0";
 
     $hasAttachments = is_array($attachments) && count($attachments) > 0;
+    $contentTypeHeader = $isPlainOnly ? "text/plain; charset=UTF-8" : "text/html; charset=UTF-8";
 
     if ($hasAttachments) {
         $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundary}\"";
         
         $messageBody = "--{$boundary}\r\n";
-        $messageBody .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $messageBody .= "Content-Type: {$contentTypeHeader}\r\n";
         $messageBody .= "Content-Transfer-Encoding: base64\r\n\r\n";
-        $messageBody .= chunk_split(base64_encode($htmlContent)) . "\r\n";
+        $messageBody .= chunk_split(base64_encode($bodyContent)) . "\r\n";
 
         foreach ($attachments as $att) {
             $filename = !empty($att['nombre']) ? $att['nombre'] : (!empty($att['filename']) ? $att['filename'] : 'documento.pdf');
@@ -218,9 +224,9 @@ function sendSmtpSocket($config, $cleanFromEmail, $fromName, $toEmails, $ccEmail
         }
         $messageBody .= "--{$boundary}--\r\n";
     } else {
-        $headers[] = "Content-Type: text/html; charset=UTF-8";
+        $headers[] = "Content-Type: {$contentTypeHeader}";
         $headers[] = "Content-Transfer-Encoding: base64";
-        $messageBody = chunk_split(base64_encode($htmlContent));
+        $messageBody = chunk_split(base64_encode($bodyContent));
     }
 
     $rawEmail = implode("\r\n", $headers) . "\r\n\r\n" . $messageBody . "\r\n.\r\n";
@@ -255,8 +261,9 @@ try {
         $ccList,
         $cleanReplyToEmail,
         $asunto,
-        $cuerpoHtml,
-        $adjuntos
+        $bodyContent,
+        $adjuntos,
+        $isPlainOnly
     );
 
     echo json_encode([

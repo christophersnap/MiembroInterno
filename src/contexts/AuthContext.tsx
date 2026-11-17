@@ -193,6 +193,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .select(`
           role, 
           socorrista_id,
+          nombre_completo,
+          nombre_usuario,
           can_upload_files,
           custom_permissions,
           requires_password_reset,
@@ -254,22 +256,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let detectedSeccionalId: number | null = null;
       let detectedSeccionalNombre: string | null = null;
 
+      const metaDisplayName =
+        String(
+          user?.user_metadata?.nombre_usuario ||
+          user?.user_metadata?.nombre_completo ||
+          user?.user_metadata?.full_name ||
+          ''
+        ).trim();
+
       if (!roleError && roleData) {
         setSocorristaId(roleData.socorrista_id);
         setRequiresPasswordReset(!!roleData.requires_password_reset);
 
+        const roleDisplayName = String(roleData.nombre_usuario || roleData.nombre_completo || '').trim();
         if (roleData.socorristas) {
           const socorrista = roleData.socorristas as any;
-          setUserName(`${socorrista.primer_nombre} ${socorrista.primer_apellido}`);
+          setUserName(roleDisplayName || `${socorrista.primer_nombre} ${socorrista.primer_apellido}`);
           if (socorrista.seccional_id) {
             detectedSeccionalId = socorrista.seccional_id;
           }
         } else {
-          setUserName(user?.email || 'Usuario');
+          setUserName(roleDisplayName || metaDisplayName || user?.email || 'Usuario');
         }
       } else {
         setSocorristaId(null);
-        setUserName(user?.email || 'Usuario');
+        setUserName(metaDisplayName || user?.email || 'Usuario');
       }
 
       const { data: permData, error: permError } = await supabase

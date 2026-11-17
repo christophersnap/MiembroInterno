@@ -296,6 +296,147 @@ export function generarHtmlCorreoPasswordTemporal(params: EmailTemplateParams, d
 }
 
 /**
+ * 2B. Generadores en TEXTO PLANO PURO (sin diseño ni interfaz HTML)
+ * Para creación de usuarios, confirmación/aprobación y cambio/restablecimiento de contraseña.
+ */
+export function generarTextoCorreoCreacionUsuario(params: {
+  remitenteNombre: string;
+  remitenteCorreo: string;
+  destinatarioCorreo: string;
+  destinatarioNombre: string;
+  rolAsignado?: string;
+  temporalPassword?: string;
+  requiereCambioPassword?: boolean;
+  seccionalNombre?: string;
+  cuentaConfirmada?: boolean;
+  loginUrl?: string;
+}): string {
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
+  const lines: string[] = [
+    'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
+    'NOTIFICACION DE CREACION Y CONFIRMACION DE CUENTA',
+    '',
+    `Hola, ${params.destinatarioNombre || params.destinatarioCorreo}:`,
+    '',
+    'Se ha creado tu cuenta de acceso en el Sistema Interno de Cruz Verde Salvadorena.',
+    '',
+    'DATOS DE ACCESO:',
+    `- Nombre de usuario: ${params.destinatarioNombre || params.destinatarioCorreo}`,
+    `- Correo electronico: ${params.destinatarioCorreo}`,
+    `- Rol asignado: ${(params.rolAsignado || 'socorrista').toUpperCase()}`,
+  ];
+
+  if (params.seccionalNombre) {
+    lines.push(`- Seccional: ${params.seccionalNombre}`);
+  }
+  if (params.temporalPassword) {
+    lines.push(`- Contrasena asignada: ${params.temporalPassword}`);
+  }
+  if (params.cuentaConfirmada) {
+    lines.push('- Estado del correo: Confirmado y listo para ingresar');
+  } else {
+    lines.push('- Estado del correo: Si recibes un enlace de confirmacion de acceso, abrelo antes de iniciar sesion.');
+  }
+  if (params.requiereCambioPassword) {
+    lines.push('');
+    lines.push('IMPORTANTE: Por seguridad, al iniciar sesion por primera vez el sistema te solicitara cambiar tu contrasena.');
+  }
+
+  lines.push('');
+  lines.push(`Enlace de acceso al sistema: ${loginUrl}`);
+  lines.push('');
+  lines.push('---');
+  lines.push(`Enviado por: ${params.remitenteNombre} <${params.remitenteCorreo}>`);
+  lines.push('Correo automatico de solo envio (No responder a este mensaje).');
+
+  return lines.join('\n');
+}
+
+export function generarTextoCorreoAprobacion(params: EmailTemplateParams): string {
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
+  const displayRol = (params.rolAsignado || params.rolNombre || 'socorrista').toUpperCase();
+  const lines: string[] = [
+    'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
+    'CONFIRMACION Y APROBACION DE CUENTA',
+    '',
+    `Hola, ${params.destinatarioNombre || params.destinatarioCorreo}:`,
+    '',
+    'Tu cuenta en el Sistema Interno de Cruz Verde Salvadorena ha sido verificada y aprobada por la administracion.',
+    '',
+    'RESUMEN DE CUENTA:',
+    `- Usuario / Correo: ${params.destinatarioCorreo}`,
+    `- Rol asignado: ${displayRol}`,
+    ...(params.seccionalNombre ? [`- Seccional asignada: ${params.seccionalNombre}`] : []),
+    '- Estado: ACTIVO / HABILITADO',
+    '',
+    `Puedes iniciar sesion en: ${loginUrl}`,
+    '',
+    '---',
+    `Enviado por: ${params.remitenteNombre} <${params.remitenteCorreo}>`,
+    'Correo automatico de solo envio (No responder a este mensaje).',
+  ];
+  return lines.join('\n');
+}
+
+export function generarTextoCorreoPasswordTemporal(params: EmailTemplateParams): string {
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
+  const lines: string[] = [
+    'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
+    'RESTABLECIMIENTO DE CONTRASENA',
+    '',
+    `Hola, ${params.destinatarioNombre || params.destinatarioCorreo}:`,
+    '',
+    'Se ha generado una clave temporal para ingresar a tu cuenta en el Sistema Institucional:',
+    '',
+    `CLAVE TEMPORAL: ${params.temporalPassword || 'CVS-9K42L'}`,
+    '',
+    'Al iniciar sesion con esta clave, el sistema te solicitara crear una nueva contrasena personal.',
+    '',
+    `Ingresa aqui: ${loginUrl}`,
+    '',
+    'Si no solicitaste este cambio, informa de inmediato a la administracion.',
+    '',
+    '---',
+    `Enviado por: ${params.remitenteNombre} <${params.remitenteCorreo}>`,
+    'Correo automatico de solo envio (No responder a este mensaje).',
+  ];
+  return lines.join('\n');
+}
+
+export function generarTextoCorreoCambioPassword(params: {
+  remitenteNombre: string;
+  remitenteCorreo: string;
+  destinatarioCorreo: string;
+  destinatarioNombre?: string;
+  loginUrl?: string;
+  fechaCambio?: string;
+}): string {
+  const loginUrl = params.loginUrl || getOfficialLoginUrl();
+  const fecha = params.fechaCambio || new Date().toLocaleString('es-SV');
+  const lines: string[] = [
+    'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
+    'CONFIRMACION DE CAMBIO DE CONTRASENA',
+    '',
+    `Hola, ${params.destinatarioNombre || params.destinatarioCorreo}:`,
+    '',
+    'Te confirmamos que la contrasena de tu cuenta ha sido actualizada correctamente.',
+    '',
+    `- Correo: ${params.destinatarioCorreo}`,
+    `- Fecha y hora: ${fecha}`,
+    '',
+    `Acceso al sistema: ${loginUrl}`,
+    '',
+    'Si tu no realizaste este cambio, comunicate de inmediato con el administrador del sistema.',
+    '',
+    '---',
+    `Enviado por: ${params.remitenteNombre} <${params.remitenteCorreo}>`,
+    'Correo automatico de solo envio (No responder a este mensaje).',
+  ];
+  return lines.join('\n');
+}
+
+
+/**
  * 3. Genera el correo para Solicitudes de Compra y Mantenimiento
  * Incluye el FORMULARIO COMPLETO LLENO y el PDF OFICIAL ADJUNTO generado.
  */

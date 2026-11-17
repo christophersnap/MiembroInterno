@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Shield, Mail, Lock, UserPlus, KeyRound, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
-import { generarHtmlCorreoPasswordTemporal } from '../lib/emailNotification';
+import { generarTextoCorreoPasswordTemporal } from '../lib/emailNotification';
 import { sendEmailNotification } from '../lib/api';
 import { getOfficialLoginUrl } from '../utils/appUrl';
 
@@ -148,23 +148,24 @@ export default function Login() {
           });
         }
 
-        const emailHtml = generarHtmlCorreoPasswordTemporal({
+        const emailTexto = generarTextoCorreoPasswordTemporal({
           remitenteNombre,
           remitenteCorreo,
           destinatarioCorreo: forgotEmail,
           destinatarioNombre: forgotEmail.split('@')[0],
-          asunto: 'Restablecimiento de Contraseña Temporal - Cruz Verde Salvadoreña',
+          asunto: 'Restablecimiento de Contrasena Temporal - Cruz Verde Salvadorena',
           temporalPassword: generatedTemp,
           loginUrl: getOfficialLoginUrl()
         });
 
-        // Despachar vía endpoint de correo
+        // Despachar vía endpoint de correo en texto plano
         try {
           await sendEmailNotification({
             remitente: `${remitenteNombre} <${remitenteCorreo}>`,
             destinatario: forgotEmail,
-            asunto: 'Restablecimiento de Contraseña Temporal - Cruz Verde Salvadoreña',
-            cuerpoHtml: emailHtml,
+            asunto: 'Restablecimiento de Contrasena Temporal - Cruz Verde Salvadorena',
+            cuerpoTexto: emailTexto,
+            soloTextoPlano: true,
             tipo: 'password_reset'
           });
         } catch (apiErr) {
