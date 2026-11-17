@@ -12,6 +12,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
   // Modal Olvidé Contraseña
@@ -31,6 +32,35 @@ export default function Login() {
     if (savedMsg) {
       setError(savedMsg);
       sessionStorage.removeItem('auth_error_message');
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const confirmToken = params.get('confirm_token');
+    if (confirmToken) {
+      (async () => {
+        try {
+          const { data, error: rpcErr } = await supabase.rpc('confirmar_cuenta_por_token', {
+            p_token: confirmToken,
+          });
+          if (rpcErr || !data?.ok) {
+            setError(data?.error || 'No se pudo confirmar tu correo electrónico. El enlace puede haber expirado.');
+          } else {
+            if (data.email) setEmail(data.email);
+            setConfirmMessage(
+              data.already_confirmed
+                ? `Tu correo (${data.email || ''}) ya estaba confirmado. Ya puedes iniciar sesión.`
+                : `¡Correo electrónico confirmado correctamente (${data.email || ''})! Ya puedes iniciar sesión.`
+            );
+          }
+        } catch {
+          setError('Ocurrió un error al validar el enlace de confirmación.');
+        } finally {
+          params.delete('confirm_token');
+          const cleanSearch = params.toString();
+          const newUrl = window.location.pathname + (cleanSearch ? `?${cleanSearch}` : '') + window.location.hash;
+          window.history.replaceState({}, '', newUrl);
+        }
+      })();
     }
   }, []);
 
@@ -126,7 +156,12 @@ export default function Login() {
         const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
           redirectTo: getOfficialLoginUrl(),
         });
-        if (error) throw error;
+        if (error) {
+          if (String(error.message || '').toLowerCase().includes('rate limit')) {
+            throw new Error('Se alcanzó el límite temporal de envíos de Supabase. Selecciona "Acceso Temporal" o solicita al administrador una clave temporal.');
+          }
+          throw error;
+        }
         setForgotSuccess(`Se ha enviado un enlace de recuperación oficial al correo ${forgotEmail}. Sigue las instrucciones recibidas.`);
       } else {
         // Opción: Acceso temporal con forzado de cambio de contraseña al iniciar sesión
@@ -228,6 +263,15 @@ export default function Login() {
 
           <form className="space-y-5" onSubmit={handleLogin}>
             
+            {confirmMessage && (
+              <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg">
+                <div className="flex items-start">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mr-2 mt-0.5" />
+                  <p className="text-sm font-medium text-emerald-800 leading-snug">{confirmMessage}</p>
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
                 <div className="flex items-start">

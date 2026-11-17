@@ -126,7 +126,33 @@ export default function SolicitudesRegistroTab({
         }
       }
 
-      // 3. Activar usuario y asignar rol + nombre en public.user_roles
+      let generatedTempPassword: string | undefined;
+
+      // 3. Si la solicitud no tenía auth_user_id (ej. por rate limit en registro público), crearlo directo con admin_create_user
+      if (!targetAuthId && solEmail) {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let tempPass = 'CVS-';
+        for (let i = 0; i < 6; i++) {
+          tempPass += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        const { data: createdData, error: createRpcErr } = await supabase.rpc('admin_create_user', {
+          p_email: solEmail.trim(),
+          p_password: tempPass,
+          p_nombre_usuario: solNombre || solEmail.split('@')[0],
+          p_role: assignedRole,
+          p_socorrista_id: null,
+          p_can_upload_files: false,
+          p_custom_permissions: {},
+          p_requires_password_reset: true,
+          p_auto_confirm: true,
+        });
+        if (!createRpcErr && createdData?.user_id) {
+          targetAuthId = createdData.user_id;
+          generatedTempPassword = tempPass;
+        }
+      }
+
+      // 4. Activar usuario y asignar rol + nombre en public.user_roles
       if (targetAuthId) {
         const { error: roleUpdateError } = await supabase
           .from('user_roles')
@@ -138,6 +164,7 @@ export default function SolicitudesRegistroTab({
             nombre_completo: solNombre || null,
             nombre_usuario: solNombre || null,
             seccional_id: assignedSeccionalId ? Number(assignedSeccionalId) : null,
+            ...(generatedTempPassword ? { requires_password_reset: true } : {}),
           });
 
         if (roleUpdateError) {
@@ -234,6 +261,7 @@ export default function SolicitudesRegistroTab({
           asunto: 'Cuenta aprobada - Cruz Verde Salvadorena',
           seccionalNombre,
           rolAsignado: assignedRole,
+          temporalPassword: generatedTempPassword,
           loginUrl: getOfficialLoginUrl(),
         });
 

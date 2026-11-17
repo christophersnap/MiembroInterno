@@ -190,14 +190,21 @@ export default function Registro() {
         }
       });
 
+      let newUserId: string | undefined = authData.user?.id;
       if (authError) {
-        if (authError.message.includes('already registered') || authError.message.includes('User already registered')) {
+        const msg = String(authError.message || '');
+        if (msg.includes('already registered') || msg.includes('User already registered')) {
           throw new Error('Este correo electrónico ya se encuentra registrado en el sistema. Puedes intentar iniciar sesión o recuperar tu contraseña.');
         }
-        throw authError;
+        // Si Supabase Auth alcanzó su límite gratuito de correos (2/hora), guardamos igualmente la solicitud pendiente
+        // para que el administrador la apruebe y cree/notifique la cuenta vía notificaciones@cruzverdesv.org
+        if (msg.toLowerCase().includes('rate limit')) {
+          console.warn('Supabase signUp rate limit alcanzado; registrando solicitud pendiente para aprobación administrativa.');
+          newUserId = undefined;
+        } else {
+          throw authError;
+        }
       }
-
-      const newUserId = authData.user?.id;
 
       // 2. Insertar rol inicial en user_roles en estado PENDIENTE / INACTIVO
       if (newUserId) {

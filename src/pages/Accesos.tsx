@@ -15,6 +15,7 @@ import PermisosIndividualesModal from '../components/accesos/PermisosIndividuale
 import {
   generarTextoCorreoAprobacion,
   generarTextoCorreoCreacionUsuario,
+  generarTextoCorreoConfirmacionEnlace,
 } from '../lib/emailNotification';
 import { getOfficialLoginUrl } from '../utils/appUrl';
 import { getApiUrl, sendEmailNotification } from '../lib/api';
@@ -88,6 +89,8 @@ export default function Accesos() {
   const [sql22Copied, setSql22Copied] = useState(false);
   const [sql31Copied, setSql31Copied] = useState(false);
   const [sql42Copied, setSql42Copied] = useState(false);
+  const [sql43Copied, setSql43Copied] = useState(false);
+  const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
                             loginShowSolicitar !== originalAjustes.loginSolicitar || 
@@ -601,39 +604,6 @@ export default function Accesos() {
         socorristaId = socorristaData.id;
       }
 
-      // 1. Create user in auth.users using secondary client with metadata
-      const secondarySupabase = createClient(
-        import.meta.env.VITE_SUPABASE_URL || '',
-        import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
-        }
-      );
-
-      const { data: authData, error: authError } = await secondarySupabase.auth.signUp({
-        email: newUserEmail.trim(),
-        password: newUserPassword,
-        options: {
-          data: {
-            full_name: trimmedNombre,
-            nombre_completo: trimmedNombre,
-            nombre_usuario: trimmedNombre,
-          },
-          emailRedirectTo: getOfficialLoginUrl(),
-        }
-      });
-      
-      if (authError) throw authError;
-      
-      const newUserId = authData.user?.id;
-      if (!newUserId) {
-        throw new Error('No se pudo obtener el ID del usuario creado. Es posible que el correo ya esté registrado o que se requiera confirmación de correo electrónico.');
-      }
-
       // Preparar permisos copiados si seleccionó usuario plantilla
       const templateUser = copyFromUserId ? usuarios.find(u => u.id === copyFromUserId) : null;
       const copiedCustomPermissions = templateUser?.custom_permissions
@@ -641,59 +611,140 @@ export default function Accesos() {
         : {};
       const copiedCanUploadFiles = Boolean(templateUser?.can_upload_files);
 
-      // 2. Assign role, nombre_usuario and copied permissions in user_roles
-      const insertPayload: Record<string, any> = {
-        id: newUserId,
-        role: newUserRole,
-        activo: true,
-        estado: 'activo',
-        socorrista_id: socorristaId,
-        nombre_completo: trimmedNombre,
-        nombre_usuario: trimmedNombre,
-        can_upload_files: copiedCanUploadFiles,
-        custom_permissions: copiedCustomPermissions,
-        requires_password_reset: newUserRequiresPasswordReset,
-      };
+      // 1. Intentar creación directa en SQL (admin_create_user) -> evita por completo "email rate limit exceeded" de Supabase Auth
+      let newUserId: string | undefined;
+      let confirmedViaSql = false;
+      let confirmationToken: string | null = null;
+      let createdDirectSql = false;
 
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .upsert(insertPayload);
-        
-      if (roleError) {
-        // Fallback si alguna columna nueva aún no fue migrada
-        const { error: fallbackErr } = await supabase
-          .from('user_roles')
-          .upsert({
-            id: newUserId,
-            role: newUserRole,
-            activo: true,
-            estado: 'activo',
-            socorrista_id: socorristaId,
-            nombre_completo: trimmedNombre,
-            can_upload_files: copiedCanUploadFiles,
-            requires_password_reset: newUserRequiresPasswordReset,
-          });
-        if (fallbackErr) throw fallbackErr;
-      }
+      const { data: rpcCreateData, error: rpcCreateError } = await supabase.rpc('admin_create_user', {
+        p_email: newUserEmail.trim(),
+        p_password: newUserPassword,
+        p_nombre_usuario: trimmedNombre,
+        p_role: newUserRole,
+        p_socorrista_id: socorristaId,
+        p_can_upload_files: copiedCanUploadFiles,
+        p_custom_permissions: copiedCustomPermissions,
+        p_requires_password_reset: newUserRequiresPasswordReset,
+        p_auto_confirm: newUserAutoConfirmEmail,
+      });
 
-      // 3. Auto-confirmar correo en SQL si está marcado y existe el RPC
-      let confirmedViaSql = Boolean(authData.session);
-      if (newUserAutoConfirmEmail && !confirmedViaSql) {
-        try {
-          const { data: confirmOk, error: confirmErr } = await supabase.rpc('admin_confirm_user_email', {
-            target_user_id: newUserId
-          });
-          if (!confirmErr && confirmOk !== false) {
-            confirmedViaSql = true;
+      if (!rpcCreateError && rpcCreateData?.user_id) {
+        createdDirectSql = true;
+        newUserId = rpcCreateData.user_id;
+        confirmedViaSql = Boolean(rpcCreateData.auto_confirmed);
+        confirmationToken = rpcCreateData.confirmation_token || null;
+      } else if (
+        rpcCreateError &&
+        !String(rpcCreateError.message || '').toLowerCase().includes('function') &&
+        !String(rpcCreateError.message || '').toLowerCase().includes('does not exist') &&
+        !String(rpcCreateError.code || '').includes('42883') &&
+        !String(rpcCreateError.code || '').includes('PGRST202')
+      ) {
+        // Error real de validación (ej: correo ya existe, contraseña corta, acceso denegado)
+        throw rpcCreateError;
+      } else {
+        // Fallback clásico si Migración 43 aún no ha sido ejecutada en Supabase
+        const secondarySupabase = createClient(
+          import.meta.env.VITE_SUPABASE_URL || '',
+          import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+          {
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+              detectSessionInUrl: false,
+            },
           }
-        } catch (confirmEx) {
-          console.warn('RPC admin_confirm_user_email no disponible aún:', confirmEx);
+        );
+
+        const { data: authData, error: authError } = await secondarySupabase.auth.signUp({
+          email: newUserEmail.trim(),
+          password: newUserPassword,
+          options: {
+            data: {
+              full_name: trimmedNombre,
+              nombre_completo: trimmedNombre,
+              nombre_usuario: trimmedNombre,
+            },
+            emailRedirectTo: getOfficialLoginUrl(),
+          }
+        });
+
+        if (authError) {
+          if (String(authError.message || '').toLowerCase().includes('rate limit')) {
+            throw new Error(
+              'Límite de correos de Supabase alcanzado ("email rate limit exceeded"). Para crear usuarios ilimitados enviando desde ' +
+              remitenteCorreo +
+              ', ejecuta la Migración 43 en Supabase SQL Editor (puedes copiarla en Ajustes del Sistema -> Migraciones).'
+            );
+          }
+          throw authError;
+        }
+
+        newUserId = authData.user?.id;
+        if (!newUserId) {
+          throw new Error('No se pudo obtener el ID del usuario creado. Es posible que el correo ya esté registrado.');
+        }
+
+        const insertPayload: Record<string, any> = {
+          id: newUserId,
+          role: newUserRole,
+          activo: true,
+          estado: 'activo',
+          socorrista_id: socorristaId,
+          nombre_completo: trimmedNombre,
+          nombre_usuario: trimmedNombre,
+          can_upload_files: copiedCanUploadFiles,
+          custom_permissions: copiedCustomPermissions,
+          requires_password_reset: newUserRequiresPasswordReset,
+        };
+
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .upsert(insertPayload);
+
+        if (roleError) {
+          const { error: fallbackErr } = await supabase
+            .from('user_roles')
+            .upsert({
+              id: newUserId,
+              role: newUserRole,
+              activo: true,
+              estado: 'activo',
+              socorrista_id: socorristaId,
+              nombre_completo: trimmedNombre,
+              can_upload_files: copiedCanUploadFiles,
+              requires_password_reset: newUserRequiresPasswordReset,
+            });
+          if (fallbackErr) throw fallbackErr;
+        }
+
+        confirmedViaSql = Boolean(authData.session);
+        if (newUserAutoConfirmEmail && !confirmedViaSql) {
+          try {
+            const { data: confirmOk, error: confirmErr } = await supabase.rpc('admin_confirm_user_email', {
+              target_user_id: newUserId
+            });
+            if (!confirmErr && confirmOk !== false) {
+              confirmedViaSql = true;
+            }
+          } catch (confirmEx) {
+            console.warn('RPC admin_confirm_user_email no disponible aún:', confirmEx);
+          }
         }
       }
 
-      // 4. Enviar correo de bienvenida / credenciales en TEXTO PLANO vía notificaciones
+      if (!newUserId) {
+        throw new Error('No se pudo completar la creación del usuario.');
+      }
+
+      // 2. Enviar correo de bienvenida / confirmación en TEXTO PLANO vía notificaciones@cruzverdesv.org
       let plainEmailSent = false;
-      if (newUserSendPlainEmail) {
+      const confirmUrl = (!confirmedViaSql && confirmationToken)
+        ? `${getOfficialLoginUrl()}?confirm_token=${encodeURIComponent(confirmationToken)}`
+        : undefined;
+
+      if (newUserSendPlainEmail || confirmUrl) {
         try {
           const seccionalObj = socorristaData?.seccional_id
             ? seccionales.find(s => s.id === socorristaData.seccional_id)
@@ -708,13 +759,16 @@ export default function Accesos() {
             requiereCambioPassword: newUserRequiresPasswordReset,
             seccionalNombre: seccionalObj?.nombre,
             cuentaConfirmada: confirmedViaSql,
+            confirmUrl,
             loginUrl: getOfficialLoginUrl(),
           });
 
           await sendEmailNotification({
             remitente: `${remitenteNombre} <${remitenteCorreo}>`,
             destinatario: newUserEmail.trim(),
-            asunto: 'Creacion de cuenta - Cruz Verde Salvadorena',
+            asunto: confirmUrl
+              ? 'Confirmacion y datos de cuenta - Cruz Verde Salvadorena'
+              : 'Creacion de cuenta - Cruz Verde Salvadorena',
             cuerpoTexto: textoCorreo,
             soloTextoPlano: true,
             tipo: 'creacion_usuario'
@@ -731,6 +785,7 @@ export default function Accesos() {
         rol: newUserRole,
         carnet: newUserCarnet,
         copiado_de: templateUser?.email || null,
+        creado_sql_directo: createdDirectSql,
         correo_plano_enviado: plainEmailSent,
       });
       
@@ -756,9 +811,11 @@ export default function Accesos() {
         setSelectedUserForPermisos(createdPreviewUser);
       } else {
         alert(
-          plainEmailSent
-            ? 'Usuario creado y notificación en texto plano enviada desde el correo institucional.'
-            : 'Usuario creado exitosamente.'
+          confirmUrl && plainEmailSent
+            ? `Usuario creado. Se envió el enlace de confirmación en texto plano desde ${remitenteCorreo}.`
+            : plainEmailSent
+              ? `Usuario creado y notificación en texto plano enviada desde ${remitenteCorreo}.`
+              : 'Usuario creado exitosamente.'
         );
       }
       
@@ -767,6 +824,58 @@ export default function Accesos() {
       setFormError(error.message || 'Ocurrió un error al crear el usuario.');
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const handleSendConfirmationLink = async (targetUser: any) => {
+    if (!targetUser?.id || !targetUser?.email) return;
+    setSendingConfirmUserId(targetUser.id);
+    try {
+      const { data, error } = await supabase.rpc('admin_generar_token_confirmacion', {
+        target_user_id: targetUser.id,
+      });
+
+      if (error || !data?.confirmation_token) {
+        // Fallback: intentar confirmar directamente con admin_confirm_user_email si Migración 43 no está aplicada
+        const { data: confirmed, error: confirmErr } = await supabase.rpc('admin_confirm_user_email', {
+          target_user_id: targetUser.id,
+        });
+        if (confirmErr || !confirmed) {
+          throw new Error(
+            'Para enviar enlaces de confirmación vía ' +
+            remitenteCorreo +
+            ', ejecuta la Migración 43 en Supabase SQL Editor (Ajustes del Sistema -> Migraciones).'
+          );
+        }
+        await fetchData();
+        alert(`El correo de ${targetUser.email} fue confirmado directamente en la base de datos.`);
+        return;
+      }
+
+      const confirmUrl = `${getOfficialLoginUrl()}?confirm_token=${encodeURIComponent(data.confirmation_token)}`;
+      const texto = generarTextoCorreoConfirmacionEnlace({
+        remitenteNombre,
+        remitenteCorreo,
+        destinatarioCorreo: targetUser.email,
+        destinatarioNombre: getUserDisplayName(targetUser),
+        confirmUrl,
+      });
+
+      await sendEmailNotification({
+        remitente: `${remitenteNombre} <${remitenteCorreo}>`,
+        destinatario: targetUser.email,
+        asunto: 'Confirma tu correo electronico - Cruz Verde Salvadorena',
+        cuerpoTexto: texto,
+        soloTextoPlano: true,
+        tipo: 'confirmacion_correo',
+      });
+
+      alert(`Enlace de confirmación en texto plano enviado a ${targetUser.email} desde ${remitenteCorreo}.`);
+    } catch (err: any) {
+      console.error('Error enviando enlace de confirmación:', err);
+      alert(err.message || 'No se pudo enviar el enlace de confirmación.');
+    } finally {
+      setSendingConfirmUserId(null);
     }
   };
 
@@ -1413,6 +1522,189 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql42Copied(false), 3000);
   };
 
+  const handleCopySqlMigration43 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 43: CREACIÓN DE USUARIOS Y ENLACES DE CONFIRMACIÓN SIN LÍMITE DE SUPABASE
+-- =========================================================================================
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
+ALTER TABLE IF EXISTS public.user_roles
+  ADD COLUMN IF NOT EXISTS nombre_completo TEXT,
+  ADD COLUMN IF NOT EXISTS nombre_usuario TEXT;
+
+CREATE TABLE IF NOT EXISTS public.email_confirmation_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '48 hours'),
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.email_confirmation_tokens ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.admin_create_user(
+  p_email TEXT,
+  p_password TEXT,
+  p_nombre_usuario TEXT,
+  p_role TEXT DEFAULT 'socorrista',
+  p_socorrista_id INTEGER DEFAULT NULL,
+  p_can_upload_files BOOLEAN DEFAULT false,
+  p_custom_permissions JSONB DEFAULT '{}'::jsonb,
+  p_requires_password_reset BOOLEAN DEFAULT false,
+  p_auto_confirm BOOLEAN DEFAULT true
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+  v_email TEXT;
+  v_nombre TEXT;
+  v_role TEXT;
+  v_user_id UUID;
+  v_token TEXT := NULL;
+BEGIN
+  IF NOT (
+    public.is_admin()
+    OR (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com'
+    OR EXISTS (
+      SELECT 1 FROM public.user_roles
+      WHERE id = auth.uid()
+        AND (role IN ('admin', 'superadmin') OR (custom_permissions ->> 'perm_accesos') = 'true')
+    )
+  ) THEN
+    RAISE EXCEPTION 'Acceso denegado: solo administradores pueden crear usuarios.';
+  END IF;
+
+  v_email := lower(trim(COALESCE(p_email, '')));
+  v_nombre := trim(COALESCE(p_nombre_usuario, ''));
+  v_role := COALESCE(NULLIF(trim(p_role), ''), 'socorrista');
+
+  IF v_email = '' OR position('@' IN v_email) = 0 THEN
+    RAISE EXCEPTION 'Debe ingresar un correo electrónico válido.';
+  END IF;
+  IF p_password IS NULL OR length(p_password) < 6 THEN
+    RAISE EXCEPTION 'La contraseña debe tener al menos 6 caracteres.';
+  END IF;
+  IF v_nombre = '' THEN
+    v_nombre := split_part(v_email, '@', 1);
+  END IF;
+  IF EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = v_email) THEN
+    RAISE EXCEPTION 'Este correo electrónico ya se encuentra registrado en el sistema.';
+  END IF;
+
+  v_user_id := gen_random_uuid();
+
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change,
+    raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    v_user_id, 'authenticated', 'authenticated', v_email,
+    extensions.crypt(p_password, extensions.gen_salt('bf')),
+    CASE WHEN COALESCE(p_auto_confirm, true) THEN NOW() ELSE NULL END,
+    '', '', '', '',
+    jsonb_build_object('provider', 'email', 'providers', ARRAY['email']),
+    jsonb_build_object('full_name', v_nombre, 'nombre_completo', v_nombre, 'nombre_usuario', v_nombre, 'socorrista_id', p_socorrista_id),
+    false, NOW(), NOW()
+  );
+
+  INSERT INTO auth.identities (
+    id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+  ) VALUES (
+    gen_random_uuid(), v_user_id,
+    jsonb_build_object('sub', v_user_id::text, 'email', v_email, 'email_verified', COALESCE(p_auto_confirm, true), 'phone_verified', false),
+    'email', v_user_id::text, NOW(), NOW(), NOW()
+  );
+
+  INSERT INTO public.user_roles (
+    id, role, activo, estado, socorrista_id, nombre_completo, nombre_usuario,
+    can_upload_files, custom_permissions, requires_password_reset
+  ) VALUES (
+    v_user_id, v_role, true, 'activo', p_socorrista_id, v_nombre, v_nombre,
+    COALESCE(p_can_upload_files, false), COALESCE(p_custom_permissions, '{}'::jsonb), COALESCE(p_requires_password_reset, false)
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    role = EXCLUDED.role, activo = true, estado = 'activo', socorrista_id = EXCLUDED.socorrista_id,
+    nombre_completo = EXCLUDED.nombre_completo, nombre_usuario = EXCLUDED.nombre_usuario,
+    can_upload_files = EXCLUDED.can_upload_files, custom_permissions = EXCLUDED.custom_permissions,
+    requires_password_reset = EXCLUDED.requires_password_reset;
+
+  IF NOT COALESCE(p_auto_confirm, true) THEN
+    v_token := encode(extensions.gen_random_bytes(24), 'hex');
+    INSERT INTO public.email_confirmation_tokens (user_id, email, token)
+    VALUES (v_user_id, v_email, v_token);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'user_id', v_user_id,
+    'email', v_email,
+    'auto_confirmed', COALESCE(p_auto_confirm, true),
+    'confirmation_token', v_token
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_create_user(TEXT, TEXT, TEXT, TEXT, INTEGER, BOOLEAN, JSONB, BOOLEAN, BOOLEAN) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_generar_token_confirmacion(target_user_id UUID)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, extensions AS $$
+DECLARE
+  v_email TEXT;
+  v_token TEXT;
+BEGIN
+  IF NOT (
+    public.is_admin() OR (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com'
+    OR EXISTS (SELECT 1 FROM public.user_roles WHERE id = auth.uid() AND (role IN ('admin', 'superadmin') OR (custom_permissions ->> 'perm_accesos') = 'true'))
+  ) THEN
+    RAISE EXCEPTION 'Acceso denegado';
+  END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = target_user_id;
+  IF v_email IS NULL THEN RAISE EXCEPTION 'Usuario no encontrado'; END IF;
+  UPDATE public.email_confirmation_tokens SET used_at = NOW() WHERE user_id = target_user_id AND used_at IS NULL;
+  v_token := encode(extensions.gen_random_bytes(24), 'hex');
+  INSERT INTO public.email_confirmation_tokens (user_id, email, token) VALUES (target_user_id, v_email, v_token);
+  RETURN jsonb_build_object('user_id', target_user_id, 'email', v_email, 'confirmation_token', v_token);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_generar_token_confirmacion(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.confirmar_cuenta_por_token(p_token TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_rec RECORD;
+BEGIN
+  IF p_token IS NULL OR trim(p_token) = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Token de confirmación inválido.');
+  END IF;
+  SELECT * INTO v_rec FROM public.email_confirmation_tokens WHERE token = trim(p_token) LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'El enlace de confirmación no existe o ya no es válido.');
+  END IF;
+  IF v_rec.used_at IS NOT NULL THEN
+    RETURN jsonb_build_object('ok', true, 'email', v_rec.email, 'already_confirmed', true);
+  END IF;
+  IF v_rec.expires_at < NOW() THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'El enlace de confirmación ha expirado.');
+  END IF;
+  UPDATE public.email_confirmation_tokens SET used_at = NOW() WHERE id = v_rec.id;
+  UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, NOW()), updated_at = NOW() WHERE id = v_rec.user_id;
+  UPDATE auth.identities SET identity_data = COALESCE(identity_data, '{}'::jsonb) || '{"email_verified": true}'::jsonb, updated_at = NOW() WHERE user_id = v_rec.user_id;
+  RETURN jsonb_build_object('ok', true, 'email', v_rec.email, 'already_confirmed', false);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.confirmar_cuenta_por_token(TEXT) TO anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql43Copied(true);
+    setTimeout(() => setSql43Copied(false), 3000);
+  };
+
   const availableFilterRoles = Array.from(
     new Set([
       ...(roles || []),
@@ -1878,36 +2170,54 @@ NOTIFY pgrst, 'reload schema';`;
 
                           {/* Estado Activo/Inactivo */}
                           <td className="px-5 py-4 whitespace-nowrap">
-                            <div className="flex items-center space-x-2">
-                              {isInactive ? (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-red-100 text-red-800 border border-red-200">
-                                  <XCircle className="w-3 h-3 mr-1 text-red-600" />
-                                  Inactivo (Bloqueado)
-                                </span>
-                              ) : isPending ? (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <Clock className="w-3 h-3 mr-1 text-amber-600" />
-                                  Pendiente
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
-                                  Activo
-                                </span>
-                              )}
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center space-x-2">
+                                {isInactive ? (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-red-100 text-red-800 border border-red-200">
+                                    <XCircle className="w-3 h-3 mr-1 text-red-600" />
+                                    Inactivo (Bloqueado)
+                                  </span>
+                                ) : isPending ? (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                    <Clock className="w-3 h-3 mr-1 text-amber-600" />
+                                    Pendiente
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
+                                    Activo
+                                  </span>
+                                )}
 
-                              {/* Botón de Alternar Estado */}
-                              <button
-                                onClick={() => handleToggleUserActive(user)}
-                                className={`px-2 py-1 rounded text-2xs font-bold transition-colors cursor-pointer ${
-                                  isInactive 
-                                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200' 
-                                    : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
-                                }`}
-                                title={isInactive ? "Activar usuario" : "Desactivar usuario"}
-                              >
-                                {isInactive ? 'Activar' : 'Desactivar'}
-                              </button>
+                                {/* Botón de Alternar Estado */}
+                                <button
+                                  onClick={() => handleToggleUserActive(user)}
+                                  className={`px-2 py-1 rounded text-2xs font-bold transition-colors cursor-pointer ${
+                                    isInactive 
+                                      ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200' 
+                                      : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
+                                  }`}
+                                  title={isInactive ? "Activar usuario" : "Desactivar usuario"}
+                                >
+                                  {isInactive ? 'Activar' : 'Desactivar'}
+                                </button>
+                              </div>
+                              {!user.email_confirmed_at && !user.confirmed_at && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-3xs text-amber-700 font-semibold">
+                                    Correo sin confirmar
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={sendingConfirmUserId === user.id}
+                                    onClick={() => handleSendConfirmationLink(user)}
+                                    className="text-3xs font-bold text-indigo-700 hover:text-indigo-900 underline cursor-pointer disabled:opacity-50"
+                                    title={`Enviar enlace de confirmación vía ${remitenteCorreo}`}
+                                  >
+                                    {sendingConfirmUserId === user.id ? 'Enviando...' : 'Enviar confirmación'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </td>
 
@@ -2364,6 +2674,30 @@ NOTIFY pgrst, 'reload schema';`;
                       {sql42Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
                     </button>
                   </div>
+
+                  {/* Migración 43 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-emerald-50/40">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-emerald-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        43
+                      </span>
+                      <div>
+                        <span className="text-xs font-semibold text-gray-900 block">
+                          Creación de Usuarios y Confirmación Sin Límite (Soluciona &quot;email rate limit exceeded&quot;)
+                        </span>
+                        <span className="text-3xs text-gray-500">
+                          Crea usuarios vía SQL y envía el enlace de confirmación desde {remitenteCorreo} en texto plano
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration43}
+                      className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql43Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2646,7 +2980,9 @@ NOTIFY pgrst, 'reload schema';`;
                             className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
                           />
                           <span className="text-2xs text-gray-700 font-medium leading-tight">
-                            Confirmar correo automáticamente en la base de datos (SQL)
+                            {newUserAutoConfirmEmail
+                              ? 'Confirmar correo automáticamente al crear (acceso inmediato sin enlace)'
+                              : `Solicitar confirmación enviando enlace propio en texto plano desde ${remitenteCorreo}`}
                           </span>
                         </label>
 

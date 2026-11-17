@@ -309,6 +309,7 @@ export function generarTextoCorreoCreacionUsuario(params: {
   requiereCambioPassword?: boolean;
   seccionalNombre?: string;
   cuentaConfirmada?: boolean;
+  confirmUrl?: string;
   loginUrl?: string;
 }): string {
   const loginUrl = params.loginUrl || getOfficialLoginUrl();
@@ -334,6 +335,11 @@ export function generarTextoCorreoCreacionUsuario(params: {
   }
   if (params.cuentaConfirmada) {
     lines.push('- Estado del correo: Confirmado y listo para ingresar');
+  } else if (params.confirmUrl) {
+    lines.push('- Estado del correo: Pendiente de confirmacion');
+    lines.push('');
+    lines.push('PARA CONFIRMAR TU CORREO Y ACTIVAR TU INGRESO, ABRE ESTE ENLACE:');
+    lines.push(params.confirmUrl);
   } else {
     lines.push('- Estado del correo: Si recibes un enlace de confirmacion de acceso, abrelo antes de iniciar sesion.');
   }
@@ -352,6 +358,32 @@ export function generarTextoCorreoCreacionUsuario(params: {
   return lines.join('\n');
 }
 
+export function generarTextoCorreoConfirmacionEnlace(params: {
+  remitenteNombre: string;
+  remitenteCorreo: string;
+  destinatarioCorreo: string;
+  destinatarioNombre?: string;
+  confirmUrl: string;
+}): string {
+  const lines: string[] = [
+    'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
+    'CONFIRMACION DE CORREO ELECTRONICO',
+    '',
+    `Hola, ${params.destinatarioNombre || params.destinatarioCorreo}:`,
+    '',
+    'Para confirmar tu direccion de correo electronico y habilitar tu acceso al Sistema Institucional, abre el siguiente enlace:',
+    '',
+    params.confirmUrl,
+    '',
+    'Este enlace tiene una validez de 48 horas.',
+    '',
+    '---',
+    `Enviado por: ${params.remitenteNombre} <${params.remitenteCorreo}>`,
+    'Correo automatico de solo envio (No responder a este mensaje).',
+  ];
+  return lines.join('\n');
+}
+
 export function generarTextoCorreoAprobacion(params: EmailTemplateParams): string {
   const loginUrl = params.loginUrl || getOfficialLoginUrl();
   const displayRol = (params.rolAsignado || params.rolNombre || 'socorrista').toUpperCase();
@@ -367,7 +399,9 @@ export function generarTextoCorreoAprobacion(params: EmailTemplateParams): strin
     `- Usuario / Correo: ${params.destinatarioCorreo}`,
     `- Rol asignado: ${displayRol}`,
     ...(params.seccionalNombre ? [`- Seccional asignada: ${params.seccionalNombre}`] : []),
+    ...(params.temporalPassword ? [`- Contrasena temporal asignada: ${params.temporalPassword}`] : []),
     '- Estado: ACTIVO / HABILITADO',
+    ...(params.temporalPassword ? ['', 'Al iniciar sesion con esta clave temporal, el sistema te solicitara crear tu contrasena personal.'] : []),
     '',
     `Puedes iniciar sesion en: ${loginUrl}`,
     '',
