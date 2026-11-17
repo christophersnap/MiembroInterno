@@ -401,6 +401,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ver_todos_formularios: canViewAllFormularios,
           view_meritos: permData.permissions.view_meritos ?? true,
           edit_meritos: permData.permissions.edit_meritos ?? (currentRole === 'admin' || currentRole === 'director'),
+          view_soporte: permData.permissions.view_soporte ?? true,
+          view_soporte_historial: permData.permissions.view_soporte_historial ?? (currentRole === 'admin'),
+          edit_soporte_estado: permData.permissions.edit_soporte_estado ?? (currentRole === 'admin'),
           personalizar_colores: canPersonalizarColores
         };
       } else {
@@ -425,6 +428,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: true, edit_noticias_banner: true,
             view_formularios: true, crear_formularios: true, edit_formularios: true, ver_todos_formularios: true,
             view_meritos: true, edit_meritos: true,
+            view_soporte: true, view_soporte_historial: true, edit_soporte_estado: true,
             personalizar_colores: true
           };
         } else if (currentRole === 'instructor') {
@@ -448,6 +452,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
+            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         } else if (currentRole === 'director') {
@@ -471,6 +476,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: true,
+            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         } else {
@@ -493,6 +499,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
+            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         }
@@ -537,6 +544,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         finalMergedPerms.view_noticias_ajustes = true;
       } else if (typeof userCustomPerms.view_noticias_ajustes === 'boolean' && !userCustomPerms.view_noticias_ajustes && typeof userCustomPerms.edit_noticias_banner !== 'boolean') {
         finalMergedPerms.edit_noticias_banner = false;
+      }
+
+      if (typeof userCustomPerms.edit_soporte_estado === 'boolean' && userCustomPerms.edit_soporte_estado && typeof userCustomPerms.view_soporte_historial !== 'boolean') {
+        finalMergedPerms.view_soporte_historial = true;
+      } else if (typeof userCustomPerms.view_soporte_historial === 'boolean' && !userCustomPerms.view_soporte_historial && typeof userCustomPerms.edit_soporte_estado !== 'boolean') {
+        finalMergedPerms.edit_soporte_estado = false;
       }
 
       // Special check for can_upload_files column only when no explicit override denies it

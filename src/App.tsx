@@ -41,6 +41,7 @@ const Formularios = React.lazy(() => import('./pages/Formularios'));
 const Meritos = React.lazy(() => import('./pages/Meritos'));
 const PublicFormulario = React.lazy(() => import('./pages/PublicFormulario'));
 const PublicSolicitudPdf = React.lazy(() => import('./pages/PublicSolicitudPdf'));
+const Soporte = React.lazy(() => import('./pages/Soporte'));
 
 const ProtectedRoute = ({ children, requiredPermission, anyPermission }: { children: React.ReactNode, requiredPermission?: string, anyPermission?: string[] }) => {
   const { user, permissions, requiresPasswordReset, loading } = useAuth();
@@ -123,6 +124,7 @@ export default function App() {
               <Route path="anuncios" element={<ProtectedRoute requiredPermission="view_anuncios"><Anuncios /></ProtectedRoute>} />
               <Route path="noticias" element={<ProtectedRoute anyPermission={['view_noticias_ajustes', 'edit_noticias_banner']}><Noticias /></ProtectedRoute>} />
               <Route path="noticias/ver/:id" element={<NoticiaLanding />} />
+              <Route path="soporte" element={<ProtectedRoute requiredPermission="view_soporte"><Soporte /></ProtectedRoute>} />
               <Route path="accesos" element={<ProtectedRoute requiredPermission="view_accesos"><Accesos /></ProtectedRoute>} />
             </Route>
           </Routes>

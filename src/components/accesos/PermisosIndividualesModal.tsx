@@ -131,6 +131,9 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'ver_todas_seccionales',
       'ver_personas_conectadas',
       'personalizar_colores',
+      'view_soporte',
+      'view_soporte_historial',
+      'edit_soporte_estado',
       'view_config',
       'view_activity',
       'view_accesos',
@@ -246,6 +249,12 @@ const SIMPLE_VIEW_EDIT_MODULES: {
     viewKey: 'view_directorio',
     editKeys: ['edit_directorio'],
   },
+  {
+    label: 'Soporte Técnico (Historial Global y Finalizar Casos)',
+    desc: 'Permitir ver el historial completo de reportes de soporte de todos los usuarios, agregar notas y cambiar el estado a Finalizado.',
+    viewKey: 'view_soporte_historial',
+    editKeys: ['edit_soporte_estado'],
+  },
 ];
 
 export default function PermisosIndividualesModal({
@@ -288,6 +297,7 @@ export default function PermisosIndividualesModal({
       view_meritos: true,
       view_anuncios: true,
       view_formularios: true,
+      view_soporte: true,
     };
   }, [user.role, rolePermissions, permissionLabels]);
 

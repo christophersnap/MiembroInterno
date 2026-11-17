@@ -85,10 +85,10 @@ export default function Solicitudes() {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'carnet' && canViewCarnet) {
       setActiveMainTab('carnet');
+    } else if (tabParam !== 'carnet' && canViewLogistica) {
+      setActiveMainTab('logistica');
     } else if (!canViewLogistica && canViewCarnet) {
       setActiveMainTab('carnet');
-    } else if (canViewLogistica && activeMainTab === 'carnet' && tabParam !== 'carnet') {
-      // keep current if user explicitly clicked
     }
   }, [searchParams, canViewCarnet, canViewLogistica]);
 

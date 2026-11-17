@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, BookOpen, MapPin, Settings, LogOut, Menu, X, 
   IdCard, ChevronLeft, ChevronRight, User as UserIcon, Activity, Shield, 
   PhoneCall, BadgeCheck, FileText, Truck, ClipboardList, Fuel, FolderDown, 
-  Megaphone, Newspaper, Sparkles, ChevronDown, Palette, FileSpreadsheet, Award
+  Megaphone, Newspaper, Sparkles, ChevronDown, Palette, FileSpreadsheet, Award, LifeBuoy
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -12,6 +12,7 @@ import { usePresence } from '../hooks/usePresence';
 import { supabase } from '../lib/supabase';
 import MisAccesosModal from './accesos/MisAccesosModal';
 import PresenceModal from './PresenceModal';
+import SoporteFormModal from './soporte/SoporteFormModal';
 
 interface NavItem {
   name: string;
@@ -33,13 +34,17 @@ export default function Layout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showMisAccesosModal, setShowMisAccesosModal] = useState(false);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const [showSoporteModal, setShowSoporteModal] = useState(false);
   const canViewOnlineUsers = role === 'admin' || Boolean(permissions.ver_personas_conectadas);
+  const canViewSoporte = permissions.view_soporte ?? true;
+  const canViewSoporteHistorial = role === 'admin' || Boolean(permissions.view_soporte_historial || permissions.edit_soporte_estado);
 
   // Estados para notificaciones de solicitudes no leídas
   const [unreadCombustible, setUnreadCombustible] = useState(0);
   const [unreadCompra, setUnreadCompra] = useState(0);
   const [unreadCarnet, setUnreadCarnet] = useState(0);
   const [unreadGeneral, setUnreadGeneral] = useState(0);
+  const [unreadSoporte, setUnreadSoporte] = useState(0);
 
   const checkUnreadSolicitudes = async () => {
     try {
@@ -121,10 +126,11 @@ export default function Layout() {
           if (typeof count === 'number') carnetPending = count;
         } catch (e) {}
       }
-      setUnreadCarnet(location.pathname === '/solicitudes' ? 0 : carnetPending);
+      const viewingCarnetTab = location.pathname === '/solicitudes' && location.search.includes('tab=carnet');
+      setUnreadCarnet(viewingCarnetTab ? 0 : carnetPending);
 
       // 4. Solicitudes generales
-      if (location.pathname === '/solicitudes') {
+      if (location.pathname === '/solicitudes' && !location.search.includes('tab=carnet')) {
         setUnreadGeneral(0);
       } else {
         const allItems = [...combItems, ...compItems];
@@ -135,8 +141,21 @@ export default function Layout() {
           }
           return itemTime > lastSeenGen;
         }).length;
-        setUnreadGeneral(unreadGen + carnetPending);
+        setUnreadGeneral(unreadGen);
       }
+
+      // 5. Tickets de soporte pendientes (si tiene permiso de historial)
+      let soportePending = 0;
+      if (canViewSoporteHistorial) {
+        try {
+          const { count } = await supabase
+            .from('soporte_tickets')
+            .select('id', { count: 'exact', head: true })
+            .neq('estado', 'Finalizado');
+          if (typeof count === 'number') soportePending = count;
+        } catch {}
+      }
+      setUnreadSoporte(location.pathname === '/soporte' ? 0 : soportePending);
 
     } catch (e) {
       // Ignorar errores silenciosos
@@ -146,33 +165,39 @@ export default function Layout() {
   // Limpiar badges según la ruta activa al ingresar
   useEffect(() => {
     const now = Date.now().toString();
-    if (location.pathname === '/solicitudes') {
+    if (location.pathname === '/solicitudes' && !location.search.includes('tab=carnet')) {
       localStorage.setItem('cv_last_seen_solicitudes', now);
       setUnreadGeneral(0);
+    } else if (location.pathname === '/solicitudes' && location.search.includes('tab=carnet')) {
+      setUnreadCarnet(0);
     } else if (location.pathname === '/solicitudes-combustible') {
       localStorage.setItem('cv_last_seen_combustible', now);
       setUnreadCombustible(0);
     } else if (location.pathname === '/solicitudes-compra') {
       localStorage.setItem('cv_last_seen_compra', now);
       setUnreadCompra(0);
+    } else if (location.pathname === '/soporte') {
+      setUnreadSoporte(0);
     }
     checkUnreadSolicitudes();
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   // Escuchar eventos globales y polling periódico
   useEffect(() => {
     const handleUpdate = () => checkUnreadSolicitudes();
     window.addEventListener('solicitudes_updated', handleUpdate);
+    window.addEventListener('soporte_updated', handleUpdate);
     window.addEventListener('focus', handleUpdate);
     const interval = setInterval(checkUnreadSolicitudes, 15000);
     return () => {
       window.removeEventListener('solicitudes_updated', handleUpdate);
+      window.removeEventListener('soporte_updated', handleUpdate);
       window.removeEventListener('focus', handleUpdate);
       clearInterval(interval);
     };
   }, []);
 
-  const totalUnreadSolicitudes = unreadGeneral > 0 ? unreadGeneral : (unreadCombustible + unreadCompra + unreadCarnet);
+  const totalUnreadSolicitudes = unreadGeneral > 0 ? unreadGeneral : (unreadCombustible + unreadCompra);
 
   const navigation: NavItem[] = [
     // Principal
@@ -192,7 +217,8 @@ export default function Layout() {
     { name: 'Directorio', href: '/directorio', icon: PhoneCall, show: permissions.view_directorio, category: 'operaciones' },
     
     // Gestión & Solicitudes
-    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(role === 'admin' || permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible || permissions.view_solicitudes_carnet), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
+    { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(role === 'admin' || permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
+    { name: 'Solicitudes de Carnet', href: '/solicitudes?tab=carnet', icon: IdCard, show: Boolean(role === 'admin' || permissions.view_solicitudes_carnet), category: 'gestion', badge: unreadCarnet > 0 ? unreadCarnet : undefined },
     { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: permissions.view_solicitudes_compra ?? true, category: 'gestion', badge: unreadCompra > 0 ? unreadCompra : undefined },
     { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: permissions.view_solicitudes_combustible ?? true, category: 'gestion', badge: unreadCombustible > 0 ? unreadCombustible : undefined },
     
@@ -202,6 +228,7 @@ export default function Layout() {
     { name: 'Verificar Carnet', href: '/verificar', icon: BadgeCheck, show: permissions.view_verificar_carnet, category: 'identificacion' },
     
     // Sistema
+    { name: 'Soporte', href: '/soporte', icon: LifeBuoy, show: canViewSoporte, category: 'sistema', badge: unreadSoporte > 0 ? unreadSoporte : undefined },
     { name: 'Actividad', href: '/actividad', icon: Activity, show: permissions.view_activity, category: 'sistema' },
     { name: 'Accesos', href: '/accesos', icon: Shield, show: permissions.view_accesos, category: 'sistema' },
     { name: 'Configuración', href: '/configuracion', icon: Settings, show: permissions.view_config, category: 'sistema' },
@@ -225,6 +252,12 @@ export default function Layout() {
 
   const isItemActive = (itemHref: string) => {
     const current = location.pathname + location.search;
+    if (itemHref === '/solicitudes') {
+      return location.pathname === '/solicitudes' && !location.search.includes('tab=carnet');
+    }
+    if (itemHref === '/solicitudes?tab=carnet') {
+      return location.pathname === '/solicitudes' && location.search.includes('tab=carnet');
+    }
     if (itemHref.includes('?')) {
       return current === itemHref;
     }
@@ -663,6 +696,31 @@ export default function Layout() {
           activeUsers={activeUsers}
           onRefresh={refreshPresence}
         />
+      )}
+
+      {/* Botón pequeño flotante de Soporte (reporte rápido de anomalías desde cualquier módulo) */}
+      {canViewSoporte && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowSoporteModal(true)}
+            title="Reportar anomalía o solicitar soporte"
+            className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-900/95 hover:bg-emerald-700 text-white text-xs font-bold shadow-lg border border-white/15 backdrop-blur-xs transition-all hover:scale-105 cursor-pointer"
+          >
+            <LifeBuoy className="w-4 h-4 text-emerald-400" />
+            <span>Soporte</span>
+            {canViewSoporteHistorial && unreadSoporte > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-500 text-white leading-tight">
+                {unreadSoporte > 99 ? '99+' : unreadSoporte}
+              </span>
+            )}
+          </button>
+
+          <SoporteFormModal
+            isOpen={showSoporteModal}
+            onClose={() => setShowSoporteModal(false)}
+          />
+        </>
       )}
     </div>
   );

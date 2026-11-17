@@ -262,6 +262,28 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS soporte_tickets (
+    id TEXT PRIMARY KEY,
+    folio TEXT UNIQUE,
+    usuario_id TEXT,
+    usuario_nombre TEXT NOT NULL,
+    usuario_email TEXT,
+    seccional_id INTEGER,
+    seccional_nombre TEXT,
+    motivo TEXT NOT NULL,
+    tipo_caso TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    imagenes TEXT DEFAULT '[]',
+    ruta_origen TEXT,
+    estado TEXT DEFAULT 'Pendiente',
+    nota_resolucion TEXT,
+    atendido_por_id TEXT,
+    atendido_por_nombre TEXT,
+    fecha_finalizacion TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 try { db.exec(`ALTER TABLE noticias_banner ADD COLUMN imagen_banner_url TEXT;`); } catch {}
@@ -1649,6 +1671,124 @@ async function startServer() {
     try {
       const { id } = req.params;
       db.prepare('DELETE FROM formulario_respuestas WHERE id = ?').run(id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- Endpoints de Soporte Técnico e Incidencias ---
+  app.get('/api/soporte', (req, res) => {
+    try {
+      const showAll = req.query.all === 'true';
+      const usuarioId = String(req.query.usuario_id || '').trim();
+      const usuarioEmail = String(req.query.usuario_email || '').trim().toLowerCase();
+
+      let rows: any[] = [];
+      if (showAll) {
+        rows = db.prepare('SELECT * FROM soporte_tickets ORDER BY created_at DESC').all();
+      } else {
+        rows = db
+          .prepare(
+            `SELECT * FROM soporte_tickets
+             WHERE (usuario_id IS NOT NULL AND usuario_id = ?)
+                OR (usuario_email IS NOT NULL AND LOWER(usuario_email) = ?)
+             ORDER BY created_at DESC`
+          )
+          .all(usuarioId, usuarioEmail);
+      }
+
+      res.json(
+        rows.map((r: any) => ({
+          ...r,
+          imagenes: (() => {
+            try {
+              return JSON.parse(r.imagenes || '[]');
+            } catch {
+              return [];
+            }
+          })(),
+        }))
+      );
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/soporte', (req, res) => {
+    try {
+      const {
+        id = `sop-${Date.now()}`,
+        folio,
+        usuario_id = null,
+        usuario_nombre = 'Usuario',
+        usuario_email = null,
+        seccional_id = null,
+        seccional_nombre = null,
+        motivo,
+        tipo_caso = 'Sistema',
+        descripcion,
+        imagenes = [],
+        ruta_origen = null,
+        estado = 'Pendiente',
+      } = req.body;
+
+      if (!motivo || !descripcion) {
+        return res.status(400).json({ error: 'Motivo y descripción son obligatorios' });
+      }
+
+      db.prepare(
+        `INSERT OR REPLACE INTO soporte_tickets (
+          id, folio, usuario_id, usuario_nombre, usuario_email,
+          seccional_id, seccional_nombre, motivo, tipo_caso, descripcion,
+          imagenes, ruta_origen, estado, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM soporte_tickets WHERE id = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
+      ).run(
+        id,
+        folio || `SOP-${Date.now()}`,
+        usuario_id,
+        usuario_nombre,
+        usuario_email,
+        seccional_id,
+        seccional_nombre,
+        motivo,
+        tipo_caso,
+        descripcion,
+        JSON.stringify(imagenes || []),
+        ruta_origen,
+        estado,
+        id
+      );
+
+      res.json({ success: true, id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch('/api/soporte/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const { estado, nota_resolucion, atendido_por_id, atendido_por_nombre, fecha_finalizacion } = req.body;
+
+      db.prepare(
+        `UPDATE soporte_tickets
+         SET estado = COALESCE(?, estado),
+             nota_resolucion = ?,
+             atendido_por_id = COALESCE(?, atendido_por_id),
+             atendido_por_nombre = COALESCE(?, atendido_por_nombre),
+             fecha_finalizacion = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      ).run(
+        estado || null,
+        nota_resolucion ?? null,
+        atendido_por_id || null,
+        atendido_por_nombre || null,
+        fecha_finalizacion || null,
+        id
+      );
+
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

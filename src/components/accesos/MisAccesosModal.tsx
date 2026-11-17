@@ -298,6 +298,21 @@ const PERMISSION_DESCRIPTIONS: Record<string, PermissionMeta> = {
     desc: 'Ajustar colores institucionales y apariencia del sistema.',
     category: 'Administración',
   },
+  view_soporte: {
+    label: 'Centro de Soporte y Reporte de Anomalías',
+    desc: 'Enviar reportes de soporte con capturas y dar seguimiento a tus propias solicitudes.',
+    category: 'Administración',
+  },
+  view_soporte_historial: {
+    label: 'Historial Global de Soporte',
+    desc: 'Consultar todas las solicitudes de soporte enviadas por los usuarios del sistema.',
+    category: 'Administración',
+  },
+  edit_soporte_estado: {
+    label: 'Finalizar y Resolver Solicitudes de Soporte',
+    desc: 'Cambiar el estado de los casos de soporte a Finalizado y agregar notas de resolución.',
+    category: 'Administración',
+  },
   view_config: {
     label: 'Ajustes de Verificación',
     desc: 'Configurar parámetros institucionales y logotipos.',
