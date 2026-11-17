@@ -8,6 +8,7 @@ import { generateSecureQrToken } from '../utils/qrSecurity';
 import { getApiUrl } from '../lib/api';
 
 import WatermarkImage from '../components/WatermarkImage';
+import SmartStorageImage from '../components/common/SmartStorageImage';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
 
 export const VERIFICATION_FIELD_DEFINITIONS = [
@@ -1713,17 +1714,14 @@ export default function GenerarCarnet() {
                       !previewSolicitudPhoto ? 'bg-emerald-50/50 border-emerald-300 ring-2 ring-emerald-500/20' : 'bg-gray-50 border-gray-200'
                     }`}>
                       <span className="text-3xs font-bold uppercase text-gray-600 mb-1.5">Foto Actual de Perfil</span>
-                      {selectedSocorrista.foto_url ? (
-                        <img
+                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-emerald-500 shadow-xs bg-gray-100 flex items-center justify-center">
+                        <SmartStorageImage
                           src={selectedSocorrista.foto_url}
                           alt="Foto actual oficial"
-                          className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 shadow-xs"
+                          className="w-full h-full object-cover"
+                          fallback={<span className="text-gray-400 text-3xs font-bold">Sin foto</span>}
                         />
-                      ) : (
-                        <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-3xs font-bold">
-                          Sin foto
-                        </div>
-                      )}
+                      </div>
                       <span className="text-3xs text-emerald-700 font-semibold mt-1">
                         {!previewSolicitudPhoto ? '● En uso oficial' : 'Oficial'}
                       </span>
@@ -1733,11 +1731,15 @@ export default function GenerarCarnet() {
                       previewSolicitudPhoto ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-500/20' : 'bg-gray-50 border-gray-200'
                     }`}>
                       <span className="text-3xs font-bold uppercase text-amber-800 mb-1.5">Nueva Foto Solicitada</span>
-                      <img
-                        src={selectedSocorrista.solicitud.foto_url}
-                        alt="Nueva foto solicitada"
-                        className="w-16 h-16 rounded-full object-cover border-2 border-amber-500 shadow-xs"
-                      />
+                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-amber-500 shadow-xs bg-gray-100 flex items-center justify-center">
+                        <SmartStorageImage
+                          src={selectedSocorrista.solicitud.foto_url}
+                          fallbackSrc={selectedSocorrista.foto_url}
+                          alt="Nueva foto solicitada"
+                          className="w-full h-full object-cover"
+                          fallback={<span className="text-amber-700 text-3xs font-bold">Sin foto</span>}
+                        />
+                      </div>
                       <span className="text-3xs text-amber-700 font-semibold mt-1">
                         {previewSolicitudPhoto ? '● Previsualizando' : 'Pendiente de aprobar'}
                       </span>

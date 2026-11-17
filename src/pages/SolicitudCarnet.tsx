@@ -19,6 +19,7 @@ import {
 import { useSettings } from '../contexts/SettingsContext';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 import CarnetSubmitConfirmModal from '../components/common/CarnetSubmitConfirmModal';
+import SmartStorageImage from '../components/common/SmartStorageImage';
 import {
   CarnetRequestStatusInfo,
   createCarnetSolicitudSafe,
@@ -26,6 +27,7 @@ import {
   formatCarnetRequestDate,
   isBlockingCarnetState,
   resubmitCarnetSolicitudSafe,
+  uploadCarnetPhotoWithFallback,
 } from '../utils/solicitudesCarnet';
 
 export default function SolicitudCarnet() {
@@ -176,6 +178,15 @@ export default function SolicitudCarnet() {
       setSubmitError("Por favor detalle el motivo.");
       return;
     }
+    const hasValidPhoto = Boolean(
+      fotoFile ||
+      (photoDecision === 'keep' && socorrista.foto_url) ||
+      (previousReviewInfo?.foto_url && resubmitMode === 'modify')
+    );
+    if (!hasValidPhoto) {
+      setSubmitError("Por favor toma o sube una fotografía oficial para el carnet antes de continuar.");
+      return;
+    }
     if (!confirmInformation || !confirmValidation || !confirmTime) {
       setSubmitError("Debe confirmar todos los términos para continuar.");
       return;
@@ -207,27 +218,17 @@ export default function SolicitudCarnet() {
       }
 
       let fotoUrl: string | null = null;
-      if (photoDecision === 'keep' && socorrista.foto_url && !fotoFile) {
+      if (fotoFile) {
+        fotoUrl = await uploadCarnetPhotoWithFallback(
+          fotoFile,
+          `${socorrista.carnet || carnet || `SOC_${socorrista.id}`}_solicitud`
+        );
+      } else if (photoDecision === 'keep' && socorrista.foto_url) {
         fotoUrl = socorrista.foto_url;
-      } else if (fotoFile) {
-        const fileExt = (fotoFile.name.split('.').pop() || 'jpg').toLowerCase();
-        const fileName = `${carnet}_solicitud_${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage
-          .from('socorristas')
-          .upload(fileName, fotoFile, { upsert: true, contentType: 'image/jpeg' });
-
-        if (uploadError) {
-          console.warn("Storage upload warning, retrying with raw blob:", uploadError);
-          const { error: retryUploadErr } = await supabase.storage
-            .from('socorristas')
-            .upload(fileName, fotoFile);
-          if (retryUploadErr) throw retryUploadErr;
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('socorristas')
-          .getPublicUrl(fileName);
-        fotoUrl = publicUrl;
+      } else if (previousReviewInfo?.foto_url) {
+        fotoUrl = previousReviewInfo.foto_url;
+      } else if (socorrista.foto_url) {
+        fotoUrl = socorrista.foto_url;
       }
 
       const secObj = Array.isArray(socorrista.seccionales) ? socorrista.seccionales[0] : socorrista.seccionales;
@@ -269,12 +270,7 @@ export default function SolicitudCarnet() {
     } catch (error: any) {
       console.error("Error submitting request:", error);
       setShowSubmitConfirmModal(false);
-      if (fotoFile) {
-        setSubmitSuccess(true);
-        window.scrollTo(0, 0);
-      } else {
-        setSubmitError("Ocurrió un error al enviar la solicitud: " + (error?.message || "Error de red"));
-      }
+      setSubmitError("Ocurrió un error al enviar la solicitud: " + (error?.message || "Error de red"));
     } finally {
       setLoadingSubmit(false);
     }
@@ -626,11 +622,14 @@ export default function SolicitudCarnet() {
                 {socorrista.foto_url && (
                   <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/60 space-y-3">
                     <div className="flex items-center gap-3.5">
-                      <img
-                        src={socorrista.foto_url}
-                        alt="Fotografía actual en perfil"
-                        className="w-16 h-16 rounded-full object-cover border-2 border-emerald-400 shrink-0"
-                      />
+                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-emerald-400 bg-white flex items-center justify-center shrink-0">
+                        <SmartStorageImage
+                          src={socorrista.foto_url}
+                          alt="Fotografía actual en perfil"
+                          className="w-full h-full object-cover"
+                          fallback={<Camera className="w-6 h-6 text-emerald-500" />}
+                        />
+                      </div>
                       <div className="text-xs text-emerald-950">
                         <p className="font-bold">Este elemento ya cuenta con una fotografía registrada</p>
                         <p className="text-emerald-800 mt-0.5">
@@ -845,7 +844,7 @@ export default function SolicitudCarnet() {
                   dui: socorrista.dui || null,
                   fotoUrl:
                     fotoPreview ||
-                    (photoDecision === 'keep' ? socorrista.foto_url : null),
+                    (photoDecision === 'keep' ? socorrista.foto_url : previousReviewInfo?.foto_url || null),
                 },
               ]
             : []

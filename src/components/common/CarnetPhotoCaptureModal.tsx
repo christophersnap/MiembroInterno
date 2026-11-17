@@ -17,7 +17,7 @@ import {
   VideoOff,
   KeyRound,
 } from 'lucide-react';
-import getCroppedImg from '../../utils/cropImage';
+import { getCroppedImgResult } from '../../utils/cropImage';
 import CarnetPhotoGuideVisual from './CarnetPhotoGuideVisual';
 
 interface CarnetPhotoCaptureModalProps {
@@ -381,18 +381,17 @@ export default function CarnetPhotoCaptureModal({
     setProcessingCrop(true);
     setModalError(null);
     try {
-      const croppedUrl = await getCroppedImg(imageSrc, croppedAreaPixels);
-      if (croppedUrl) {
-        const res = await fetch(croppedUrl);
-        const blob = await res.blob();
-        const file = new File([blob], `carnet_foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        stopCameraStream();
-        onPhotoReady(file, croppedUrl);
-        onClose();
+      const cropped = await getCroppedImgResult(imageSrc, croppedAreaPixels, 0, 900);
+      if (!cropped || !cropped.blob || cropped.blob.size < 100) {
+        throw new Error('El recorte generó una imagen vacía.');
       }
+      const file = new File([cropped.blob], `carnet_foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      stopCameraStream();
+      onPhotoReady(file, cropped.dataUrl);
+      onClose();
     } catch (err) {
       console.error('Error cropping photo:', err);
-      setModalError('No se pudo recortar la fotografía. Intente nuevamente.');
+      setModalError('No se pudo recortar la fotografía. Intente nuevamente con otra imagen.');
     } finally {
       setProcessingCrop(false);
     }

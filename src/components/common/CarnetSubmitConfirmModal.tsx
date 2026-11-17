@@ -10,6 +10,7 @@ import {
   UserCheck,
   X,
 } from 'lucide-react';
+import SmartStorageImage from './SmartStorageImage';
 
 export interface CarnetConfirmItem {
   id: number;
@@ -131,15 +132,12 @@ export default function CarnetSubmitConfirmModal({
                     className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200/80"
                   >
                     <div className="w-11 h-11 rounded-full overflow-hidden bg-white border border-slate-200 shrink-0 flex items-center justify-center">
-                      {item.fotoUrl ? (
-                        <img
-                          src={item.fotoUrl}
-                          alt={item.nombre}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <ShieldCheck className="w-5 h-5 text-slate-400" />
-                      )}
+                      <SmartStorageImage
+                        src={item.fotoUrl}
+                        alt={item.nombre}
+                        className="w-full h-full object-cover"
+                        fallback={<ShieldCheck className="w-5 h-5 text-slate-400" />}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-extrabold text-slate-900 truncate">

@@ -25,12 +25,14 @@ import { useSettings } from '../contexts/SettingsContext';
 import { logActivity } from '../lib/logger';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 import CarnetSubmitConfirmModal from '../components/common/CarnetSubmitConfirmModal';
+import SmartStorageImage from '../components/common/SmartStorageImage';
 import {
   CarnetRequestStatusInfo,
   createCarnetSolicitudSafe,
   fetchLatestCarnetRequestsMap,
   formatCarnetRequestDate,
   isBlockingCarnetState,
+  uploadCarnetPhotoWithFallback,
 } from '../utils/solicitudesCarnet';
 
 interface StagedPhoto {
@@ -400,23 +402,10 @@ export default function SolicitudCarnetLote() {
         const staged = stagedPhotos[s.id];
 
         if (staged?.file) {
-          const ext = (staged.file.name.split('.').pop() || 'jpg').toLowerCase();
-          const fileName = `${s.carnet || `SOC_${s.id}`}_lote_${Date.now()}_${i}.${ext}`;
-          let uploadErr = (
-            await supabase.storage
-              .from('socorristas')
-              .upload(fileName, staged.file, { upsert: true, contentType: 'image/jpeg' })
-          ).error;
-
-          if (uploadErr) {
-            const retry = await supabase.storage.from('socorristas').upload(fileName, staged.file);
-            uploadErr = retry.error;
-          }
-
-          if (!uploadErr) {
-            const { data: { publicUrl } } = supabase.storage.from('socorristas').getPublicUrl(fileName);
-            fotoUrl = publicUrl;
-          }
+          fotoUrl = await uploadCarnetPhotoWithFallback(
+            staged.file,
+            `${s.carnet || `SOC_${s.id}`}_lote_${i}`
+          );
         }
 
         const res = await createCarnetSolicitudSafe({
@@ -774,10 +763,12 @@ export default function SolicitudCarnetLote() {
                               }`}
                             >
                               {effectivePhoto ? (
-                                <img
+                                <SmartStorageImage
                                   src={effectivePhoto}
+                                  fallbackSrc={s.foto_url}
                                   alt={s.nombre_completo}
                                   className="w-full h-full object-cover"
+                                  fallback={<Camera className="w-5 h-5 text-amber-500" />}
                                 />
                               ) : (
                                 <Camera className="w-5 h-5 text-amber-500" />

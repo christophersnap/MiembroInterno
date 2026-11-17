@@ -3,13 +3,11 @@ import {
   IdCard,
   Search,
   Filter,
-  Download,
   Eye,
   Edit3,
   CheckCircle2,
   Clock,
   AlertTriangle,
-  XCircle,
   Calendar,
   Building2,
   User,
@@ -19,10 +17,15 @@ import {
   FileSpreadsheet,
   Camera,
   MessageSquare,
+  ZoomIn,
+  ImagePlus,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/logger';
+import SmartStorageImage from '../common/SmartStorageImage';
+import CarnetPhotoCaptureModal from '../common/CarnetPhotoCaptureModal';
+import { uploadCarnetPhotoWithFallback } from '../../utils/solicitudesCarnet';
 
 export interface SolicitudCarnetRecord {
   id: number | string;
@@ -62,14 +65,12 @@ const ESTADOS_CARNET = [
 ];
 
 function getWeekDateRange(weekStr: string): { start: Date; end: Date; label: string } | null {
-  // Format: YYYY-Www
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
   if (!match) return null;
   const year = Number(match[1]);
   const week = Number(match[2]);
-  // ISO week 1 always contains Jan 4th
   const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7; // 1..7 (Mon..Sun)
+  const jan4Day = jan4.getDay() || 7;
   const mondayWeek1 = new Date(jan4);
   mondayWeek1.setDate(jan4.getDate() - (jan4Day - 1));
   const start = new Date(mondayWeek1);
@@ -109,6 +110,7 @@ export default function SolicitudesCarnetTab() {
   const [seccionales, setSeccionales] = useState<{ id: number; nombre: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   // Smart Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -125,11 +127,20 @@ export default function SolicitudesCarnetTab() {
     return `${now.getFullYear()}-W${String(Math.max(1, Math.min(53, weekNum))).padStart(2, '0')}`;
   });
 
-  // Detail & Edit Modals
+  // Detail, Zoom & Edit Modals
   const [detailRecord, setDetailRecord] = useState<SolicitudCarnetRecord | null>(null);
+  const [zoomPhotoInfo, setZoomPhotoInfo] = useState<{
+    src?: string | null;
+    fallbackSrc?: string | null;
+    nombre: string;
+    carnet: string;
+  } | null>(null);
   const [editRecord, setEditRecord] = useState<SolicitudCarnetRecord | null>(null);
   const [editEstado, setEditEstado] = useState('Pendiente');
   const [editObservaciones, setEditObservaciones] = useState('');
+  const [editReplacementFile, setEditReplacementFile] = useState<File | null>(null);
+  const [editReplacementPreview, setEditReplacementPreview] = useState<string | null>(null);
+  const [showReplacePhotoModal, setShowReplacePhotoModal] = useState(false);
   const [applyFotoToProfile, setApplyFotoToProfile] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -140,6 +151,7 @@ export default function SolicitudesCarnetTab() {
 
   const loadData = async () => {
     setLoading(true);
+    setFeedbackError(null);
     try {
       const { data: secData } = await supabase.from('seccionales').select('id, nombre').order('nombre');
       const secList = secData || [];
@@ -149,6 +161,8 @@ export default function SolicitudesCarnetTab() {
 
       // 1. Query DB solicitudes_carnet with socorristas join
       let dbItems: SolicitudCarnetRecord[] = [];
+      const socLookup = new Map<number, any>();
+
       try {
         const { data, error } = await supabase
           .from('solicitudes_carnet')
@@ -170,7 +184,8 @@ export default function SolicitudesCarnetTab() {
 
         if (!error && data) {
           dbItems = data.map((row: any) => {
-            const soc = row.socorristas;
+            const soc = Array.isArray(row.socorristas) ? row.socorristas[0] : row.socorristas;
+            if (soc?.id) socLookup.set(Number(soc.id), soc);
             const socSec = Array.isArray(soc?.seccionales) ? soc.seccionales[0] : soc?.seccionales;
             const resolvedSecId = row.seccional_id || soc?.seccional_id || socSec?.id || null;
             const resolvedSecNombre =
@@ -187,7 +202,7 @@ export default function SolicitudesCarnetTab() {
 
             return {
               id: row.id,
-              socorrista_id: row.socorrista_id,
+              socorrista_id: Number(row.socorrista_id),
               socorrista_nombre: nombreSoc,
               carnet: soc?.carnet || 'S/C',
               seccional_id: resolvedSecId,
@@ -243,6 +258,7 @@ export default function SolicitudesCarnetTab() {
                   motivo: parsed.motivo || null,
                   detalles_motivo: parsed.detalles_motivo || null,
                   foto_url: parsed.foto_url || null,
+                  socorrista_foto_actual: null,
                   observaciones: parsed.observaciones || null,
                   solicitado_por: parsed.solicitado_por || parsed.nombre_completo || 'Solicitante',
                   solicitado_por_email: parsed.solicitado_por_email || null,
@@ -261,7 +277,54 @@ export default function SolicitudesCarnetTab() {
             })
             .filter(Boolean) as SolicitudCarnetRecord[];
         }
-      } catch (e) {}
+      } catch {}
+
+      // Fetch missing socorrista rows (for configItems or rows where join didn't hydrate)
+      const allMissingSocIds = Array.from(
+        new Set(
+          [...dbItems, ...configItems]
+            .map((it) => it.socorrista_id)
+            .filter((sid) => sid > 0 && !socLookup.has(sid))
+        )
+      );
+
+      if (allMissingSocIds.length > 0) {
+        try {
+          const { data: extraSocs } = await supabase
+            .from('socorristas')
+            .select('id, carnet, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, foto_url, seccional_id')
+            .in('id', allMissingSocIds.slice(0, 200));
+          if (extraSocs) {
+            extraSocs.forEach((s: any) => socLookup.set(Number(s.id), s));
+          }
+        } catch {}
+      }
+
+      // Enrich items with socLookup so socorrista_foto_actual & seccional_id are always available
+      const enrichItem = (item: SolicitudCarnetRecord): SolicitudCarnetRecord => {
+        const soc = socLookup.get(item.socorrista_id);
+        if (!soc) return item;
+        const fullName = `${soc.primer_nombre || ''} ${soc.segundo_nombre || ''} ${soc.primer_apellido || ''} ${soc.segundo_apellido || ''}`
+          .replace(/\s+/g, ' ')
+          .trim();
+        const secId = item.seccional_id || soc.seccional_id || null;
+        const secName =
+          item.seccional_nombre && item.seccional_nombre !== 'Sin Seccional'
+            ? item.seccional_nombre
+            : (secId ? secNameById.get(secId) : null) || 'Sin Seccional';
+        return {
+          ...item,
+          socorrista_nombre:
+            item.socorrista_nombre.startsWith('Elemento #') && fullName ? fullName : item.socorrista_nombre,
+          carnet: item.carnet === 'S/C' && soc.carnet ? soc.carnet : item.carnet,
+          seccional_id: secId,
+          seccional_nombre: secName,
+          socorrista_foto_actual: item.socorrista_foto_actual || soc.foto_url || null,
+        };
+      };
+
+      dbItems = dbItems.map(enrichItem);
+      configItems = configItems.map(enrichItem);
 
       // Merge avoiding duplicates where DB already holds the same socorrista+foto or close timestamp
       const merged = [...dbItems];
@@ -371,16 +434,33 @@ export default function SolicitudesCarnetTab() {
     setEditRecord(rec);
     setEditEstado(rec.estado_solicitud || 'Pendiente');
     setEditObservaciones(rec.observaciones || '');
+    setEditReplacementFile(null);
+    setEditReplacementPreview(null);
     setApplyFotoToProfile(Boolean(rec.foto_url && rec.foto_url !== rec.socorrista_foto_actual));
+  };
+
+  const handleReplacementPhotoReady = (file: File, previewUrl: string) => {
+    setEditReplacementFile(file);
+    setEditReplacementPreview(previewUrl);
+    setApplyFotoToProfile(true);
   };
 
   const handleSaveStatus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editRecord || !canEdit) return;
     setSavingEdit(true);
+    setFeedbackError(null);
     try {
       const revisadoPor = userName || user?.email || 'Administración';
       const fechaRev = new Date().toISOString();
+
+      let updatedFotoUrl = editRecord.foto_url;
+      if (editReplacementFile) {
+        updatedFotoUrl = await uploadCarnetPhotoWithFallback(
+          editReplacementFile,
+          `${editRecord.carnet || `SOC_${editRecord.socorrista_id}`}_solicitud`
+        );
+      }
 
       if (editRecord.source === 'db') {
         const payload: any = {
@@ -390,6 +470,9 @@ export default function SolicitudesCarnetTab() {
           fecha_revision: fechaRev,
           updated_at: fechaRev,
         };
+        if (updatedFotoUrl !== editRecord.foto_url) {
+          payload.foto_url = updatedFotoUrl;
+        }
 
         const { error } = await supabase
           .from('solicitudes_carnet')
@@ -397,10 +480,13 @@ export default function SolicitudesCarnetTab() {
           .eq('id', editRecord.id);
 
         if (error) {
-          // Fallback if migration 31 columns haven't been added yet
+          const minimalPayload: any = { estado_solicitud: editEstado };
+          if (updatedFotoUrl !== editRecord.foto_url) {
+            minimalPayload.foto_url = updatedFotoUrl;
+          }
           const { error: fallbackErr } = await supabase
             .from('solicitudes_carnet')
-            .update({ estado_solicitud: editEstado })
+            .update(minimalPayload)
             .eq('id', editRecord.id);
           if (fallbackErr) throw fallbackErr;
         }
@@ -417,6 +503,7 @@ export default function SolicitudesCarnetTab() {
           .update({
             valor: JSON.stringify({
               ...currentObj,
+              foto_url: updatedFotoUrl,
               estado_solicitud: editEstado,
               observaciones: editObservaciones.trim() || null,
               revisado_por: revisadoPor,
@@ -427,10 +514,10 @@ export default function SolicitudesCarnetTab() {
       }
 
       // Optionally sync submitted photo to socorrista profile when approved/completed
-      if (applyFotoToProfile && editRecord.foto_url && editRecord.socorrista_id) {
+      if (applyFotoToProfile && updatedFotoUrl && editRecord.socorrista_id) {
         await supabase
           .from('socorristas')
-          .update({ foto_url: editRecord.foto_url })
+          .update({ foto_url: updatedFotoUrl })
           .eq('id', editRecord.socorrista_id);
       }
 
@@ -439,11 +526,13 @@ export default function SolicitudesCarnetTab() {
           r.id === editRecord.id
             ? {
                 ...r,
+                foto_url: updatedFotoUrl,
                 estado_solicitud: editEstado,
                 observaciones: editObservaciones.trim() || null,
                 revisado_por: revisadoPor,
                 fecha_revision: fechaRev,
-                socorrista_foto_actual: applyFotoToProfile && editRecord.foto_url ? editRecord.foto_url : r.socorrista_foto_actual,
+                socorrista_foto_actual:
+                  applyFotoToProfile && updatedFotoUrl ? updatedFotoUrl : r.socorrista_foto_actual,
               }
             : r
         )
@@ -454,24 +543,23 @@ export default function SolicitudesCarnetTab() {
         carnet: editRecord.carnet,
         estado: editEstado,
         observaciones: editObservaciones,
+        foto_actualizada: Boolean(editReplacementFile),
       });
 
       window.dispatchEvent(new Event('solicitudes_updated'));
       setEditRecord(null);
     } catch (err: any) {
       console.error('Error updating carnet request:', err);
-      alert('No se pudo actualizar la solicitud de carnet: ' + (err?.message || 'Error de red'));
+      setFeedbackError('No se pudo actualizar la solicitud de carnet: ' + (err?.message || 'Error de red'));
     } finally {
       setSavingEdit(false);
     }
   };
 
   const handleExportExcel = async () => {
-    if (filteredRecords.length === 0) {
-      alert('No hay registros filtrados para exportar.');
-      return;
-    }
+    if (filteredRecords.length === 0) return;
     setExporting(true);
+    setFeedbackError(null);
     try {
       const XLSX = await import('xlsx');
       const rows = filteredRecords.map((r) => ({
@@ -490,7 +578,7 @@ export default function SolicitudesCarnetTab() {
         'Correo Solicitante': r.solicitado_por_email || '',
         'Revisado Por': r.revisado_por || '',
         'Fecha Revisión': r.fecha_revision ? new Date(r.fecha_revision).toLocaleDateString('es-SV') : '',
-        'Fotografía Adjunta': r.foto_url ? 'Sí' : 'No',
+        'Fotografía Adjunta': r.foto_url || r.socorrista_foto_actual ? 'Sí' : 'No',
       }));
 
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -519,7 +607,7 @@ export default function SolicitudesCarnetTab() {
       XLSX.writeFile(wb, `solicitudes_carnet${periodSuffix}.xlsx`);
     } catch (err) {
       console.error('Error exporting Excel:', err);
-      alert('No se pudo exportar el archivo Excel.');
+      setFeedbackError('No se pudo exportar el archivo Excel.');
     } finally {
       setExporting(false);
     }
@@ -556,6 +644,22 @@ export default function SolicitudesCarnetTab() {
 
   return (
     <div className="space-y-5">
+      {feedbackError && (
+        <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{feedbackError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackError(null)}
+            className="text-rose-500 hover:text-rose-800 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
@@ -657,7 +761,6 @@ export default function SolicitudesCarnetTab() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Search */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
@@ -669,7 +772,6 @@ export default function SolicitudesCarnetTab() {
             />
           </div>
 
-          {/* Seccional Filter */}
           <div>
             <select
               value={filterSeccional}
@@ -694,7 +796,6 @@ export default function SolicitudesCarnetTab() {
             </select>
           </div>
 
-          {/* Usuario Filter */}
           <div>
             <select
               value={filterUsuario}
@@ -710,7 +811,6 @@ export default function SolicitudesCarnetTab() {
             </select>
           </div>
 
-          {/* Estado Filter */}
           <div>
             <select
               value={filterEstado}
@@ -727,7 +827,7 @@ export default function SolicitudesCarnetTab() {
           </div>
         </div>
 
-        {/* Period Filter (Todos / Mes / Semana) */}
+        {/* Period Filter */}
         <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3">
           <span className="text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -800,102 +900,117 @@ export default function SolicitudesCarnetTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {filteredRecords.map((rec) => (
-                  <tr key={String(rec.id)} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="px-4 py-3.5 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                          {rec.foto_url || rec.socorrista_foto_actual ? (
-                            <img
-                              src={rec.foto_url || rec.socorrista_foto_actual || ''}
-                              alt={rec.socorrista_nombre}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <Camera className="w-4 h-4 text-slate-400" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{rec.socorrista_nombre}</p>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold mt-0.5">
-                            {rec.carnet}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3.5">
-                      <div className="text-xs font-semibold text-slate-800 flex items-center gap-1">
-                        <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        {rec.seccional_nombre}
-                      </div>
-                      <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                        <User className="w-3 h-3 text-slate-400 shrink-0" />
-                        {rec.solicitado_por}
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-semibold text-slate-900">{rec.tipo_solicitud}</span>
-                        {rec.es_lote && (
-                          <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
-                            Lote{rec.lote_id ? ` · ${rec.lote_id}` : ''}
-                          </span>
-                        )}
-                      </div>
-                      {rec.motivo && <span className="text-[11px] text-slate-500 block">{rec.motivo}</span>}
-                      {rec.observaciones && (
-                        <span className="text-[11px] text-orange-700 inline-flex items-center gap-1 mt-0.5 max-w-xs truncate">
-                          <MessageSquare className="w-3 h-3 shrink-0" />
-                          {rec.observaciones}
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="px-4 py-3.5 whitespace-nowrap text-xs text-slate-600">
-                      {new Date(rec.fecha_solicitud).toLocaleDateString('es-SV', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </td>
-
-                    <td className="px-4 py-3.5 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${getEstadoBadge(
-                          rec.estado_solicitud
-                        )}`}
-                      >
-                        {rec.estado_solicitud}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setDetailRecord(rec)}
-                          className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
-                          title="Ver detalle completo"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {canEdit && (
+                {filteredRecords.map((rec) => {
+                  const hasAnyPhoto = Boolean(rec.foto_url || rec.socorrista_foto_actual);
+                  return (
+                    <tr key={String(rec.id)} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
                           <button
                             type="button"
-                            onClick={() => handleOpenEdit(rec)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-xs font-semibold transition-colors cursor-pointer"
-                            title="Gestionar estado u observaciones"
+                            onClick={() =>
+                              hasAnyPhoto
+                                ? setZoomPhotoInfo({
+                                    src: rec.foto_url,
+                                    fallbackSrc: rec.socorrista_foto_actual,
+                                    nombre: rec.socorrista_nombre,
+                                    carnet: rec.carnet,
+                                  })
+                                : setDetailRecord(rec)
+                            }
+                            title={hasAnyPhoto ? 'Clic para ampliar fotografía del elemento' : 'Sin fotografía registrada'}
+                            className="w-11 h-11 rounded-full bg-slate-200/80 border-2 border-slate-200 hover:border-emerald-400 overflow-hidden flex items-center justify-center shrink-0 transition-colors cursor-pointer"
                           >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            Gestionar
+                            <SmartStorageImage
+                              src={rec.foto_url}
+                              fallbackSrc={rec.socorrista_foto_actual}
+                              alt={rec.socorrista_nombre}
+                              className="w-full h-full object-cover"
+                              fallback={<Camera className="w-4 h-4 text-slate-500" />}
+                            />
                           </button>
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{rec.socorrista_nombre}</p>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold mt-0.5">
+                              {rec.carnet}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5">
+                        <div className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+                          <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          {rec.seccional_nombre}
+                        </div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <User className="w-3 h-3 text-slate-400 shrink-0" />
+                          {rec.solicitado_por}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-slate-900">{rec.tipo_solicitud}</span>
+                          {rec.es_lote && (
+                            <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                              Lote{rec.lote_id ? ` · ${rec.lote_id}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        {rec.motivo && <span className="text-[11px] text-slate-500 block">{rec.motivo}</span>}
+                        {rec.observaciones && (
+                          <span className="text-[11px] text-orange-700 inline-flex items-center gap-1 mt-0.5 max-w-xs truncate">
+                            <MessageSquare className="w-3 h-3 shrink-0" />
+                            {rec.observaciones}
+                          </span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      <td className="px-4 py-3.5 whitespace-nowrap text-xs text-slate-600">
+                        {new Date(rec.fecha_solicitud).toLocaleDateString('es-SV', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </td>
+
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${getEstadoBadge(
+                            rec.estado_solicitud
+                          )}`}
+                        >
+                          {rec.estado_solicitud}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDetailRecord(rec)}
+                            className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                            title="Ver detalle y fotografía"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(rec)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-xs font-semibold transition-colors cursor-pointer"
+                              title="Gestionar estado, fotografía u observaciones"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              Gestionar
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -920,24 +1035,72 @@ export default function SolicitudesCarnetTab() {
               </button>
             </div>
             <div className="p-5 space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="w-24 h-24 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                  {detailRecord.foto_url ? (
-                    <img src={detailRecord.foto_url} alt="Foto solicitada" className="w-full h-full object-cover" />
-                  ) : (
-                    <Camera className="w-7 h-7 text-slate-400" />
-                  )}
+              <div className="flex items-start gap-4">
+                <div className="flex flex-col items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (detailRecord.foto_url || detailRecord.socorrista_foto_actual) {
+                        setZoomPhotoInfo({
+                          src: detailRecord.foto_url,
+                          fallbackSrc: detailRecord.socorrista_foto_actual,
+                          nombre: detailRecord.socorrista_nombre,
+                          carnet: detailRecord.carnet,
+                        });
+                      }
+                    }}
+                    className="group relative w-28 h-28 rounded-2xl bg-slate-200/80 border-2 border-slate-300 overflow-hidden flex items-center justify-center shadow-xs cursor-zoom-in"
+                    title="Clic para ver fotografía en tamaño completo"
+                  >
+                    <SmartStorageImage
+                      src={detailRecord.foto_url}
+                      fallbackSrc={detailRecord.socorrista_foto_actual}
+                      alt={detailRecord.socorrista_nombre}
+                      className="w-full h-full object-cover"
+                      fallback={
+                        <div className="flex flex-col items-center justify-center text-slate-500 px-2 text-center">
+                          <Camera className="w-7 h-7 mb-1 text-slate-400" />
+                          <span className="text-[10px] font-semibold leading-tight">Sin foto legible</span>
+                        </div>
+                      }
+                    />
+                    {(detailRecord.foto_url || detailRecord.socorrista_foto_actual) && (
+                      <span className="absolute bottom-1.5 right-1.5 p-1 rounded-lg bg-slate-900/70 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                  </button>
+                  <span className="text-[10px] font-semibold text-slate-500">
+                    {detailRecord.foto_url ? 'Foto de solicitud' : detailRecord.socorrista_foto_actual ? 'Foto en perfil' : 'Sin fotografía'}
+                  </span>
                 </div>
-                <div className="space-y-1 text-xs">
+
+                <div className="space-y-1 text-xs min-w-0">
                   <p className="text-sm font-bold text-slate-900">{detailRecord.socorrista_nombre}</p>
                   <p className="text-slate-600">Seccional: <strong>{detailRecord.seccional_nombre}</strong></p>
                   <p className="text-slate-600">Tipo: <strong>{detailRecord.tipo_solicitud}</strong></p>
                   {detailRecord.motivo && (
                     <p className="text-slate-600">Motivo: <strong>{detailRecord.motivo}</strong></p>
                   )}
-                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getEstadoBadge(detailRecord.estado_solicitud)}`}>
-                    {detailRecord.estado_solicitud}
-                  </span>
+                  <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getEstadoBadge(detailRecord.estado_solicitud)}`}>
+                      {detailRecord.estado_solicitud}
+                    </span>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = detailRecord;
+                          setDetailRecord(null);
+                          handleOpenEdit(target);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 cursor-pointer"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        Gestionar
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -986,7 +1149,7 @@ export default function SolicitudesCarnetTab() {
         </div>
       )}
 
-      {/* Edit Status & Observations Modal */}
+      {/* Edit Status, Photo & Observations Modal */}
       {editRecord && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
           <form
@@ -1009,7 +1172,56 @@ export default function SolicitudesCarnetTab() {
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 max-h-[78vh] overflow-y-auto">
+              {/* Fotografía del elemento en la solicitud */}
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center gap-3.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setZoomPhotoInfo({
+                      src: editReplacementPreview || editRecord.foto_url,
+                      fallbackSrc: editRecord.socorrista_foto_actual,
+                      nombre: editRecord.socorrista_nombre,
+                      carnet: editRecord.carnet,
+                    })
+                  }
+                  className="w-20 h-20 rounded-2xl bg-slate-200/80 border-2 border-slate-300 overflow-hidden flex items-center justify-center shrink-0 cursor-zoom-in"
+                  title="Ampliar fotografía"
+                >
+                  <SmartStorageImage
+                    src={editReplacementPreview || editRecord.foto_url}
+                    fallbackSrc={editRecord.socorrista_foto_actual}
+                    alt={editRecord.socorrista_nombre}
+                    className="w-full h-full object-cover"
+                    fallback={
+                      <div className="flex flex-col items-center justify-center text-slate-500 px-1 text-center">
+                        <Camera className="w-5 h-5 mb-0.5 text-slate-400" />
+                        <span className="text-[9px] font-semibold leading-tight">Sin foto</span>
+                      </div>
+                    }
+                  />
+                </button>
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <p className="text-xs font-bold text-slate-800">
+                    {editReplacementPreview
+                      ? 'Nueva fotografía cargada'
+                      : editRecord.foto_url
+                      ? 'Fotografía adjunta a la solicitud'
+                      : editRecord.socorrista_foto_actual
+                      ? 'Fotografía actual en perfil'
+                      : 'Sin fotografía válida'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowReplacePhotoModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-bold shadow-2xs cursor-pointer transition-colors"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5 text-emerald-700" />
+                    {editRecord.foto_url || editReplacementPreview ? 'Reemplazar Fotografía' : 'Subir Fotografía'}
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">Estado de Solicitud</label>
                 <select
@@ -1052,7 +1264,7 @@ export default function SolicitudesCarnetTab() {
                 />
               </div>
 
-              {editRecord.foto_url && (
+              {(editRecord.foto_url || editReplacementPreview) && (
                 <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/70 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1061,7 +1273,7 @@ export default function SolicitudesCarnetTab() {
                     className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
                   />
                   <span className="text-xs text-emerald-950 font-medium leading-snug">
-                    Aplicar esta fotografía enviada como foto oficial del perfil del socorrista
+                    Aplicar esta fotografía como foto oficial del perfil del socorrista
                   </span>
                 </label>
               )}
@@ -1087,6 +1299,58 @@ export default function SolicitudesCarnetTab() {
           </form>
         </div>
       )}
+
+      {/* Fullscreen Photo Lightbox */}
+      {zoomPhotoInfo && (
+        <div
+          className="fixed inset-0 z-[60] bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setZoomPhotoInfo(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900">{zoomPhotoInfo.nombre}</h4>
+                <p className="text-[11px] font-mono text-slate-500">{zoomPhotoInfo.carnet}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoomPhotoInfo(null)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 bg-slate-200/70 flex items-center justify-center min-h-[280px]">
+              <SmartStorageImage
+                src={zoomPhotoInfo.src}
+                fallbackSrc={zoomPhotoInfo.fallbackSrc}
+                alt={zoomPhotoInfo.nombre}
+                className="max-h-[70vh] w-auto rounded-2xl object-contain shadow-md bg-white"
+                fallback={
+                  <div className="py-12 text-center text-slate-500 space-y-2">
+                    <Camera className="w-10 h-10 mx-auto text-slate-400" />
+                    <p className="text-xs font-semibold">La fotografía no está disponible o está dañada.</p>
+                  </div>
+                }
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <CarnetPhotoCaptureModal
+        isOpen={showReplacePhotoModal}
+        onClose={() => setShowReplacePhotoModal(false)}
+        onPhotoReady={handleReplacementPhotoReady}
+        title={
+          editRecord
+            ? `Actualizar Fotografía — ${editRecord.socorrista_nombre}`
+            : 'Actualizar Fotografía de Solicitud'
+        }
+      />
     </div>
   );
 }

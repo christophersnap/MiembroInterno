@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle, AlertTriangle, Lock } from 'lucide-react';
 import Cropper from 'react-easy-crop';
-import getCroppedImg from '../utils/cropImage';
+import { getCroppedImgResult } from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
@@ -870,9 +870,9 @@ export default function SocorristaProfile() {
   const handleCropSave = async () => {
     try {
       if (!imageSrc || !croppedAreaPixels) return;
-      const croppedImageBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
-      if (croppedImageBlob) {
-        const file = new File([croppedImageBlob], 'cropped_image.jpg', { type: 'image/jpeg' });
+      const cropped = await getCroppedImgResult(imageSrc, croppedAreaPixels);
+      if (cropped?.blob) {
+        const file = new File([cropped.blob], `perfil_${Date.now()}.jpg`, { type: 'image/jpeg' });
         setFotoFile(file);
         setShowCropper(false);
       }

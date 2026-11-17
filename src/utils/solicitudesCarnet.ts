@@ -1,4 +1,44 @@
 import { supabase } from '../lib/supabase';
+import { fileToCompactDataUrl } from './cropImage';
+
+export async function uploadCarnetPhotoWithFallback(
+  file: File,
+  prefix: string
+): Promise<string> {
+  if (!file || file.size < 100) {
+    throw new Error('El archivo de fotografía está vacío o dañado. Vuelve a tomar o seleccionar la imagen.');
+  }
+
+  const safePrefix = (prefix || 'carnet')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 40);
+  const fileName = `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`;
+
+  try {
+    let { error: uploadError } = await supabase.storage
+      .from('socorristas')
+      .upload(fileName, file, { upsert: true, contentType: file.type || 'image/jpeg' });
+
+    if (uploadError) {
+      const retry = await supabase.storage.from('socorristas').upload(fileName, file);
+      uploadError = retry.error;
+    }
+
+    if (!uploadError) {
+      const { data } = supabase.storage.from('socorristas').getPublicUrl(fileName);
+      if (data?.publicUrl) {
+        return data.publicUrl;
+      }
+    } else {
+      console.warn('Subida a Storage rechazada por permisos, usando imagen compacta de respaldo:', uploadError);
+    }
+  } catch (err) {
+    console.warn('Error subiendo fotografía a Storage, usando respaldo compacto:', err);
+  }
+
+  // Respaldo garantizado en formato data:image/jpeg compacto (~30-45 KB) si Storage aún no tiene política pública
+  return fileToCompactDataUrl(file, 520, 0.82);
+}
 
 export const BLOCKING_CARNET_STATES = [
   'Pendiente',

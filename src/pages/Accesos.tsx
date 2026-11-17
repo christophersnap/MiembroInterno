@@ -90,6 +90,7 @@ export default function Accesos() {
   const [sql31Copied, setSql31Copied] = useState(false);
   const [sql42Copied, setSql42Copied] = useState(false);
   const [sql43Copied, setSql43Copied] = useState(false);
+  const [sql44Copied, setSql44Copied] = useState(false);
   const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
@@ -1714,6 +1715,101 @@ NOTIFY pgrst, 'reload schema';`;
     ])
   );
 
+  const handleCopySqlMigration44 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 44: VISIBILIDAD DE IMÁGENES EN SOLICITUDES DE CARNET Y STORAGE PÚBLICO
+-- =========================================================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES
+  ('socorristas', 'socorristas', true, 52428800, NULL),
+  ('archivos', 'archivos', true, 52428800, NULL),
+  ('logos', 'logos', true, 52428800, NULL),
+  ('plantillas', 'plantillas', true, 52428800, NULL),
+  ('assets', 'assets', true, 52428800, NULL)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 52428800,
+  allowed_mime_types = NULL;
+
+DROP POLICY IF EXISTS "Allow Public Read Objects" ON storage.objects;
+CREATE POLICY "Allow Public Read Objects" ON storage.objects
+  FOR SELECT
+  USING (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+
+DROP POLICY IF EXISTS "Allow Public Upload Objects" ON storage.objects;
+CREATE POLICY "Allow Public Upload Objects" ON storage.objects
+  FOR INSERT
+  WITH CHECK (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+
+DROP POLICY IF EXISTS "Allow Public Update Objects" ON storage.objects;
+CREATE POLICY "Allow Public Update Objects" ON storage.objects
+  FOR UPDATE
+  USING (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+
+ALTER TABLE IF EXISTS public.solicitudes_carnet
+  ADD COLUMN IF NOT EXISTS foto_url TEXT,
+  ADD COLUMN IF NOT EXISTS seccional_id INTEGER REFERENCES public.seccionales(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS seccional_nombre TEXT,
+  ADD COLUMN IF NOT EXISTS solicitado_por TEXT,
+  ADD COLUMN IF NOT EXISTS solicitado_por_email TEXT,
+  ADD COLUMN IF NOT EXISTS observaciones TEXT,
+  ADD COLUMN IF NOT EXISTS revisado_por TEXT,
+  ADD COLUMN IF NOT EXISTS fecha_revision TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS lote_id TEXT,
+  ADD COLUMN IF NOT EXISTS es_lote BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+UPDATE public.solicitudes_carnet
+SET foto_url = NULL
+WHERE foto_url LIKE 'blob:%' OR btrim(COALESCE(foto_url, '')) = '';
+
+UPDATE public.socorristas
+SET foto_url = NULL
+WHERE foto_url LIKE 'blob:%' OR btrim(COALESCE(foto_url, '')) = '';
+
+UPDATE public.solicitudes_carnet sc
+SET foto_url = s.foto_url
+FROM public.socorristas s
+WHERE sc.socorrista_id = s.id
+  AND (sc.foto_url IS NULL OR btrim(sc.foto_url) = '')
+  AND s.foto_url IS NOT NULL
+  AND btrim(s.foto_url) <> ''
+  AND s.foto_url NOT LIKE 'blob:%';
+
+ALTER TABLE IF EXISTS public.solicitudes_carnet ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir lectura solicitudes_carnet" ON public.solicitudes_carnet;
+CREATE POLICY "Permitir lectura solicitudes_carnet"
+  ON public.solicitudes_carnet
+  FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Permitir crear solicitudes_carnet publico" ON public.solicitudes_carnet;
+CREATE POLICY "Permitir crear solicitudes_carnet publico"
+  ON public.solicitudes_carnet
+  FOR INSERT
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Permitir actualizacion solicitudes_carnet" ON public.solicitudes_carnet;
+CREATE POLICY "Permitir actualizacion solicitudes_carnet"
+  ON public.solicitudes_carnet
+  FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Usuarios autenticados pueden ver socorristas" ON public.socorristas;
+CREATE POLICY "Usuarios autenticados pueden ver socorristas"
+  ON public.socorristas
+  FOR SELECT
+  USING (true);
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql44Copied(true);
+    setTimeout(() => setSql44Copied(false), 3000);
+  };
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
@@ -2696,6 +2792,30 @@ NOTIFY pgrst, 'reload schema';`;
                       className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
                     >
                       {sql43Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
+                    </button>
+                  </div>
+
+                  {/* Migración 44 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-emerald-50/60">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-emerald-800 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        44
+                      </span>
+                      <div>
+                        <span className="text-xs font-semibold text-gray-900 block">
+                          Visibilidad de Fotografías en Solicitudes de Carnet y Storage Público
+                        </span>
+                        <span className="text-3xs text-gray-500">
+                          Habilita lectura pública en el bucket socorristas, políticas de solicitudes_carnet y recupera fotos de perfil faltantes
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration44}
+                      className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql44Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
                     </button>
                   </div>
                 </div>
