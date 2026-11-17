@@ -30,6 +30,7 @@ import {
   Search,
   FileText,
   Move,
+  AlertTriangle,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
@@ -163,6 +164,8 @@ export default function Noticias() {
   const [formVideos, setFormVideos] = useState<NoticiaVideo[]>([]);
   const [formArchivosAdjuntos, setFormArchivosAdjuntos] = useState<NoticiaArchivoAdjunto[]>([]);
   const [availableArchivos, setAvailableArchivos] = useState<NoticiaArchivoAdjunto[]>([]);
+  const [loadingArchivos, setLoadingArchivos] = useState(false);
+  const [archivosError, setArchivosError] = useState<string | null>(null);
   const [archivoSearch, setArchivoSearch] = useState('');
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newVideoTitle, setNewVideoTitle] = useState('');
@@ -183,60 +186,90 @@ export default function Noticias() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
 
+  const mapArchivoItem = (f: any): NoticiaArchivoAdjunto => ({
+    id: String(f.id),
+    titulo: f.titulo || f.nombre_archivo || 'Archivo',
+    nombre_archivo: f.nombre_archivo || f.titulo || 'archivo',
+    url_archivo: f.url_archivo || f.enlace_externo || '',
+    extension: f.extension,
+    tamano_legible: f.tamano_legible,
+    categoria: f.categoria,
+    enlace_externo: f.enlace_externo || null,
+  });
+
   const loadAvailableArchivos = async () => {
+    setLoadingArchivos(true);
+    setArchivosError(null);
     try {
+      const merged = new Map<string, NoticiaArchivoAdjunto>();
+      let supabaseOk = false;
+
       const { data, error } = await supabase
         .from('archivos')
-        .select('id, titulo, nombre_archivo, url_archivo, extension, tamano_legible, categoria, enlace_externo, activo')
+        .select('id, titulo, nombre_archivo, url_archivo, extension, tamano_legible, categoria, enlace_externo, activo, created_at')
         .order('created_at', { ascending: false });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        setAvailableArchivos(
-          data
-            .filter((f: any) => f.activo !== false)
-            .map((f: any) => ({
-              id: String(f.id),
-              titulo: f.titulo || f.nombre_archivo || 'Archivo',
-              nombre_archivo: f.nombre_archivo || f.titulo || 'archivo',
-              url_archivo: f.url_archivo || f.enlace_externo || '',
-              extension: f.extension,
-              tamano_legible: f.tamano_legible,
-              categoria: f.categoria,
-              enlace_externo: f.enlace_externo || null,
-            }))
+      if (error) {
+        console.warn('Error consultando public.archivos desde Noticias:', error);
+        setArchivosError(
+          `No se pudo leer la tabla archivos en Supabase (${error.message}). Ejecuta el Script SQL #38 en Supabase.`
         );
-        return;
-      }
-
-      const res = await fetch(getApiUrl('/api/archivos'));
-      if (res.ok) {
-        const apiData = await res.json();
-        if (Array.isArray(apiData) && apiData.length > 0) {
-          setAvailableArchivos(
-            apiData.map((f: any) => ({
-              id: String(f.id),
-              titulo: f.titulo || f.nombre_archivo || 'Archivo',
-              nombre_archivo: f.nombre_archivo || f.titulo || 'archivo',
-              url_archivo: f.url_archivo || f.enlace_externo || '',
-              extension: f.extension,
-              tamano_legible: f.tamano_legible,
-              categoria: f.categoria,
-              enlace_externo: f.enlace_externo || null,
-            }))
-          );
-          return;
+      } else if (Array.isArray(data)) {
+        supabaseOk = true;
+        for (const f of data) {
+          if (f && f.activo !== false) {
+            const mapped = mapArchivoItem(f);
+            merged.set(mapped.id, mapped);
+          }
         }
       }
 
-      const cached = localStorage.getItem('cruz_verde_archivos_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          setAvailableArchivos(parsed);
+      // Complementar desde API local si hubo error en Supabase, si está vacío o si hay registros locales heredados (id arc-*)
+      try {
+        const res = await fetch(getApiUrl('/api/archivos'));
+        if (res.ok) {
+          const apiData = await res.json();
+          if (Array.isArray(apiData)) {
+            for (const f of apiData) {
+              if (!f || f.activo === false) continue;
+              const mapped = mapArchivoItem(f);
+              const alreadyExists =
+                merged.has(mapped.id) ||
+                Array.from(merged.values()).some(
+                  (m) => m.titulo === mapped.titulo && m.nombre_archivo === mapped.nombre_archivo
+                );
+              if (!alreadyExists && (!supabaseOk || merged.size === 0 || mapped.id.startsWith('arc-'))) {
+                merged.set(mapped.id, mapped);
+              }
+            }
+          }
+        }
+      } catch {
+        // Sin API local disponible
+      }
+
+      // Fallback localStorage si ni Supabase ni API local devolvieron registros
+      if (merged.size === 0 && !supabaseOk) {
+        const cached = localStorage.getItem('cruz_verde_archivos_data');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            for (const f of parsed) {
+              if (f && f.activo !== false) {
+                const mapped = mapArchivoItem(f);
+                merged.set(mapped.id, mapped);
+              }
+            }
+          }
         }
       }
-    } catch (err) {
+
+      setAvailableArchivos(Array.from(merged.values()));
+    } catch (err: any) {
       console.warn('Error cargando catálogo de archivos:', err);
+      setArchivosError(err?.message || 'Error al cargar los archivos disponibles.');
+    } finally {
+      setLoadingArchivos(false);
     }
   };
 
@@ -1326,10 +1359,29 @@ export default function Noticias() {
                         <Paperclip className="w-4 h-4 text-emerald-700" />
                         4. Adjuntar Documentos existentes de la pestaña Archivos (Opcional)
                       </label>
-                      <span className="text-[11px] font-semibold text-emerald-700">
-                        {formArchivosAdjuntos.length} archivo(s) adjunto(s)
-                      </span>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[11px] font-semibold text-emerald-700">
+                          {formArchivosAdjuntos.length} adjunto(s) · {availableArchivos.length} disponible(s)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={loadAvailableArchivos}
+                          disabled={loadingArchivos}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer disabled:opacity-50"
+                          title="Recargar archivos desde Supabase"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loadingArchivos ? 'animate-spin text-emerald-700' : ''}`} />
+                          <span>Actualizar</span>
+                        </button>
+                      </div>
                     </div>
+
+                    {archivosError && (
+                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                        <span>{archivosError}</span>
+                      </div>
+                    )}
 
                     {formArchivosAdjuntos.length > 0 && (
                       <div className="flex flex-wrap gap-2">
@@ -1364,26 +1416,41 @@ export default function Noticias() {
                       />
                     </div>
 
-                    {availableArchivos.length === 0 ? (
-                      <p className="text-[11px] text-slate-500 italic">
-                        No hay archivos cargados en la pestaña Archivos todavía.
-                      </p>
-                    ) : (
-                      <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-                        {availableArchivos
-                          .filter((f) => {
-                            const q = archivoSearch.trim().toLowerCase();
-                            if (!q) return true;
-                            return (
-                              (f.titulo || '').toLowerCase().includes(q) ||
-                              (f.nombre_archivo || '').toLowerCase().includes(q) ||
-                              (f.categoria || '').toLowerCase().includes(q)
-                            );
-                          })
-                          .map((file) => {
+                    {loadingArchivos && availableArchivos.length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 px-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-600">
+                        <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
+                        <span>Consultando archivos disponibles en Supabase...</span>
+                      </div>
+                    ) : availableArchivos.length === 0 ? (
+                      <div className="p-3 rounded-xl border border-dashed border-slate-300 bg-white text-[11px] text-slate-500">
+                        No hay archivos registrados en la pestaña <strong>Archivos</strong> todavía. Sube primero el documento en el módulo Archivos y luego presiona <strong>Actualizar</strong>.
+                      </div>
+                    ) : (() => {
+                      const q = archivoSearch.trim().toLowerCase();
+                      const filteredFiles = availableArchivos.filter((f) => {
+                        if (!q) return true;
+                        return (
+                          (f.titulo || '').toLowerCase().includes(q) ||
+                          (f.nombre_archivo || '').toLowerCase().includes(q) ||
+                          (f.categoria || '').toLowerCase().includes(q)
+                        );
+                      });
+
+                      if (filteredFiles.length === 0) {
+                        return (
+                          <div className="p-3 rounded-xl border border-slate-200 bg-white text-[11px] text-slate-500">
+                            No se encontraron archivos que coincidan con «{archivoSearch.trim()}».
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+                          {filteredFiles.map((file) => {
                             const selected = formArchivosAdjuntos.some(
                               (a) => String(a.id) === String(file.id)
                             );
+                            const hasValidUrl = Boolean(file.url_archivo || file.enlace_externo);
                             return (
                               <label
                                 key={file.id}
@@ -1403,7 +1470,12 @@ export default function Noticias() {
                                       {file.titulo || file.nombre_archivo}
                                     </p>
                                     <p className="text-[10px] text-slate-500 truncate">
-                                      {[file.categoria, file.extension?.toUpperCase(), file.tamano_legible]
+                                      {[
+                                        file.categoria,
+                                        file.extension?.toUpperCase(),
+                                        file.tamano_legible,
+                                        hasValidUrl ? 'Enlace listo' : 'Sin enlace',
+                                      ]
                                         .filter(Boolean)
                                         .join(' · ')}
                                     </p>
@@ -1419,8 +1491,9 @@ export default function Noticias() {
                               </label>
                             );
                           })}
-                      </div>
-                    )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </>
               )}

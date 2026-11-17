@@ -6,8 +6,22 @@ import {
   Tag, ExternalLink, HardDrive, RefreshCw, Copy, Check, Info, AlertTriangle, X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getApiUrl } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const generateUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 export interface ArchivoItem {
   id: string;
@@ -57,7 +71,9 @@ export default function Archivos() {
   // Modal Subida
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dbWarning, setDbWarning] = useState<string | null>(null);
 
   // Formulario de Subida
   const [formTitulo, setFormTitulo] = useState('');
@@ -65,6 +81,10 @@ export default function Archivos() {
   const [formCategoria, setFormCategoria] = useState(CATEGORIAS_DEFAULT[0]);
   const [formEnlaceExterno, setFormEnlaceExterno] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Modal Confirmación Eliminación
+  const [deleteTarget, setDeleteTarget] = useState<ArchivoItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Modal Previsualización
   const [previewFile, setPreviewFile] = useState<ArchivoItem | null>(null);
@@ -79,37 +99,84 @@ export default function Archivos() {
 
   const fetchArchivos = async () => {
     setLoading(true);
+    setDbWarning(null);
     try {
-      // 1. Intentar obtener desde Supabase
+      const mergedMap = new Map<string, ArchivoItem>();
+      let supabaseLoaded = false;
+
+      // 1. Obtener desde Supabase (fuente principal)
       const { data, error } = await supabase
         .from('archivos')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
-        setArchivos(data);
-        setLoading(false);
-        return;
-      }
-
-      // 2. Si la tabla no existe en Supabase o está vacía, consultar endpoint de la API local
-      const res = await fetch('/api/archivos');
-      if (res.ok) {
-        const localData = await res.json();
-        if (localData && localData.length > 0) {
-          setArchivos(localData);
-          setLoading(false);
-          return;
+      if (error) {
+        console.warn('Error consultando public.archivos en Supabase:', error);
+        setDbWarning(
+          `No se pudo consultar Supabase (${error.message}). Verifica que ejecutaste el Script SQL de Archivos.`
+        );
+      } else if (Array.isArray(data)) {
+        supabaseLoaded = true;
+        for (const item of data) {
+          if (item && item.activo !== false) {
+            mergedMap.set(String(item.id), item as ArchivoItem);
+          }
         }
       }
 
-      // 3. Fallback de respaldo en localStorage
-      const cached = localStorage.getItem('cruz_verde_archivos_data');
-      if (cached) {
-        setArchivos(JSON.parse(cached));
+      // 2. Complementar con API local sólo si Supabase falló o para registros locales pendientes
+      try {
+        const res = await fetch(getApiUrl('/api/archivos'));
+        if (res.ok) {
+          const localData = await res.json();
+          if (Array.isArray(localData)) {
+            for (const item of localData) {
+              if (!item || item.activo === false) continue;
+              const idKey = String(item.id);
+              if (!mergedMap.has(idKey)) {
+                // Evitar duplicar si ya vino desde Supabase con distinto ID pero mismo título y archivo
+                const dupInSupabase = Array.from(mergedMap.values()).some(
+                  (sb) =>
+                    sb.titulo === item.titulo &&
+                    sb.nombre_archivo === item.nombre_archivo &&
+                    sb.url_archivo === item.url_archivo
+                );
+                if (!dupInSupabase && !supabaseLoaded) {
+                  mergedMap.set(idKey, item as ArchivoItem);
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Sin API local (ej. producción estática), continuar con Supabase
       }
-    } catch (err) {
+
+      // 3. Fallback localStorage si no hubo respuesta ni de Supabase ni de API local
+      if (mergedMap.size === 0 && !supabaseLoaded) {
+        const cached = localStorage.getItem('cruz_verde_archivos_data');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              if (item) mergedMap.set(String(item.id), item as ArchivoItem);
+            }
+          }
+        }
+      }
+
+      const finalList = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime()
+      );
+      setArchivos(finalList);
+      try {
+        localStorage.setItem('cruz_verde_archivos_data', JSON.stringify(finalList));
+      } catch {
+        // Ignorar si excede cuota de localStorage
+      }
+    } catch (err: any) {
       console.warn('Error al obtener archivos de base de datos:', err);
+      setDbWarning(err?.message || 'Error al cargar el repositorio de archivos.');
     } finally {
       setLoading(false);
     }
@@ -146,134 +213,177 @@ export default function Archivos() {
     return <FileCode className="w-8 h-8 text-gray-500" />;
   };
 
-  // Subir archivo
+  // Subir archivo (Supabase Storage primero + UUID válido en public.archivos)
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitulo.trim()) {
-      setUploadError('Por favor ingresa un título para el archivo');
+      setUploadError('Por favor ingresa un título para el archivo.');
       return;
     }
     if (!selectedFile && !formEnlaceExterno.trim()) {
-      setUploadError('Debes seleccionar un archivo o indicar un enlace de descarga');
+      setUploadError('Debes seleccionar un archivo o indicar un enlace de descarga.');
       return;
     }
 
     setUploading(true);
     setUploadError(null);
+    setUploadStatus(selectedFile ? 'Subiendo archivo a Supabase Storage...' : 'Preparando registro...');
 
     try {
       let finalFileUrl = formEnlaceExterno.trim();
-      let originalFileName = selectedFile ? selectedFile.name : 'Documento_Externo.pdf';
-      let extension = selectedFile ? selectedFile.name.split('.').pop()?.toLowerCase() || '' : 'link';
-      let tamanoLegible = selectedFile ? formatBytes(selectedFile.size) : 'Enlace en la nube';
-      let tamanoBytes = selectedFile ? selectedFile.size : 0;
-      let mimetype = selectedFile ? selectedFile.type : 'application/octet-stream';
+      const originalFileName = selectedFile ? selectedFile.name : 'Documento_Externo.pdf';
+      const extension = selectedFile ? selectedFile.name.split('.').pop()?.toLowerCase() || '' : 'link';
+      const tamanoLegible = selectedFile ? formatBytes(selectedFile.size) : 'Enlace en la nube';
+      const tamanoBytes = selectedFile ? selectedFile.size : 0;
+      const mimetype = selectedFile ? selectedFile.type || 'application/octet-stream' : 'application/octet-stream';
+      let storageErrorDetail: string | null = null;
 
       if (selectedFile) {
-        // Intentar subir a través del endpoint API del servidor
-        const formData = new FormData();
-        formData.append('archivo', selectedFile);
+        const safeFileName = selectedFile.name
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9._-]/g, '_');
+        const objectPath = `archivos/${Date.now()}_${safeFileName}`;
 
-        try {
-          const uploadRes = await fetch('/api/upload-file', {
-            method: 'POST',
-            body: formData
-          });
-
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            if (uploadData.url) {
-              finalFileUrl = uploadData.url;
-            }
-          }
-        } catch (serverUploadErr) {
-          console.warn('API local upload falló, probando fallback a Supabase Storage:', serverUploadErr);
-        }
-
-        // Si falló el servidor, intentar Supabase Storage bucket 'socorristas'
-        if (!finalFileUrl) {
+        // 1. Subir directo a Supabase Storage (prioritario para rapidez y persistencia en la nube)
+        const candidateBuckets = ['socorristas', 'archivos'] as const;
+        for (const bucketName of candidateBuckets) {
+          if (finalFileUrl) break;
           try {
-            const cleanName = `archivos/${Date.now()}_${selectedFile.name.replace(/\s+/g, '_')}`;
             const { error: storageErr } = await supabase.storage
-              .from('socorristas')
-              .upload(cleanName, selectedFile, { upsert: true });
+              .from(bucketName)
+              .upload(objectPath, selectedFile, {
+                cacheControl: '3600',
+                upsert: true,
+                contentType: mimetype,
+              });
 
             if (!storageErr) {
-              const { data: { publicUrl } } = supabase.storage
-                .from('socorristas')
-                .getPublicUrl(cleanName);
-              finalFileUrl = publicUrl;
+              const { data: urlData } = supabase.storage
+                .from(bucketName)
+                .getPublicUrl(objectPath);
+              if (urlData?.publicUrl) {
+                finalFileUrl = urlData.publicUrl;
+                storageErrorDetail = null;
+                break;
+              }
+            } else {
+              storageErrorDetail = storageErr.message;
+              console.warn(`Supabase Storage (${bucketName}) rechazó subida:`, storageErr.message);
             }
-          } catch (storageException) {
-            console.warn('Storage fallback falló:', storageException);
+          } catch (storageEx: any) {
+            storageErrorDetail = storageEx?.message || 'Error de red en Storage';
           }
         }
 
-        // Si ambos fallaron, convertir a Data URL (para que nunca falle)
+        // 2. Respaldo al endpoint /api/upload-file si Storage falló (ej. MIME pendiente de migración SQL)
         if (!finalFileUrl) {
+          setUploadStatus('Usando servidor de respaldo temporal...');
+          try {
+            const formData = new FormData();
+            formData.append('archivo', selectedFile);
+            const uploadRes = await fetch(getApiUrl('/api/upload-file'), {
+              method: 'POST',
+              body: formData,
+            });
+            if (uploadRes.ok) {
+              const uploadData = await uploadRes.json();
+              if (uploadData?.url) {
+                finalFileUrl = uploadData.url;
+              }
+            }
+          } catch (serverUploadErr) {
+            console.warn('API upload fallback falló:', serverUploadErr);
+          }
+        }
+
+        // 3. Último recurso sólo para archivos pequeños (<= 1.5 MB) para no congelar el navegador ni inflar JSON
+        if (!finalFileUrl && selectedFile.size <= 1.5 * 1024 * 1024) {
           finalFileUrl = await new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.onload = (ev) => resolve((ev.target?.result as string) || '');
             reader.readAsDataURL(selectedFile);
           });
         }
+
+        if (!finalFileUrl) {
+          throw new Error(
+            storageErrorDetail
+              ? `Supabase Storage rechazó el archivo (${storageErrorDetail}). Ejecuta el Script SQL #38 en Supabase para permitir todos los formatos de archivo en Storage.`
+              : 'No se pudo subir el archivo a Supabase Storage ni al servidor.'
+          );
+        }
       }
 
-      const newArchivoItem: ArchivoItem = {
-        id: `arc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      setUploadStatus('Guardando registro en Supabase...');
+
+      const validId = generateUuid();
+      const validUserId = user?.id && UUID_REGEX.test(user.id) ? user.id : undefined;
+
+      const supabasePayload: Record<string, any> = {
+        id: validId,
         titulo: formTitulo.trim(),
-        descripcion: formDescripcion.trim() || undefined,
+        descripcion: formDescripcion.trim() || null,
         categoria: formCategoria,
         nombre_archivo: originalFileName,
         url_archivo: finalFileUrl,
         tipo_archivo: mimetype,
-        extension: extension,
+        extension,
         tamano_bytes: tamanoBytes,
         tamano_legible: tamanoLegible,
-        subido_por_id: user?.id,
         subido_por_nombre: userName || user?.email || 'Administración',
         enlace_externo: formEnlaceExterno.trim() || null,
         descargas_count: 0,
         activo: true,
-        created_at: new Date().toISOString()
+      };
+      if (validUserId) {
+        supabasePayload.subido_por_id = validUserId;
+      }
+
+      const { data: insertedSupabase, error: insertError } = await supabase
+        .from('archivos')
+        .insert([supabasePayload])
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Error guardando archivo en Supabase:', insertError);
+        throw new Error(
+          `No se pudo guardar en Supabase (${insertError.message}). Verifica que ejecutaste el Script SQL #38 de permisos en Supabase.`
+        );
+      }
+
+      const savedItem: ArchivoItem = (insertedSupabase as ArchivoItem) || {
+        ...(supabasePayload as ArchivoItem),
+        created_at: new Date().toISOString(),
       };
 
-      // Guardar en Supabase
-      try {
-        const { data: insertedSupabase, error: insertError } = await supabase
-          .from('archivos')
-          .insert([newArchivoItem])
-          .select()
-          .single();
+      // Sincronizar en segundo plano con API local sin bloquear la respuesta de la UI
+      fetch(getApiUrl('/api/archivos'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(savedItem),
+      }).catch(() => {});
 
-        if (!insertError && insertedSupabase) {
-          newArchivoItem.id = insertedSupabase.id;
-        }
-      } catch (errDb) {
-        console.warn('No se pudo guardar directamente en Supabase, sincronizando con API local:', errDb);
-      }
-
-      // Guardar en API local (respaldo)
-      try {
-        await fetch('/api/archivos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newArchivoItem)
-        });
-      } catch (apiErr) {
-        console.warn('No se pudo guardar en API local:', apiErr);
-      }
-
-      // Actualizar estado en memoria y cache
-      const updatedList = [newArchivoItem, ...archivos];
+      const updatedList = [savedItem, ...archivos];
       setArchivos(updatedList);
-      localStorage.setItem('cruz_verde_archivos_data', JSON.stringify(updatedList));
+      try {
+        localStorage.setItem('cruz_verde_archivos_data', JSON.stringify(updatedList));
+      } catch {
+        // Ignorar si excede cuota
+      }
 
-      await logActivity('Subió nuevo archivo institucional', 'Archivos', newArchivoItem.id, {
-        titulo: newArchivoItem.titulo,
-        categoria: newArchivoItem.categoria,
-        nombre_archivo: newArchivoItem.nombre_archivo
-      });
+      if (storageErrorDetail) {
+        setDbWarning(
+          `El registro se guardó en Supabase, pero el archivo físico usó almacenamiento alternativo (${storageErrorDetail}). Ejecuta el Script SQL #38 en Supabase para subir directo a Storage.`
+        );
+      }
+
+      logActivity('Subió nuevo archivo institucional', 'Archivos', savedItem.id, {
+        titulo: savedItem.titulo,
+        categoria: savedItem.categoria,
+        nombre_archivo: savedItem.nombre_archivo,
+      }).catch(() => {});
 
       // Limpiar y cerrar modal
       setFormTitulo('');
@@ -283,9 +393,10 @@ export default function Archivos() {
       setSelectedFile(null);
       setShowUploadModal(false);
     } catch (err: any) {
-      setUploadError(err.message || 'Error al guardar el archivo');
+      setUploadError(err?.message || 'Error al guardar el archivo en Supabase.');
     } finally {
       setUploading(false);
+      setUploadStatus(null);
     }
   };
 
@@ -299,11 +410,15 @@ export default function Archivos() {
         // ignore
       }
 
-      // O mediante API local
-      fetch(`/api/archivos/${archivo.id}/descarga`, { method: 'POST' }).catch(() => {});
+      // Respaldo API local
+      fetch(getApiUrl(`/api/archivos/${encodeURIComponent(archivo.id)}/descarga`), {
+        method: 'POST',
+      }).catch(() => {});
 
       // Actualizar contador en UI
-      setArchivos(prev => prev.map(a => a.id === archivo.id ? { ...a, descargas_count: (a.descargas_count || 0) + 1 } : a));
+      setArchivos((prev) =>
+        prev.map((a) => (a.id === archivo.id ? { ...a, descargas_count: (a.descargas_count || 0) + 1 } : a))
+      );
 
       // Descarga real
       const link = document.createElement('a');
@@ -317,7 +432,7 @@ export default function Archivos() {
 
       await logActivity('Descargó archivo institucional', 'Archivos', archivo.id, {
         titulo: archivo.titulo,
-        nombre_archivo: archivo.nombre_archivo
+        nombre_archivo: archivo.nombre_archivo,
       });
     } catch (err) {
       console.error('Error al iniciar la descarga:', err);
@@ -325,22 +440,36 @@ export default function Archivos() {
   };
 
   // Eliminar archivo
-  const handleEliminar = async (id: string, titulo: string) => {
-    if (!canUpload) return;
-    if (!window.confirm(`¿Estás seguro de que deseas eliminar el archivo "${titulo}"?`)) return;
+  const confirmEliminar = async () => {
+    if (!canUpload || !deleteTarget) return;
+    const { id, titulo } = deleteTarget;
+    setDeleting(true);
+    setDbWarning(null);
 
     try {
-      await supabase.from('archivos').delete().eq('id', id);
-      await fetch(`/api/archivos/${id}`, { method: 'DELETE' }).catch(() => {});
+      const { error: sbDelErr } = await supabase.from('archivos').delete().eq('id', id);
+      if (sbDelErr) {
+        console.warn('Error eliminando en Supabase:', sbDelErr.message);
+        setDbWarning(`No se pudo eliminar en Supabase (${sbDelErr.message}). Revisa el Script SQL #38.`);
+      }
 
-      const updated = archivos.filter(a => a.id !== id);
+      await fetch(getApiUrl(`/api/archivos/${encodeURIComponent(id)}`), { method: 'DELETE' }).catch(() => {});
+
+      const updated = archivos.filter((a) => a.id !== id);
       setArchivos(updated);
-      localStorage.setItem('cruz_verde_archivos_data', JSON.stringify(updated));
+      try {
+        localStorage.setItem('cruz_verde_archivos_data', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
 
       await logActivity('Eliminó archivo institucional', 'Archivos', id, { titulo });
-    } catch (err) {
+      setDeleteTarget(null);
+    } catch (err: any) {
       console.error('Error al eliminar archivo:', err);
-      alert('No se pudo eliminar el archivo');
+      setDbWarning(err?.message || 'No se pudo eliminar el archivo.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -371,8 +500,8 @@ export default function Archivos() {
   const totalDescargas = archivos.reduce((acc, a) => acc + (a.descargas_count || 0), 0);
 
   const sqlMigrationCode = `-- ==============================================================================
--- Migración SQL para Habilitar Archivos y Anuncios en Supabase
--- Ejecuta este código en el Editor SQL de tu panel Supabase
+-- Migración SQL #38: Archivos, RLS completo y Storage sin restricción de MIME
+-- Ejecuta este código en el SQL Editor de tu panel Supabase
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.archivos (
@@ -392,23 +521,75 @@ CREATE TABLE IF NOT EXISTS public.archivos (
   descargas_count INTEGER DEFAULT 0,
   activo BOOLEAN DEFAULT true,
   enlace_externo TEXT,
+  tags TEXT[],
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE public.user_roles ADD COLUMN IF NOT EXISTS can_upload_files BOOLEAN DEFAULT false;
-
 ALTER TABLE public.archivos ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Usuarios autenticados pueden ver archivos activos" ON public.archivos;
 CREATE POLICY "Usuarios autenticados pueden ver archivos activos"
-  ON public.archivos FOR SELECT TO authenticated USING (true);
+  ON public.archivos FOR SELECT TO authenticated
+  USING (
+    activo = true OR auth.uid() = subido_por_id OR (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com'
+    OR EXISTS (
+      SELECT 1 FROM public.user_roles ur LEFT JOIN public.role_permissions rp ON rp.role = ur.role
+      WHERE ur.id = auth.uid() AND (
+        ur.role = 'admin' OR ur.can_upload_files = true
+        OR COALESCE((ur.custom_permissions->>'view_archivos')::boolean, false) = true
+        OR COALESCE((ur.custom_permissions->>'subir_archivos')::boolean, false) = true
+        OR COALESCE((ur.custom_permissions->>'edit_archivos')::boolean, false) = true
+        OR COALESCE((ur.custom_permissions->>'view_noticias_ajustes')::boolean, false) = true
+        OR COALESCE((ur.custom_permissions->>'edit_noticias_banner')::boolean, false) = true
+      )
+    )
+  );
 
+DROP POLICY IF EXISTS "Usuarios autorizados pueden subir archivos" ON public.archivos;
 CREATE POLICY "Usuarios autorizados pueden subir archivos"
-  ON public.archivos FOR INSERT TO authenticated WITH CHECK (true);
+  ON public.archivos FOR INSERT TO authenticated
+  WITH CHECK (
+    (auth.jwt() ->> 'email') = 'christopher.snap@gmail.com'
+    OR EXISTS (
+      SELECT 1 FROM public.user_roles ur LEFT JOIN public.role_permissions rp ON rp.role = ur.role
+      WHERE ur.id = auth.uid() AND (
+        ur.role = 'admin' OR ur.can_upload_files = true
+        OR COALESCE((ur.custom_permissions->>'subir_archivos')::boolean, false) = true
+        OR COALESCE((ur.custom_permissions->>'edit_archivos')::boolean, false) = true
+        OR COALESCE((rp.permissions->>'subir_archivos')::boolean, false) = true
+        OR COALESCE((rp.permissions->>'edit_archivos')::boolean, false) = true
+      )
+    )
+  );
 
-CREATE POLICY "Admin y creador pueden modificar o eliminar"
-  ON public.archivos FOR ALL TO authenticated USING (true);
-`;
+DROP POLICY IF EXISTS "Admin y autor pueden modificar archivos" ON public.archivos;
+CREATE POLICY "Admin y autor pueden modificar archivos"
+  ON public.archivos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin y autor pueden eliminar archivos" ON public.archivos;
+CREATE POLICY "Admin y autor pueden eliminar archivos"
+  ON public.archivos FOR DELETE TO authenticated USING (true);
+
+-- Permitir todos los formatos de documentos (PDF, Word, Excel, ZIP, Imágenes) en Storage hasta 50 MB
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES
+  ('socorristas', 'socorristas', true, 52428800, NULL),
+  ('archivos', 'archivos', true, 52428800, NULL)
+ON CONFLICT (id) DO UPDATE SET public = true, file_size_limit = 52428800, allowed_mime_types = NULL;
+
+DROP POLICY IF EXISTS "Allow Public Read Objects" ON storage.objects;
+CREATE POLICY "Allow Public Read Objects" ON storage.objects
+  FOR SELECT USING (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+DROP POLICY IF EXISTS "Allow Public Upload Objects" ON storage.objects;
+CREATE POLICY "Allow Public Upload Objects" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+DROP POLICY IF EXISTS "Allow Public Update Objects" ON storage.objects;
+CREATE POLICY "Allow Public Update Objects" ON storage.objects
+  FOR UPDATE USING (bucket_id IN ('socorristas', 'archivos', 'logos', 'plantillas', 'assets'));
+
+NOTIFY pgrst, 'reload schema';`;
 
   return (
     <div className="space-y-6 w-full mx-auto pb-12">
@@ -596,6 +777,23 @@ CREATE POLICY "Admin y creador pueden modificar o eliminar"
         </div>
       </div>
 
+      {/* Alerta de sincronización Supabase */}
+      {dbWarning && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-3 text-xs flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>{dbWarning}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDbWarning(null)}
+            className="text-amber-600 hover:text-amber-800 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Contenido Principal: Lista o Cuadrícula */}
       {loading ? (
         <div className="flex flex-col items-center justify-center h-64 bg-white rounded-xl border border-gray-200">
@@ -642,7 +840,7 @@ CREATE POLICY "Admin y creador pueden modificar o eliminar"
                     </span>
                     {canUpload && (
                       <button
-                        onClick={() => handleEliminar(archivo.id, archivo.titulo)}
+                        onClick={() => setDeleteTarget(archivo)}
                         className="p-1 text-gray-400 hover:text-red-600 rounded transition cursor-pointer"
                         title="Eliminar archivo"
                       >
@@ -863,7 +1061,7 @@ CREATE POLICY "Admin y creador pueden modificar o eliminar"
                   {uploading ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Subiendo...</span>
+                      <span>{uploadStatus || 'Subiendo a Supabase...'}</span>
                     </>
                   ) : (
                     <>
@@ -955,8 +1153,8 @@ CREATE POLICY "Admin y creador pueden modificar o eliminar"
               <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl">
                 <p className="font-semibold">¿Qué se debe agregar en SQL en la base de datos para que funcione?</p>
                 <p className="mt-1 text-2xs text-blue-700">
-                  El archivo completo de migración está guardado en <code className="font-mono bg-blue-100 px-1 rounded">21_archivos_y_anuncios_sistema.sql</code>. 
-                  Copia y pega este script en el <strong>SQL Editor</strong> de tu proyecto de Supabase para habilitar las tablas con RLS y permisos.
+                  El archivo completo de corrección está guardado en <code className="font-mono bg-blue-100 px-1 rounded">38_fix_archivos_supabase_y_storage.sql</code> (y base en <code className="font-mono bg-blue-100 px-1 rounded">21_archivos_y_anuncios_sistema.sql</code>). 
+                  Copia y pega este script en el <strong>SQL Editor</strong> de tu proyecto de Supabase para habilitar la tabla con RLS y permitir todos los formatos en Storage.
                 </p>
               </div>
 
@@ -985,6 +1183,43 @@ CREATE POLICY "Admin y creador pueden modificar o eliminar"
                   Cerrar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINACIÓN */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-full bg-red-50 text-red-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">¿Eliminar archivo institucional?</h3>
+                <p className="text-xs text-gray-600 mt-1">
+                  Se eliminará <strong className="text-gray-900">"{deleteTarget.titulo}"</strong> del repositorio. Esta acción no se puede deshacer.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmEliminar}
+                className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg cursor-pointer disabled:opacity-50"
+              >
+                {deleting ? 'Eliminando...' : 'Sí, eliminar'}
+              </button>
             </div>
           </div>
         </div>
