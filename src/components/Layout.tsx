@@ -11,6 +11,12 @@ import { useSettings } from '../contexts/SettingsContext';
 import { usePresence } from '../hooks/usePresence';
 import { supabase } from '../lib/supabase';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
+import {
+  syncReadReceiptsFromSupabase,
+  isSolicitudUnread,
+  SOLICITUDES_READ_EVENT,
+  publishModuleUnreadCount,
+} from '../utils/solicitudReadTracker';
 import MisAccesosModal from './accesos/MisAccesosModal';
 import PresenceModal from './PresenceModal';
 import SoporteFormModal from './soporte/SoporteFormModal';
@@ -70,17 +76,12 @@ export default function Layout() {
   const carnetSeccionalIds = getModuleSeccionalIds('solicitudes_carnet');
   const scopesDepsKey = `${compraScope}:${compraSeccionalIds.join(',')}|${combustibleScope}:${combustibleSeccionalIds.join(',')}|${carnetScope}:${carnetSeccionalIds.join(',')}`;
 
-  // Estados para notificaciones de solicitudes no leídas (filtradas estrictamente por acceso del usuario)
+  // Estados para notificaciones de solicitudes no leídas por solicitud individual (según alcance del usuario)
   const [unreadCombustible, setUnreadCombustible] = useState(0);
   const [unreadCompra, setUnreadCompra] = useState(0);
   const [unreadCarnet, setUnreadCarnet] = useState(0);
   const [unreadGeneral, setUnreadGeneral] = useState(0);
   const [unreadSoporte, setUnreadSoporte] = useState(0);
-
-  const getSeenStorageKey = (suffix: string) => {
-    const uid = user?.id || user?.email || 'anon';
-    return `cv_last_seen_${suffix}_${uid}`;
-  };
 
   const checkUnreadSolicitudes = async () => {
     if (authLoading || !user) {
@@ -93,9 +94,7 @@ export default function Layout() {
     }
 
     try {
-      const lastSeenComb = Number(localStorage.getItem(getSeenStorageKey('combustible')) || '0');
-      const lastSeenComp = Number(localStorage.getItem(getSeenStorageKey('compra')) || '0');
-      const lastSeenGen = Number(localStorage.getItem(getSeenStorageKey('solicitudes')) || '0');
+      const readSet = await syncReadReceiptsFromSupabase(user.id);
 
       // Catálogo de seccionales para resolver nombres e IDs en alcances por seccional
       let secList: { id: number; nombre: string }[] = [];
@@ -155,7 +154,7 @@ export default function Layout() {
         try {
           const { data: combData, error: combErr } = await supabase
             .from('solicitudes_combustible')
-            .select('id, created_at, estado, seccional_id, seccional_nombre, nombre_solicitante, correo_electronico')
+            .select('id, folio, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, nombre_solicitante, correo_electronico')
             .order('created_at', { ascending: false })
             .limit(200);
           if (combErr) {
@@ -181,16 +180,18 @@ export default function Layout() {
         );
       }
 
-      if (!canViewCombustible || !canViewCombustibleHistorial || location.pathname === '/solicitudes-combustible') {
-        setUnreadCombustible(0);
-      } else {
-        const unreadComb = scopedCombItems.filter((s) => {
-          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
-          if (lastSeenComb === 0) return s.estado === 'Pendiente';
-          return itemTime > lastSeenComb;
-        }).length;
-        setUnreadCombustible(unreadComb);
-      }
+      const unreadCombCount = scopedCombItems.filter((s) =>
+        isSolicitudUnread({
+          userId: user.id,
+          readSet,
+          modulo: 'combustible',
+          solicitudKey: s.id,
+          estado: s.estado,
+          createdAt: s.created_at || s.fecha_solicitud,
+        })
+      ).length;
+
+      setUnreadCombustible(canViewCombustible && canViewCombustibleHistorial ? unreadCombCount : 0);
 
       // 2. Solicitudes de compra observables por el usuario
       let scopedCompItems: any[] = [];
@@ -200,7 +201,7 @@ export default function Layout() {
         try {
           const { data: compData, error: compErr } = await supabase
             .from('solicitudes_compra')
-            .select('id, created_at, estado, seccional_id, seccional_nombre, solicitado_por, user_email')
+            .select('id, folio, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, solicitado_por, user_email')
             .order('created_at', { ascending: false })
             .limit(200);
           if (compErr) {
@@ -226,26 +227,26 @@ export default function Layout() {
         );
       }
 
-      if (!canViewCompra || !canViewCompraHistorial || location.pathname === '/solicitudes-compra') {
-        setUnreadCompra(0);
-      } else {
-        const unreadComp = scopedCompItems.filter((s) => {
-          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
-          if (lastSeenComp === 0) return s.estado === 'Pendiente';
-          return itemTime > lastSeenComp;
-        }).length;
-        setUnreadCompra(unreadComp);
-      }
+      const unreadCompCount = scopedCompItems.filter((s) =>
+        isSolicitudUnread({
+          userId: user.id,
+          readSet,
+          modulo: 'compra',
+          solicitudKey: s.id,
+          estado: s.estado,
+          createdAt: s.created_at || s.fecha_solicitud,
+        })
+      ).length;
 
-      // 3. Solicitudes de carnet pendientes/observadas observables según alcance del usuario
-      let carnetPending = 0;
-      const viewingCarnetTab = location.pathname === '/solicitudes' && location.search.includes('tab=carnet');
-      if (canViewCarnet && !viewingCarnetTab) {
+      setUnreadCompra(canViewCompra && canViewCompraHistorial ? unreadCompCount : 0);
+
+      // 3. Solicitudes de carnet no leídas observables según alcance del usuario
+      let carnetUnreadCount = 0;
+      if (canViewCarnet) {
         try {
           const secNameById = new Map<number, string>();
           secList.forEach((s) => secNameById.set(s.id, s.nombre));
 
-          const activeCarnetStates = ['Pendiente', 'En revisión', 'Observada'];
           const { data: carnetRows } = await supabase
             .from('solicitudes_carnet')
             .select(`
@@ -264,7 +265,8 @@ export default function Layout() {
                 seccionales (id, nombre)
               )
             `)
-            .in('estado_solicitud', activeCarnetStates);
+            .order('fecha_solicitud', { ascending: false })
+            .limit(300);
 
           const normalizedDbCarnet = (carnetRows || []).map((row: any) => {
             const soc = Array.isArray(row.socorristas) ? row.socorristas[0] : row.socorristas;
@@ -276,11 +278,13 @@ export default function Layout() {
               (resolvedSecId ? secNameById.get(resolvedSecId) : '') ||
               '';
             return {
+              id: row.id as number | string,
               socorrista_id: Number(row.socorrista_id || 0),
               seccional_id: resolvedSecId,
               seccional_nombre: resolvedSecNombre,
               solicitado_por: row.solicitado_por || '',
               solicitado_por_email: row.solicitado_por_email || null,
+              estado_solicitud: row.estado_solicitud || 'Pendiente',
               fecha_solicitud: row.fecha_solicitud || '',
               foto_url: row.foto_url || null,
             };
@@ -298,7 +302,6 @@ export default function Layout() {
                 try {
                   const parsed = JSON.parse(r.valor);
                   const est = parsed.estado_solicitud || 'Pendiente';
-                  if (!activeCarnetStates.includes(est)) return;
                   const sid = Number(parsed.socorrista_id || 0);
                   const fSol = parsed.fecha_solicitud || '';
                   const dup = normalizedDbCarnet.some(
@@ -310,12 +313,14 @@ export default function Layout() {
                   if (!dup) {
                     const secId = parsed.seccional_id || null;
                     mergedCarnet.push({
+                      id: r.clave as number | string,
                       socorrista_id: sid,
                       seccional_id: secId,
                       seccional_nombre:
                         parsed.seccional_nombre || (secId ? secNameById.get(secId) || '' : ''),
                       solicitado_por: parsed.solicitado_por || parsed.nombre_completo || '',
                       solicitado_por_email: parsed.solicitado_por_email || null,
+                      estado_solicitud: est,
                       fecha_solicitud: fSol,
                       foto_url: parsed.foto_url || null,
                     });
@@ -366,24 +371,30 @@ export default function Layout() {
             return Boolean(emailMatch || nameMatch || socMatch);
           });
 
-          carnetPending = scopedCarnet.length;
+          carnetUnreadCount = scopedCarnet.filter((item) =>
+            isSolicitudUnread({
+              userId: user.id,
+              readSet,
+              modulo: 'carnet',
+              solicitudKey: item.id,
+              estado: item.estado_solicitud,
+              createdAt: item.fecha_solicitud,
+            })
+          ).length;
         } catch {}
       }
-      setUnreadCarnet(viewingCarnetTab ? 0 : carnetPending);
+      setUnreadCarnet(carnetUnreadCount);
+      publishModuleUnreadCount('carnet', carnetUnreadCount);
+      publishModuleUnreadCount('combustible', canViewCombustible ? unreadCombCount : 0);
+      publishModuleUnreadCount('compra', canViewCompra ? unreadCompCount : 0);
 
-      // 4. Solicitudes generales (Compras + Combustible dentro del alcance del usuario)
-      const viewingGeneralSolicitudes =
-        location.pathname === '/solicitudes' && !location.search.includes('tab=carnet');
-      if ((!canViewCompra && !canViewCombustible) || viewingGeneralSolicitudes) {
+      // 4. Solicitudes generales (Compras + Combustible no leídas dentro del alcance del usuario)
+      if (!canViewCompra && !canViewCombustible) {
         setUnreadGeneral(0);
       } else {
-        const allScopedItems = [...scopedCombItems, ...scopedCompItems];
-        const unreadGen = allScopedItems.filter((s) => {
-          const itemTime = s.created_at ? new Date(s.created_at).getTime() : 0;
-          if (lastSeenGen === 0) return s.estado === 'Pendiente';
-          return itemTime > lastSeenGen;
-        }).length;
-        setUnreadGeneral(unreadGen);
+        setUnreadGeneral(
+          (canViewCombustible ? unreadCombCount : 0) + (canViewCompra ? unreadCompCount : 0)
+        );
       }
 
       // 5. Tickets de soporte pendientes (únicamente si puede ver el historial de soporte)
@@ -406,7 +417,7 @@ export default function Layout() {
   const checkUnreadRef = useRef(checkUnreadSolicitudes);
   checkUnreadRef.current = checkUnreadSolicitudes;
 
-  // Limpiar badges según la ruta activa y recalcular cuando cambian permisos o alcances
+  // Recalcular cuando cambian permisos, alcances o ruta activa (sin borrar solicitudes no vistas)
   useEffect(() => {
     if (authLoading || !user) {
       setUnreadCombustible(0);
@@ -417,19 +428,7 @@ export default function Layout() {
       return;
     }
 
-    const now = Date.now().toString();
-    if (location.pathname === '/solicitudes' && !location.search.includes('tab=carnet')) {
-      localStorage.setItem(getSeenStorageKey('solicitudes'), now);
-      setUnreadGeneral(0);
-    } else if (location.pathname === '/solicitudes' && location.search.includes('tab=carnet')) {
-      setUnreadCarnet(0);
-    } else if (location.pathname === '/solicitudes-combustible') {
-      localStorage.setItem(getSeenStorageKey('combustible'), now);
-      setUnreadCombustible(0);
-    } else if (location.pathname === '/solicitudes-compra') {
-      localStorage.setItem(getSeenStorageKey('compra'), now);
-      setUnreadCompra(0);
-    } else if (location.pathname === '/soporte') {
+    if (location.pathname === '/soporte') {
       setUnreadSoporte(0);
     }
 
@@ -455,15 +454,17 @@ export default function Layout() {
     location.search,
   ]);
 
-  // Escuchar eventos globales y polling periódico usando referencia siempre actualizada
+  // Escuchar eventos globales (incluyendo lectura individual de solicitudes) y polling periódico
   useEffect(() => {
     const handleUpdate = () => checkUnreadRef.current();
     window.addEventListener('solicitudes_updated', handleUpdate);
+    window.addEventListener(SOLICITUDES_READ_EVENT, handleUpdate);
     window.addEventListener('soporte_updated', handleUpdate);
     window.addEventListener('focus', handleUpdate);
     const interval = setInterval(() => checkUnreadRef.current(), 15000);
     return () => {
       window.removeEventListener('solicitudes_updated', handleUpdate);
+      window.removeEventListener(SOLICITUDES_READ_EVENT, handleUpdate);
       window.removeEventListener('soporte_updated', handleUpdate);
       window.removeEventListener('focus', handleUpdate);
       clearInterval(interval);

@@ -5,7 +5,7 @@ import {
   CheckCircle2, Clock, XCircle, AlertCircle, RefreshCw, ChevronLeft, 
   Building2, User, FileText, Send, Calendar, Check, ExternalLink,
   DollarSign, Truck, AlertTriangle, ShieldCheck, Info, ArrowUpRight,
-  Sliders, Edit3, X, IdCard
+  Sliders, Edit3, X, IdCard, CheckCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -19,6 +19,7 @@ import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import SolicitudesCarnetTab from '../components/solicitudes/SolicitudesCarnetTab';
+import { useSolicitudReadTracker, useModuleUnreadCount } from '../utils/solicitudReadTracker';
 
 export type TipoSolicitudFilter = 'todas' | 'combustible' | 'compra';
 
@@ -53,6 +54,8 @@ export default function Solicitudes() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds } = useAuth();
+  const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
+  const unreadCarnetTabCount = useModuleUnreadCount('carnet');
   
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
@@ -130,12 +133,14 @@ export default function Solicitudes() {
   const [sendSuccessMsg, setSendSuccessMsg] = useState('');
 
   const handleOpenStatusModal = (item: SolicitudUnifiedItem) => {
+    markAsRead(item.tipo, item.originalId);
     setStatusModalItem(item);
     setNewStatus(item.estado || 'Pendiente');
     setMotivoRechazo(item.motivo_rechazo || '');
   };
 
   const handleQuickStatus = async (item: SolicitudUnifiedItem, targetStatus: string) => {
+    markAsRead(item.tipo, item.originalId);
     if (targetStatus === 'Rechazada') {
       handleOpenStatusModal(item);
       setNewStatus('Rechazada');
@@ -668,6 +673,7 @@ export default function Solicitudes() {
 
   // Manejar apertura de PDF
   const handleOpenPdf = (item: SolicitudUnifiedItem) => {
+    markAsRead(item.tipo, item.originalId);
     if (item.tipo === 'combustible' && item.rawCombustible) {
       setPdfCombustibleItem(item.rawCombustible);
     } else if (item.tipo === 'compra' && item.rawCompra) {
@@ -675,9 +681,49 @@ export default function Solicitudes() {
     }
   };
 
-  // Contadores por tipo
+  const isItemUnread = (item: SolicitudUnifiedItem) =>
+    isUnread(
+      item.tipo,
+      item.originalId,
+      item.estado,
+      item.rawCombustible?.created_at || item.rawCompra?.created_at || item.fecha
+    );
+
+  // Contadores por tipo y no leídas
   const countCombustible = useMemo(() => solicitudes.filter(s => s.tipo === 'combustible').length, [solicitudes]);
   const countCompra = useMemo(() => solicitudes.filter(s => s.tipo === 'compra').length, [solicitudes]);
+  const unreadLogisticaAll = useMemo(
+    () =>
+      solicitudes.filter((s) =>
+        isUnread(s.tipo, s.originalId, s.estado, s.rawCombustible?.created_at || s.rawCompra?.created_at || s.fecha)
+      ).length,
+    [solicitudes, isUnread]
+  );
+  const unreadCombustibleCount = useMemo(
+    () =>
+      solicitudes.filter(
+        (s) =>
+          s.tipo === 'combustible' &&
+          isUnread('combustible', s.originalId, s.estado, s.rawCombustible?.created_at || s.fecha)
+      ).length,
+    [solicitudes, isUnread]
+  );
+  const unreadCompraCount = useMemo(
+    () =>
+      solicitudes.filter(
+        (s) =>
+          s.tipo === 'compra' &&
+          isUnread('compra', s.originalId, s.estado, s.rawCompra?.created_at || s.fecha)
+      ).length,
+    [solicitudes, isUnread]
+  );
+  const unreadVisibleItems = useMemo(
+    () =>
+      filteredSolicitudes.filter((s) =>
+        isUnread(s.tipo, s.originalId, s.estado, s.rawCombustible?.created_at || s.rawCompra?.created_at || s.fecha)
+      ),
+    [filteredSolicitudes, isUnread]
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -719,6 +765,22 @@ export default function Solicitudes() {
         {/* Botones de Acción Rápida para Nuevas Solicitudes */}
         {activeMainTab === 'logistica' && (
           <div className="flex flex-wrap items-center gap-2.5">
+            {unreadVisibleItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  markManyAsRead(
+                    unreadVisibleItems.map((it) => ({ modulo: it.tipo, solicitudKey: it.originalId }))
+                  )
+                }
+                className="inline-flex items-center px-3.5 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-xl text-xs font-bold transition cursor-pointer"
+                title="Marcar las solicitudes visibles como leídas"
+              >
+                <CheckCheck className="w-4 h-4 mr-1.5 text-sky-700" />
+                Marcar vistas ({unreadVisibleItems.length})
+              </button>
+            )}
+
             {canViewCombustible && (
               <button
                 onClick={() => navigate('/solicitudes-combustible')}
@@ -767,7 +829,12 @@ export default function Solicitudes() {
               }`}
             >
               <ClipboardList className="w-4 h-4 mr-2" />
-              Compras y Combustible ({solicitudes.length})
+              <span>Compras y Combustible ({solicitudes.length})</span>
+              {unreadLogisticaAll > 0 && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-2xs">
+                  {unreadLogisticaAll}
+                </span>
+              )}
             </button>
           )}
           {canViewCarnet && (
@@ -784,7 +851,12 @@ export default function Solicitudes() {
               }`}
             >
               <IdCard className="w-4 h-4 mr-2" />
-              Solicitudes de Carnet
+              <span>Solicitudes de Carnet</span>
+              {unreadCarnetTabCount > 0 && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-2xs">
+                  {unreadCarnetTabCount}
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -810,9 +882,16 @@ export default function Solicitudes() {
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
               {isAdmin ? 'Todas las Solicitudes' : 'Mis Solicitudes'}
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-800">
-              {solicitudes.length}
-            </span>
+            <div className="flex items-center gap-1.5">
+              {unreadLogisticaAll > 0 && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                  {unreadLogisticaAll} sin leer
+                </span>
+              )}
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-800">
+                {solicitudes.length}
+              </span>
+            </div>
           </div>
           <p className="text-2xl font-black text-gray-900 mt-2">
             {solicitudes.length}
@@ -836,9 +915,16 @@ export default function Solicitudes() {
               <Fuel className="w-3.5 h-3.5 mr-1 text-emerald-600" />
               {isAdmin ? 'Combustible' : 'Mis Solicitudes de Combustible'}
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-              {countCombustible}
-            </span>
+            <div className="flex items-center gap-1.5">
+              {unreadCombustibleCount > 0 && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                  {unreadCombustibleCount} sin leer
+                </span>
+              )}
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                {countCombustible}
+              </span>
+            </div>
           </div>
           <p className="text-2xl font-black text-emerald-900 mt-2">
             {countCombustible}
@@ -862,9 +948,16 @@ export default function Solicitudes() {
               <FileText className="w-3.5 h-3.5 mr-1 text-primary" />
               {isAdmin ? 'Compras y Mantenimiento' : 'Mis Solicitudes de Compra'}
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-              {countCompra}
-            </span>
+            <div className="flex items-center gap-1.5">
+              {unreadCompraCount > 0 && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                  {unreadCompraCount} sin leer
+                </span>
+              )}
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                {countCompra}
+              </span>
+            </div>
           </div>
           <p className="text-2xl font-black text-primary mt-2">
             {countCompra}
@@ -1037,13 +1130,30 @@ export default function Solicitudes() {
               <tbody className="divide-y divide-gray-100">
                 {filteredSolicitudes.map((item) => {
                   const isCombustible = item.tipo === 'combustible';
+                  const rowUnread = isItemUnread(item);
 
                   return (
-                    <tr key={item.id} className="hover:bg-gray-50/80 transition-colors">
+                    <tr
+                      key={item.id}
+                      onClick={() => {
+                        if (rowUnread) markAsRead(item.tipo, item.originalId);
+                      }}
+                      className={`transition-colors ${
+                        rowUnread
+                          ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                          : 'bg-white hover:bg-gray-50/80 border-l-4 border-l-transparent'
+                      }`}
+                    >
                       
                       {/* Folio y Tipo */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
+                          {rowUnread && (
+                            <span
+                              className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"
+                              title="Solicitud no leída"
+                            />
+                          )}
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-bold ${
                               isCombustible
@@ -1063,14 +1173,19 @@ export default function Solicitudes() {
                               </>
                             )}
                           </span>
-                          <span className="font-mono font-bold text-gray-900">
+                          <span className={`font-mono ${rowUnread ? 'font-black text-slate-950' : 'font-bold text-gray-900'}`}>
                             {item.folio}
                           </span>
+                          {rowUnread && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide">
+                              Sin leer
+                            </span>
+                          )}
                         </div>
                       </td>
 
                       {/* Seccional */}
-                      <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-800">
+                      <td className={`px-4 py-3 whitespace-nowrap ${rowUnread ? 'font-bold text-slate-900' : 'font-medium text-gray-800'}`}>
                         <div className="flex items-center space-x-1.5">
                           <Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                           <span>{item.seccional_nombre}</span>
@@ -1079,13 +1194,13 @@ export default function Solicitudes() {
 
                       {/* Solicitante */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="font-semibold text-gray-900">{item.solicitante}</div>
+                        <div className={rowUnread ? 'font-bold text-slate-950' : 'font-semibold text-gray-900'}>{item.solicitante}</div>
                         <div className="text-2xs text-gray-500">{item.cargo}</div>
                       </td>
 
                       {/* Fecha */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center space-x-1 text-gray-800 font-medium">
+                        <div className={`flex items-center space-x-1 ${rowUnread ? 'text-slate-900 font-semibold' : 'text-gray-800 font-medium'}`}>
                           <Calendar className="w-3.5 h-3.5 text-gray-400" />
                           <span>{item.fecha}</span>
                         </div>
@@ -1094,7 +1209,7 @@ export default function Solicitudes() {
 
                       {/* Requerimiento */}
                       <td className="px-4 py-3 max-w-xs truncate">
-                        <div className="font-medium text-gray-900 truncate">
+                        <div className={`truncate ${rowUnread ? 'font-bold text-slate-950' : 'font-medium text-gray-900'}`}>
                           {item.detalle_resumen}
                         </div>
                         {item.vehiculo_info && (
@@ -1115,7 +1230,10 @@ export default function Solicitudes() {
                         <div className="flex flex-col space-y-1">
                           <button
                             type="button"
-                            onClick={() => canManageItem(item) && handleOpenStatusModal(item)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (canManageItem(item)) handleOpenStatusModal(item);
+                            }}
                             disabled={!canManageItem(item)}
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold transition ${
                               canManageItem(item) ? 'cursor-pointer hover:shadow-xs hover:ring-2 hover:ring-offset-1 hover:ring-primary/40' : 'cursor-default'
@@ -1146,7 +1264,10 @@ export default function Solicitudes() {
                               {item.estado !== 'Aprobada' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleQuickStatus(item, 'Aprobada')}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickStatus(item, 'Aprobada');
+                                  }}
                                   className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition cursor-pointer"
                                   title="Aprobar solicitud inmediatamente"
                                 >
@@ -1156,7 +1277,10 @@ export default function Solicitudes() {
                               {item.estado !== 'Finalizada' && item.estado !== 'Entregada' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleQuickStatus(item, 'Finalizada')}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickStatus(item, 'Finalizada');
+                                  }}
                                   className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition cursor-pointer"
                                   title="Marcar como Finalizada (Entrega o despacho completado)"
                                 >
@@ -1166,7 +1290,10 @@ export default function Solicitudes() {
                               {item.estado !== 'Pendiente' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleQuickStatus(item, 'Pendiente')}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickStatus(item, 'Pendiente');
+                                  }}
                                   className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition cursor-pointer"
                                   title="Regresar a estado Pendiente"
                                 >
@@ -1182,7 +1309,11 @@ export default function Solicitudes() {
                       <td className="px-4 py-3 whitespace-nowrap text-center">
                         {item.correo_enviado ? (
                           <button
-                            onClick={() => setEmailInfoItem(item)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markAsRead(item.tipo, item.originalId);
+                              setEmailInfoItem(item);
+                            }}
                             className="inline-flex items-center px-2.5 py-1 rounded-lg text-2xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition cursor-pointer"
                             title="Haga clic para ver los correos a los que se envió"
                           >
@@ -1191,7 +1322,9 @@ export default function Solicitudes() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markAsRead(item.tipo, item.originalId);
                               setResendEmailItem(item);
                               setResendEmailTo(item.correo_solicitante || '');
                             }}
@@ -1210,8 +1343,11 @@ export default function Solicitudes() {
                         {/* Cambiar estado */}
                         {canManageItem(item) && (
                           <button
-                            onClick={() => handleOpenStatusModal(item)}
-                            className="inline-flex items-center p-1.5 text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenStatusModal(item);
+                            }}
+                            className="inline-flex items-center p-1.5 text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition cursor-pointer"
                             title="Gestionar estado formal (Pendiente, Aprobada, Finalizada, Rechazada)"
                           >
                             <Sliders className="w-4 h-4" />
@@ -1220,8 +1356,12 @@ export default function Solicitudes() {
 
                         {/* Ver más detalles */}
                         <button
-                          onClick={() => setDetailItem(item)}
-                          className="inline-flex items-center p-1.5 text-gray-600 hover:text-primary hover:bg-gray-100 rounded-lg transition"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markAsRead(item.tipo, item.originalId);
+                            setDetailItem(item);
+                          }}
+                          className="inline-flex items-center p-1.5 text-gray-600 hover:text-primary hover:bg-gray-100 rounded-lg transition cursor-pointer"
                           title="Ver más detalles de la solicitud"
                         >
                           <Eye className="w-4 h-4" />
@@ -1229,11 +1369,13 @@ export default function Solicitudes() {
 
                         {/* Reenviar o ver correos notificados */}
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markAsRead(item.tipo, item.originalId);
                             setResendEmailItem(item);
                             setResendEmailTo(item.correo_solicitante || '');
                           }}
-                          className="inline-flex items-center p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition"
+                          className="inline-flex items-center p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
                           title="Enviar o reenviar correo con enlace y documento oficial en PDF"
                         >
                           <Mail className="w-4 h-4" />
@@ -1242,7 +1384,10 @@ export default function Solicitudes() {
                         {/* Descargar / Ver PDF */}
                         {canPreviewPdf && (
                           <button
-                            onClick={() => handleOpenPdf(item)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenPdf(item);
+                            }}
                             className="inline-flex items-center px-2.5 py-1 bg-gray-900 hover:bg-black text-white rounded-lg text-2xs font-bold transition shadow-2xs cursor-pointer"
                             title="Abrir y descargar documento oficial en PDF"
                           >

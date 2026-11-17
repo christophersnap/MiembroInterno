@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Fuel, Plus, List, Settings, Search, CheckCircle2, Clock, 
   AlertCircle, Printer, Mail, Eye, Shield, Copy, Check, Filter, X,
-  ChevronLeft
+  ChevronLeft, CheckCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -14,6 +14,7 @@ import {
   DEFAULT_COMBUSTIBLE_CONFIG 
 } from '../types/combustible';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
+import { useSolicitudReadTracker } from '../utils/solicitudReadTracker';
 import CombustibleForm from '../components/combustible/CombustibleForm';
 import CombustibleEmailModal from '../components/combustible/CombustibleEmailModal';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
@@ -26,6 +27,7 @@ import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
   const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
+  const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const combustibleScope = getModuleScope('solicitudes_combustible');
@@ -623,6 +625,14 @@ NOTIFY pgrst, 'reload schema';`;
     return matchesSearch && matchesEstado && matchesSeccional;
   });
 
+  const scopedAllSolicitudes = solicitudes.filter(sol => matchesCombustibleScope(sol));
+  const unreadAllCombustible = scopedAllSolicitudes.filter(sol =>
+    isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud)
+  ).length;
+  const unreadVisibleCombustible = filteredSolicitudes.filter(sol =>
+    isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud)
+  );
+
   return (
     <div className="space-y-6">
       
@@ -717,7 +727,14 @@ NOTIFY pgrst, 'reload schema';`;
               }`}
             >
               <List className="w-4 h-4 mr-1.5 text-blue-600" />
-              {hasNivelNacional ? `Historial (${solicitudes.length})` : isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+              <span>
+                {hasNivelNacional ? `Historial (${solicitudes.length})` : isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+              </span>
+              {unreadAllCombustible > 0 && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-2xs">
+                  {unreadAllCombustible}
+                </span>
+              )}
             </button>
           )}
 
@@ -779,7 +796,23 @@ NOTIFY pgrst, 'reload schema';`;
               />
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center flex-wrap gap-2">
+              {unreadVisibleCombustible.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    markManyAsRead(
+                      unreadVisibleCombustible.map((s) => ({ modulo: 'combustible' as const, solicitudKey: s.id }))
+                    )
+                  }
+                  className="inline-flex items-center px-3 py-2 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-900 font-bold transition cursor-pointer"
+                  title="Marcar las solicitudes visibles como leídas"
+                >
+                  <CheckCheck className="w-3.5 h-3.5 mr-1.5 text-sky-700" />
+                  Marcar vistas ({unreadVisibleCombustible.length})
+                </button>
+              )}
+
               <select
                 value={filterEstado}
                 onChange={(e) => setFilterEstado(e.target.value)}
@@ -837,93 +870,129 @@ NOTIFY pgrst, 'reload schema';`;
                       </td>
                     </tr>
                   ) : (
-                    filteredSolicitudes.map((sol) => (
-                      <tr key={sol.id} className="hover:bg-gray-50 transition">
-                        <td className="px-4 py-3 font-mono font-bold text-gray-900">
-                          {sol.folio}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-gray-800">
-                          {sol.seccional_nombre}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-bold text-gray-900 block">{sol.nombre_solicitante}</span>
-                          <span className="text-3xs text-gray-500">{sol.telefono_solicitante}</span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-700 max-w-xs truncate" title={sol.actividad}>
-                          {sol.actividad}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {sol.entrego_liquidacion_anterior ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold bg-emerald-100 text-emerald-800">
-                              <CheckCircle2 className="w-3 h-3 mr-1" /> Sí
+                    filteredSolicitudes.map((sol) => {
+                      const rowUnread = isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
+                      return (
+                        <tr
+                          key={sol.id}
+                          onClick={() => {
+                            if (rowUnread) markAsRead('combustible', sol.id);
+                          }}
+                          className={`transition ${
+                            rowUnread
+                              ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                              : 'bg-white hover:bg-gray-50 border-l-4 border-l-transparent'
+                          }`}
+                        >
+                          <td className="px-4 py-3 font-mono whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              {rowUnread && (
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"
+                                  title="Solicitud no leída"
+                                />
+                              )}
+                              <span className={rowUnread ? 'font-black text-slate-950' : 'font-bold text-gray-900'}>
+                                {sol.folio}
+                              </span>
+                              {rowUnread && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black font-sans uppercase tracking-wide">
+                                  Sin leer
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={`px-4 py-3 ${rowUnread ? 'font-bold text-slate-900' : 'font-semibold text-gray-800'}`}>
+                            {sol.seccional_nombre}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`${rowUnread ? 'font-black text-slate-950' : 'font-bold text-gray-900'} block`}>
+                              {sol.nombre_solicitante}
                             </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold bg-amber-100 text-amber-800" title={sol.motivo_no_liquidacion || 'Pendiente'}>
-                              <AlertCircle className="w-3 h-3 mr-1" /> No
+                            <span className="text-3xs text-gray-500">{sol.telefono_solicitante}</span>
+                          </td>
+                          <td className={`px-4 py-3 max-w-xs truncate ${rowUnread ? 'font-semibold text-slate-900' : 'text-gray-700'}`} title={sol.actividad}>
+                            {sol.actividad}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {sol.entrego_liquidacion_anterior ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold bg-emerald-100 text-emerald-800">
+                                <CheckCircle2 className="w-3 h-3 mr-1" /> Sí
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold bg-amber-100 text-amber-800" title={sol.motivo_no_liquidacion || 'Pendiente'}>
+                                <AlertCircle className="w-3 h-3 mr-1" /> No
+                              </span>
+                            )}
+                          </td>
+                          <td className={`px-4 py-3 font-mono text-3xs ${rowUnread ? 'text-slate-900 font-semibold' : 'text-gray-600'}`}>
+                            {sol.fecha_envio_completa || `${sol.fecha_solicitud} ${sol.hora_solicitud || ''}`}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold ${
+                              sol.estado === 'Aprobada' ? 'bg-emerald-100 text-emerald-800' :
+                              sol.estado === 'Rechazada' ? 'bg-red-100 text-red-800' :
+                              sol.estado === 'En Proceso' ? 'bg-blue-100 text-blue-800' :
+                              sol.estado === 'Entregada' ? 'bg-purple-100 text-purple-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {sol.estado}
                             </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 font-mono text-3xs">
-                          {sol.fecha_envio_completa || `${sol.fecha_solicitud} ${sol.hora_solicitud || ''}`}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-3xs font-bold ${
-                            sol.estado === 'Aprobada' ? 'bg-emerald-100 text-emerald-800' :
-                            sol.estado === 'Rechazada' ? 'bg-red-100 text-red-800' :
-                            sol.estado === 'En Proceso' ? 'bg-blue-100 text-blue-800' :
-                            sol.estado === 'Entregada' ? 'bg-purple-100 text-purple-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {sol.estado}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end space-x-1">
-                            {/* Botón Acuse de Correo (Imagen 2) */}
-                            <button
-                              onClick={() => {
-                                setSelectedSolicitud(sol);
-                                setShowEmailModal(true);
-                              }}
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                              title="Ver Acuse de Correo Recibido"
-                            >
-                              <Mail className="w-4 h-4" />
-                            </button>
-
-                            {/* Botón Documento Oficial PDF (Documento 3) */}
-                            {canPreviewPdf && (
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end space-x-1">
+                              {/* Botón Acuse de Correo (Imagen 2) */}
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markAsRead('combustible', sol.id);
                                   setSelectedSolicitud(sol);
-                                  setShowPdfModal(true);
+                                  setShowEmailModal(true);
                                 }}
-                                className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
-                                title="Ver / Imprimir Hoja Oficial PDF"
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                                title="Ver Acuse de Correo Recibido"
                               >
-                                <Printer className="w-4 h-4" />
+                                <Mail className="w-4 h-4" />
                               </button>
-                            )}
 
-                            {/* Botón Gestión de Estado (Admin) */}
-                            {canApprove && (
-                              <button
-                                onClick={() => {
-                                  setSelectedSolicitud(sol);
-                                  setNewStatus(sol.estado);
-                                  setMotivoRechazo(sol.motivo_rechazo || '');
-                                  setShowStatusModal(true);
-                                }}
-                                className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition"
-                                title="Cambiar Estado / Autorización"
-                              >
-                                <Shield className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {/* Botón Documento Oficial PDF (Documento 3) */}
+                              {canPreviewPdf && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    markAsRead('combustible', sol.id);
+                                    setSelectedSolicitud(sol);
+                                    setShowPdfModal(true);
+                                  }}
+                                  className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                                  title="Ver / Imprimir Hoja Oficial PDF"
+                                >
+                                  <Printer className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {/* Botón Gestión de Estado (Admin) */}
+                              {canApprove && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    markAsRead('combustible', sol.id);
+                                    setSelectedSolicitud(sol);
+                                    setNewStatus(sol.estado);
+                                    setMotivoRechazo(sol.motivo_rechazo || '');
+                                    setShowStatusModal(true);
+                                  }}
+                                  className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition cursor-pointer"
+                                  title="Cambiar Estado / Autorización"
+                                >
+                                  <Shield className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

@@ -5,13 +5,14 @@ import {
   CheckCircle2, Clock, AlertTriangle, XCircle, Truck, Building2, 
   User, Copy, Send, Check, Settings, AlertCircle, Eye, ChevronRight,
   DollarSign, Wrench, Shield, RefreshCw, X, MessageSquare, Info, Lock, Sliders,
-  ChevronLeft, ShieldAlert, Paperclip, ExternalLink, Image as ImageIcon
+  ChevronLeft, ShieldAlert, Paperclip, ExternalLink, Image as ImageIcon, CheckCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
 import { CompraConfig, DEFAULT_COMPRA_CONFIG } from '../types/compra';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
+import { useSolicitudReadTracker } from '../utils/solicitudReadTracker';
 import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import CompraForm, { ArchivoCotizacion } from '../components/compra/CompraForm';
@@ -77,6 +78,7 @@ const TIPOS_SOLICITUD = [
 export default function SolicitudesCompra() {
   const navigate = useNavigate();
   const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
+  const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const compraScope = getModuleScope('solicitudes_compra');
@@ -1269,6 +1271,7 @@ Cruz Verde Salvadoreña`;
 
   // Disparar Impresión de PDF
   const handleTriggerPrint = (sol: SolicitudCompra) => {
+    markAsRead('compra', sol.id);
     setSelectedSolicitud(sol);
     setShowPrintModal(true);
   };
@@ -1305,6 +1308,22 @@ Cruz Verde Salvadoreña`;
       return matchesSearch && matchesEstado && matchesSeccional && matchesTipo;
     });
   }, [solicitudes, searchTerm, filterEstado, filterSeccional, filterTipo, compraScope, hasNivelNacional, isSeccionalOnly, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user, userName]);
+
+  const unreadAllCompra = useMemo(
+    () =>
+      solicitudes
+        .filter(s => matchesCompraScope(s))
+        .filter(s => isUnread('compra', s.id, s.estado, s.created_at || s.fecha_solicitud)).length,
+    [solicitudes, isUnread, compraScope, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user, userName]
+  );
+
+  const unreadVisibleCompra = useMemo(
+    () =>
+      filteredSolicitudes.filter(s =>
+        isUnread('compra', s.id, s.estado, s.created_at || s.fecha_solicitud)
+      ),
+    [filteredSolicitudes, isUnread]
+  );
 
   // Contadores de resumen
   const stats = useMemo(() => {
@@ -1425,13 +1444,20 @@ Cruz Verde Salvadoreña`;
                   <button
                     type="button"
                     onClick={() => setActiveTab('lista')}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
                       activeTab === 'lista'
                         ? 'bg-white text-slate-900 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    {isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+                    <span>
+                      {isSeccionalOnly ? `Solicitudes Seccional (${solicitudes.length})` : `Mis Solicitudes (${solicitudes.length})`}
+                    </span>
+                    {unreadAllCompra > 0 && (
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-2xs">
+                        {unreadAllCompra}
+                      </span>
+                    )}
                   </button>
                 )}
                 {canViewPlantillas && (
@@ -1455,13 +1481,18 @@ Cruz Verde Salvadoreña`;
                   <button
                     type="button"
                     onClick={() => setActiveTab('lista')}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                    className={`inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
                       activeTab === 'lista'
                         ? 'bg-white text-slate-900 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Historial ({solicitudes.length})
+                    <span>Historial ({solicitudes.length})</span>
+                    {unreadAllCompra > 0 && (
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full min-w-5 text-center leading-none shadow-2xs">
+                        {unreadAllCompra}
+                      </span>
+                    )}
                   </button>
                 )}
                 {canCreateCompra && (
@@ -1496,11 +1527,28 @@ Cruz Verde Salvadoreña`;
             )}
           </div>
 
+          {activeTab === 'lista' && unreadVisibleCompra.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                markManyAsRead(
+                  unreadVisibleCompra.map((s) => ({ modulo: 'compra' as const, solicitudKey: s.id }))
+                )
+              }
+              className="inline-flex items-center px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-2xl text-xs font-semibold transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+              title="Marcar las solicitudes visibles como leídas"
+            >
+              <CheckCheck className="w-3.5 h-3.5 mr-1.5 text-sky-700" />
+              Marcar vistas ({unreadVisibleCompra.length})
+            </button>
+          )}
+
           {canPreviewPdf && (
             <button
               type="button"
               onClick={() => {
                 const sol = selectedSolicitud || (solicitudes.length > 0 ? solicitudes[0] : null);
+                if (sol) markAsRead('compra', sol.id);
                 setPreviewPdfSolicitud(sol);
                 setShowPreviewPdfModal(true);
               }}
@@ -1753,141 +1801,178 @@ Cruz Verde Salvadoreña`;
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredSolicitudes.map((sol) => (
-                      <tr key={sol.id} className="hover:bg-gray-50/80 transition-colors">
-                        
-                        {/* Folio y Fecha */}
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="font-mono font-bold text-primary text-sm block">
-                            {sol.folio}
-                          </span>
-                          <span className="text-xs text-gray-500 block mt-0.5">
-                            {sol.fecha_solicitud} {sol.hora_solicitud ? `• ${sol.hora_solicitud}` : ''}
-                          </span>
-                          {sol.prioridad === 'Emergencia' && (
-                            <span className="inline-block mt-1 text-2xs font-bold px-1.5 py-0.5 bg-red-100 text-red-800 rounded">
-                              Emergencia
-                            </span>
-                          )}
-                          {sol.prioridad === 'Urgente' && (
-                            <span className="inline-block mt-1 text-2xs font-bold px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">
-                              Urgente
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Seccional y Director */}
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center space-x-1 text-sm font-semibold text-gray-900">
-                            <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
-                            <span>Seccional {sol.seccional_nombre}</span>
-                          </div>
-                          <div className="flex items-center space-x-1 text-xs text-gray-600 mt-0.5">
-                            <User className="w-3 h-3 text-gray-400 shrink-0" />
-                            <span className="truncate">{sol.solicitado_por} ({sol.cargo})</span>
-                          </div>
-                        </td>
-
-                        {/* Rubro y Vehículo */}
-                        <td className="px-4 py-3.5">
-                          <span className="text-xs font-medium text-gray-800 block">
-                            {sol.tipo_solicitud}
-                          </span>
-                          {sol.vehiculo_placa ? (
-                            <div className="inline-flex items-center space-x-1 text-2xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded mt-1 border border-blue-200">
-                              <Truck className="w-3 h-3 text-blue-600 mr-1" />
-                              <span>{sol.vehiculo_placa}</span>
-                            </div>
-                          ) : (
-                            <span className="text-2xs text-gray-400">Sin vehículo vinculado</span>
-                          )}
-                        </td>
-
-                        {/* Descripción Resumida */}
-                        <td className="px-4 py-3.5 max-w-xs">
-                          <p className="text-xs text-gray-700 line-clamp-2" title={sol.descripcion}>
-                            {sol.descripcion}
-                          </p>
-                        </td>
-
-                        {/* Monto Estimado */}
-                        <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold text-gray-900">
-                          {sol.monto_estimado ? (
-                            <span>${sol.monto_estimado.toFixed(2)}</span>
-                          ) : (
-                            <span className="text-gray-400 font-normal">Por cotizar</span>
-                          )}
-                          {sol.cotizaciones_archivos && sol.cotizaciones_archivos.length > 0 && (
-                            <div className="flex items-center text-3xs font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1 w-fit">
-                              <Paperclip className="w-2.5 h-2.5 mr-1" />
-                              <span>{sol.cotizaciones_archivos.length} cotización(es)</span>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Estado */}
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {renderEstadoBadge(sol.estado)}
-                          {sol.autorizado_por && (
-                            <span className="block text-2xs text-gray-400 mt-1 truncate">
-                              Por: {sol.autorizado_por}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Acciones */}
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right text-xs font-medium space-x-1">
+                    {filteredSolicitudes.map((sol) => {
+                      const rowUnread = isUnread('compra', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
+                      return (
+                        <tr
+                          key={sol.id}
+                          onClick={() => {
+                            if (rowUnread) markAsRead('compra', sol.id);
+                          }}
+                          className={`transition-colors ${
+                            rowUnread
+                              ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                              : 'bg-white hover:bg-gray-50/80 border-l-4 border-l-transparent'
+                          }`}
+                        >
                           
-                          {/* Ver Detalle */}
-                          <button
-                            onClick={() => {
-                              setSelectedSolicitud(sol);
-                              setShowDetailModal(true);
-                            }}
-                            className="p-1.5 text-gray-600 hover:text-primary hover:bg-gray-100 rounded-md transition"
-                            title="Ver detalles completos"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                          {/* Folio y Fecha */}
+                          <td className="px-4 py-3.5 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              {rowUnread && (
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"
+                                  title="Solicitud no leída"
+                                />
+                              )}
+                              <span className={`font-mono text-primary text-sm ${rowUnread ? 'font-black' : 'font-bold'}`}>
+                                {sol.folio}
+                              </span>
+                              {rowUnread && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide">
+                                  Sin leer
+                                </span>
+                              )}
+                            </div>
+                            <span className={`text-xs block mt-0.5 ${rowUnread ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>
+                              {sol.fecha_solicitud} {sol.hora_solicitud ? `• ${sol.hora_solicitud}` : ''}
+                            </span>
+                            {sol.prioridad === 'Emergencia' && (
+                              <span className="inline-block mt-1 text-2xs font-bold px-1.5 py-0.5 bg-red-100 text-red-800 rounded">
+                                Emergencia
+                              </span>
+                            )}
+                            {sol.prioridad === 'Urgente' && (
+                              <span className="inline-block mt-1 text-2xs font-bold px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">
+                                Urgente
+                              </span>
+                            )}
+                          </td>
 
-                          {/* Imprimir / Descargar PDF */}
-                          {canPreviewPdf && (
+                          {/* Seccional y Director */}
+                          <td className="px-4 py-3.5">
+                            <div className={`flex items-center space-x-1 text-sm ${rowUnread ? 'font-bold text-slate-950' : 'font-semibold text-gray-900'}`}>
+                              <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <span>Seccional {sol.seccional_nombre}</span>
+                            </div>
+                            <div className="flex items-center space-x-1 text-xs text-gray-600 mt-0.5">
+                              <User className="w-3 h-3 text-gray-400 shrink-0" />
+                              <span className="truncate">{sol.solicitado_por} ({sol.cargo})</span>
+                            </div>
+                          </td>
+
+                          {/* Rubro y Vehículo */}
+                          <td className="px-4 py-3.5">
+                            <span className={`text-xs block ${rowUnread ? 'font-bold text-slate-950' : 'font-medium text-gray-800'}`}>
+                              {sol.tipo_solicitud}
+                            </span>
+                            {sol.vehiculo_placa ? (
+                              <div className="inline-flex items-center space-x-1 text-2xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded mt-1 border border-blue-200">
+                                <Truck className="w-3 h-3 text-blue-600 mr-1" />
+                                <span>{sol.vehiculo_placa}</span>
+                              </div>
+                            ) : (
+                              <span className="text-2xs text-gray-400">Sin vehículo vinculado</span>
+                            )}
+                          </td>
+
+                          {/* Descripción Resumida */}
+                          <td className="px-4 py-3.5 max-w-xs">
+                            <p className={`text-xs line-clamp-2 ${rowUnread ? 'text-slate-900 font-medium' : 'text-gray-700'}`} title={sol.descripcion}>
+                              {sol.descripcion}
+                            </p>
+                          </td>
+
+                          {/* Monto Estimado */}
+                          <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold text-gray-900">
+                            {sol.monto_estimado ? (
+                              <span>${sol.monto_estimado.toFixed(2)}</span>
+                            ) : (
+                              <span className="text-gray-400 font-normal">Por cotizar</span>
+                            )}
+                            {sol.cotizaciones_archivos && sol.cotizaciones_archivos.length > 0 && (
+                              <div className="flex items-center text-3xs font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1 w-fit">
+                                <Paperclip className="w-2.5 h-2.5 mr-1" />
+                                <span>{sol.cotizaciones_archivos.length} cotización(es)</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Estado */}
+                          <td className="px-4 py-3.5 whitespace-nowrap">
+                            {renderEstadoBadge(sol.estado)}
+                            {sol.autorizado_por && (
+                              <span className="block text-2xs text-gray-400 mt-1 truncate">
+                                Por: {sol.autorizado_por}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Acciones */}
+                          <td className="px-4 py-3.5 whitespace-nowrap text-right text-xs font-medium space-x-1">
+                            
+                            {/* Ver Detalle */}
                             <button
-                              onClick={() => handleTriggerPrint(sol)}
-                              className="p-1.5 text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-md transition cursor-pointer"
-                              title="Imprimir / Descargar PDF Oficial"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {/* Notificar por Correo */}
-                          <button
-                            onClick={() => handleOpenEmailModal(sol)}
-                            className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition cursor-pointer"
-                            title="Enviar por Correo Electrónico"
-                          >
-                            <Mail className="w-4 h-4" />
-                          </button>
-
-                          {/* Autorizar / Cambiar Estado (Admin) */}
-                          {canApprove && (
-                            <button
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markAsRead('compra', sol.id);
                                 setSelectedSolicitud(sol);
-                                setNewStatus(sol.estado);
-                                setMotivoRechazo(sol.motivo_rechazo || '');
-                                setShowStatusModal(true);
+                                setShowDetailModal(true);
                               }}
-                              className="p-1.5 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-md transition cursor-pointer"
-                              title="Gestionar estado de autorización"
+                              className="p-1.5 text-gray-600 hover:text-primary hover:bg-gray-100 rounded-md transition cursor-pointer"
+                              title="Ver detalles completos"
                             >
-                              <Shield className="w-4 h-4" />
+                              <Eye className="w-4 h-4" />
                             </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+
+                            {/* Imprimir / Descargar PDF */}
+                            {canPreviewPdf && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTriggerPrint(sol);
+                                }}
+                                className="p-1.5 text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-md transition cursor-pointer"
+                                title="Imprimir / Descargar PDF Oficial"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Notificar por Correo */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markAsRead('compra', sol.id);
+                                handleOpenEmailModal(sol);
+                              }}
+                              className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition cursor-pointer"
+                              title="Enviar por Correo Electrónico"
+                            >
+                              <Mail className="w-4 h-4" />
+                            </button>
+
+                            {/* Autorizar / Cambiar Estado (Admin) */}
+                            {canApprove && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markAsRead('compra', sol.id);
+                                  setSelectedSolicitud(sol);
+                                  setNewStatus(sol.estado);
+                                  setMotivoRechazo(sol.motivo_rechazo || '');
+                                  setShowStatusModal(true);
+                                }}
+                                className="p-1.5 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-md transition cursor-pointer"
+                                title="Gestionar estado de autorización"
+                              >
+                                <Shield className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

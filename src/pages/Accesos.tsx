@@ -91,6 +91,7 @@ export default function Accesos() {
   const [sql42Copied, setSql42Copied] = useState(false);
   const [sql43Copied, setSql43Copied] = useState(false);
   const [sql44Copied, setSql44Copied] = useState(false);
+  const [sql45Copied, setSql45Copied] = useState(false);
   const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
@@ -1810,6 +1811,63 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql44Copied(false), 3000);
   };
 
+  const handleCopySqlMigration45 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 45: CONTROL DE LECTURA INDIVIDUAL POR SOLICITUD Y POR USUARIO
+-- =========================================================================================
+CREATE TABLE IF NOT EXISTS public.solicitudes_lecturas (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  modulo TEXT NOT NULL CHECK (modulo IN ('carnet', 'combustible', 'compra')),
+  solicitud_key TEXT NOT NULL,
+  leido_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, modulo, solicitud_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solicitudes_lecturas_user_modulo
+  ON public.solicitudes_lecturas (user_id, modulo);
+
+ALTER TABLE public.solicitudes_lecturas ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Usuarios leen sus propias lecturas de solicitudes" ON public.solicitudes_lecturas;
+CREATE POLICY "Usuarios leen sus propias lecturas de solicitudes"
+  ON public.solicitudes_lecturas
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Usuarios registran sus propias lecturas de solicitudes" ON public.solicitudes_lecturas;
+CREATE POLICY "Usuarios registran sus propias lecturas de solicitudes"
+  ON public.solicitudes_lecturas
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Usuarios actualizan sus propias lecturas de solicitudes" ON public.solicitudes_lecturas;
+CREATE POLICY "Usuarios actualizan sus propias lecturas de solicitudes"
+  ON public.solicitudes_lecturas
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Usuarios eliminan sus propias lecturas de solicitudes" ON public.solicitudes_lecturas;
+CREATE POLICY "Usuarios eliminan sus propias lecturas de solicitudes"
+  ON public.solicitudes_lecturas
+  FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.solicitudes_lecturas TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.solicitudes_lecturas_id_seq TO authenticated;
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql45Copied(true);
+    setTimeout(() => setSql45Copied(false), 3000);
+  };
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
@@ -2816,6 +2874,30 @@ NOTIFY pgrst, 'reload schema';`;
                       className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
                     >
                       {sql44Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
+                    </button>
+                  </div>
+
+                  {/* Migración 45 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-sky-50/70">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-sky-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        45
+                      </span>
+                      <div>
+                        <span className="text-xs font-semibold text-gray-900 block">
+                          Control de Lectura Individual por Solicitud y Notificaciones No Leídas
+                        </span>
+                        <span className="text-3xs text-gray-500">
+                          Crea la tabla solicitudes_lecturas para recordar por usuario qué solicitudes de carnet, compra o combustible ya fueron vistas
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration45}
+                      className="inline-flex items-center px-3 py-1.5 border border-sky-200 bg-white hover:bg-sky-50 rounded-lg text-2xs font-semibold text-sky-800 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql45Copied ? <><Check className="w-3 h-3 mr-1 text-sky-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-sky-600" /> Copiar SQL</>}
                     </button>
                   </div>
                 </div>
