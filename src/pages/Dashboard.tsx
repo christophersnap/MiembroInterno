@@ -16,12 +16,19 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
 import PresenceModal from '../components/PresenceModal';
 import NoticiasBannerSlider from '../components/dashboard/NoticiasBannerSlider';
+import CountdownBannerSection from '../components/dashboard/CountdownBannerSection';
 import {
   DEFAULT_BANNER_CONFIG,
   fetchNoticiasBannerData,
   NoticiaBannerSlide,
   NoticiasBannerConfig,
 } from '../lib/noticiasBanner';
+import {
+  DEFAULT_COUNTDOWN_CONFIG,
+  fetchNoticiasCountdownData,
+  NoticiaCountdown,
+  NoticiasCountdownConfig,
+} from '../lib/noticiasCountdown';
 
 function DashboardPersonAvatar({
   fotoUrl,
@@ -88,6 +95,8 @@ export default function Dashboard() {
   const [recentMeritos, setRecentMeritos] = useState<any[]>([]);
   const [bannerSlides, setBannerSlides] = useState<NoticiaBannerSlide[]>([]);
   const [bannerConfig, setBannerConfig] = useState<NoticiasBannerConfig>(DEFAULT_BANNER_CONFIG);
+  const [countdowns, setCountdowns] = useState<NoticiaCountdown[]>([]);
+  const [countdownConfig, setCountdownConfig] = useState<NoticiasCountdownConfig>(DEFAULT_COUNTDOWN_CONFIG);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -323,9 +332,20 @@ export default function Dashboard() {
       }
     };
 
+    const fetchCountdowns = async () => {
+      try {
+        const res = await fetchNoticiasCountdownData(false);
+        setCountdowns(res.countdowns);
+        setCountdownConfig(res.config);
+      } catch (e) {
+        console.warn('Error cargando banner countdown:', e);
+      }
+    };
+
     fetchStats();
     fetchDashboardAnuncios();
     fetchBanner();
+    fetchCountdowns();
   }, []);
 
   // Ticker interval para cambiar titulares automáticamente
@@ -612,6 +632,11 @@ export default function Dashboard() {
       {/* 0. SECCIÓN: BANNER SLIDE DE NOTICIAS INSTITUCIONALES                      */}
       {/* ========================================================================= */}
       <NoticiasBannerSlider slides={bannerSlides} config={bannerConfig} />
+
+      {/* ========================================================================= */}
+      {/* 0.5 SECCIÓN: BANNER COUNTDOWN DE EVENTOS                                  */}
+      {/* ========================================================================= */}
+      <CountdownBannerSection countdowns={countdowns} config={countdownConfig} />
 
       {/* ========================================================================= */}
       {/* 1. SECCIÓN: CUADRO DE NOTIFICACIÓN DE ANUNCIO (ESTILO WIDGET IOS CON X)   */}

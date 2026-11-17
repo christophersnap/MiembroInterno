@@ -263,6 +263,37 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS noticias_countdown (
+    id TEXT PRIMARY KEY,
+    nombre_evento TEXT NOT NULL,
+    etiqueta_superior TEXT DEFAULT 'Próximo Evento',
+    subtitulo TEXT,
+    fecha_objetivo TEXT NOT NULL,
+    texto_finalizado TEXT DEFAULT '¡El evento ha comenzado!',
+    mostrar_meses INTEGER DEFAULT 1,
+    imagen_url TEXT,
+    logo_url TEXT,
+    posicion_imagen TEXT DEFAULT 'izquierda',
+    posicion_logo TEXT DEFAULT 'izquierda',
+    posicion_conteo TEXT DEFAULT 'derecha',
+    tipografia TEXT DEFAULT 'jakarta',
+    tamano_titulo TEXT DEFAULT 'md',
+    color_fondo TEXT DEFAULT '#064e3b',
+    color_fondo_secundario TEXT DEFAULT '#0f172a',
+    usar_gradiente INTEGER DEFAULT 1,
+    color_texto TEXT DEFAULT '#ffffff',
+    color_acento TEXT DEFAULT '#34d399',
+    color_caja_tiempo TEXT DEFAULT '#022c22',
+    color_texto_tiempo TEXT DEFAULT '#ffffff',
+    enlace_url TEXT,
+    enlace_texto TEXT DEFAULT 'Ver más detalles',
+    activo INTEGER DEFAULT 1,
+    orden INTEGER DEFAULT 0,
+    autor_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS soporte_tickets (
     id TEXT PRIMARY KEY,
     folio TEXT UNIQUE,
@@ -421,20 +452,15 @@ if (seccionalesCount === 0) {
   `);
 }
 
-// Seed archivos si está vacío
+// Limpiar registros semilla de ejemplo de archivos si quedaron precargados
 try {
-  const archivosCount = db.prepare('SELECT COUNT(*) as count FROM archivos').get().count;
-  if (archivosCount === 0) {
-    db.prepare(`
-      INSERT INTO archivos (id, titulo, descripcion, categoria, nombre_archivo, url_archivo, tipo_archivo, extension, tamano_legible, subido_por_nombre, activo)
-      VALUES 
-      ('arc-001', 'Manual de Primeros Auxilios Básicos y Avanzados 2026', 'Guía oficial y protocolos estandarizados de atención prehospitalaria de Cruz Verde Salvadoreña.', 'Manuales y Protocolos', 'Manual_Primeros_Auxilios_CVS_2026.pdf', 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=1200&auto=format&fit=crop&q=80', 'application/pdf', 'pdf', '4.2 MB', 'Administración Nacional', 1),
-      ('arc-002', 'Formato Oficial de Hoja de Servicio y Turnos de Ambulancia', 'Plantilla descargable para registro de emergencias, traslados, kilometraje y firmas de tripulación.', 'Formatos y Formularios', 'Formato_Hoja_Servicio_Ambulancia_CVS.xlsx', 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=1200&auto=format&fit=crop&q=80', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', '245 KB', 'Jefatura de Operaciones', 1),
-      ('arc-003', 'Reglamento Interno y Código de Ética Institucional', 'Normativa que rige los deberes, derechos, uniformidad y disciplina del personal voluntario y remunerado.', 'Leyes y Normativas', 'Reglamento_Interno_Codigo_Etica_CVS.pdf', 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=1200&auto=format&fit=crop&q=80', 'application/pdf', 'pdf', '1.8 MB', 'Dirección Jurídica', 1)
-    `).run();
-  }
+  db.prepare(`
+    DELETE FROM archivos
+    WHERE id IN ('arc-001', 'arc-002', 'arc-003')
+      AND url_archivo LIKE 'https://images.unsplash.com/%'
+  `).run();
 } catch (e) {
-  console.warn('Error seeding archivos:', e);
+  console.warn('Error limpiando archivos de ejemplo:', e);
 }
 
 // Seed anuncios si está vacío
@@ -1145,6 +1171,161 @@ async function startServer() {
   app.delete('/api/noticias-banner/:id', (req, res) => {
     try {
       db.prepare('DELETE FROM noticias_banner WHERE id = ?').run(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Endpoints de Noticias Countdown ---
+  app.get('/api/noticias-countdown', (req, res) => {
+    try {
+      const includeInactive = req.query.all === 'true';
+      const query = includeInactive
+        ? 'SELECT * FROM noticias_countdown ORDER BY orden ASC, fecha_objetivo ASC'
+        : 'SELECT * FROM noticias_countdown WHERE activo = 1 ORDER BY orden ASC, fecha_objetivo ASC';
+      const rows = (db.prepare(query).all() as any[]).map((r) => ({
+        ...r,
+        activo: Boolean(r.activo),
+        mostrar_meses: Boolean(r.mostrar_meses),
+        usar_gradiente: Boolean(r.usar_gradiente),
+      }));
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/noticias-countdown', (req, res) => {
+    try {
+      const b = req.body || {};
+      const id = b.id || `cnt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      if (!b.nombre_evento || !b.fecha_objetivo) {
+        return res.status(400).json({ error: 'Nombre del evento y fecha objetivo son obligatorios' });
+      }
+      db.prepare(`
+        INSERT INTO noticias_countdown (
+          id, nombre_evento, etiqueta_superior, subtitulo, fecha_objetivo, texto_finalizado,
+          mostrar_meses, imagen_url, logo_url, posicion_imagen, posicion_logo, posicion_conteo,
+          tipografia, tamano_titulo, color_fondo, color_fondo_secundario, usar_gradiente,
+          color_texto, color_acento, color_caja_tiempo, color_texto_tiempo,
+          enlace_url, enlace_texto, activo, orden, autor_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        b.nombre_evento,
+        b.etiqueta_superior ?? 'Próximo Evento',
+        b.subtitulo ?? null,
+        b.fecha_objetivo,
+        b.texto_finalizado ?? '¡El evento ha comenzado!',
+        b.mostrar_meses === false ? 0 : 1,
+        b.imagen_url ?? null,
+        b.logo_url ?? null,
+        b.posicion_imagen ?? 'izquierda',
+        b.posicion_logo ?? 'izquierda',
+        b.posicion_conteo ?? 'derecha',
+        b.tipografia ?? 'jakarta',
+        b.tamano_titulo ?? 'md',
+        b.color_fondo ?? '#064e3b',
+        b.color_fondo_secundario ?? '#0f172a',
+        b.usar_gradiente === false ? 0 : 1,
+        b.color_texto ?? '#ffffff',
+        b.color_acento ?? '#34d399',
+        b.color_caja_tiempo ?? '#022c22',
+        b.color_texto_tiempo ?? '#ffffff',
+        b.enlace_url ?? null,
+        b.enlace_texto ?? 'Ver más detalles',
+        b.activo === false ? 0 : 1,
+        Number(b.orden ?? 0),
+        b.autor_id ?? null
+      );
+      const created = db.prepare('SELECT * FROM noticias_countdown WHERE id = ?').get(id) as any;
+      res.json({
+        ...created,
+        activo: Boolean(created.activo),
+        mostrar_meses: Boolean(created.mostrar_meses),
+        usar_gradiente: Boolean(created.usar_gradiente),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/noticias-countdown/:id', (req, res) => {
+    try {
+      const current = db.prepare('SELECT * FROM noticias_countdown WHERE id = ?').get(req.params.id) as any;
+      if (!current) return res.status(404).json({ error: 'Countdown no encontrado' });
+      const b = req.body || {};
+      db.prepare(`
+        UPDATE noticias_countdown SET
+          nombre_evento = COALESCE(?, nombre_evento),
+          etiqueta_superior = ?,
+          subtitulo = ?,
+          fecha_objetivo = COALESCE(?, fecha_objetivo),
+          texto_finalizado = COALESCE(?, texto_finalizado),
+          mostrar_meses = COALESCE(?, mostrar_meses),
+          imagen_url = ?,
+          logo_url = ?,
+          posicion_imagen = COALESCE(?, posicion_imagen),
+          posicion_logo = COALESCE(?, posicion_logo),
+          posicion_conteo = COALESCE(?, posicion_conteo),
+          tipografia = COALESCE(?, tipografia),
+          tamano_titulo = COALESCE(?, tamano_titulo),
+          color_fondo = COALESCE(?, color_fondo),
+          color_fondo_secundario = COALESCE(?, color_fondo_secundario),
+          usar_gradiente = COALESCE(?, usar_gradiente),
+          color_texto = COALESCE(?, color_texto),
+          color_acento = COALESCE(?, color_acento),
+          color_caja_tiempo = COALESCE(?, color_caja_tiempo),
+          color_texto_tiempo = COALESCE(?, color_texto_tiempo),
+          enlace_url = ?,
+          enlace_texto = COALESCE(?, enlace_texto),
+          activo = COALESCE(?, activo),
+          orden = COALESCE(?, orden),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        b.nombre_evento !== undefined ? b.nombre_evento : null,
+        b.etiqueta_superior !== undefined ? b.etiqueta_superior : current.etiqueta_superior,
+        b.subtitulo !== undefined ? b.subtitulo : current.subtitulo,
+        b.fecha_objetivo !== undefined ? b.fecha_objetivo : null,
+        b.texto_finalizado !== undefined ? b.texto_finalizado : null,
+        b.mostrar_meses !== undefined ? (b.mostrar_meses ? 1 : 0) : null,
+        b.imagen_url !== undefined ? b.imagen_url : current.imagen_url,
+        b.logo_url !== undefined ? b.logo_url : current.logo_url,
+        b.posicion_imagen !== undefined ? b.posicion_imagen : null,
+        b.posicion_logo !== undefined ? b.posicion_logo : null,
+        b.posicion_conteo !== undefined ? b.posicion_conteo : null,
+        b.tipografia !== undefined ? b.tipografia : null,
+        b.tamano_titulo !== undefined ? b.tamano_titulo : null,
+        b.color_fondo !== undefined ? b.color_fondo : null,
+        b.color_fondo_secundario !== undefined ? b.color_fondo_secundario : null,
+        b.usar_gradiente !== undefined ? (b.usar_gradiente ? 1 : 0) : null,
+        b.color_texto !== undefined ? b.color_texto : null,
+        b.color_acento !== undefined ? b.color_acento : null,
+        b.color_caja_tiempo !== undefined ? b.color_caja_tiempo : null,
+        b.color_texto_tiempo !== undefined ? b.color_texto_tiempo : null,
+        b.enlace_url !== undefined ? b.enlace_url : current.enlace_url,
+        b.enlace_texto !== undefined ? b.enlace_texto : null,
+        b.activo !== undefined ? (b.activo ? 1 : 0) : null,
+        b.orden !== undefined ? Number(b.orden) : null,
+        req.params.id
+      );
+      const updated = db.prepare('SELECT * FROM noticias_countdown WHERE id = ?').get(req.params.id) as any;
+      res.json({
+        ...updated,
+        activo: Boolean(updated.activo),
+        mostrar_meses: Boolean(updated.mostrar_meses),
+        usar_gradiente: Boolean(updated.usar_gradiente),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/noticias-countdown/:id', (req, res) => {
+    try {
+      db.prepare('DELETE FROM noticias_countdown WHERE id = ?').run(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

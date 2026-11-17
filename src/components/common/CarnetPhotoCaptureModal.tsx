@@ -18,6 +18,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import getCroppedImg from '../../utils/cropImage';
+import CarnetPhotoGuideVisual from './CarnetPhotoGuideVisual';
 
 interface CarnetPhotoCaptureModalProps {
   isOpen: boolean;
@@ -27,7 +28,13 @@ interface CarnetPhotoCaptureModalProps {
   initialStep?: 'guidelines' | 'camera';
 }
 
-const GUIDE_IMAGE_URL = '/assets/aistudio/Requisitos_para_fotograf_a_de_carnet__1__90eb9817.png';
+const GUIDE_IMAGE_CANDIDATES = Array.from(
+  new Set([
+    `${import.meta.env.BASE_URL || '/'}assets/aistudio/Requisitos_para_fotograf_a_de_carnet__1__90eb9817.png`,
+    '/miembros/assets/aistudio/Requisitos_para_fotograf_a_de_carnet__1__90eb9817.png',
+    '/assets/aistudio/Requisitos_para_fotograf_a_de_carnet__1__90eb9817.png',
+  ])
+);
 
 const PHOTO_RULES = [
   {
@@ -64,6 +71,9 @@ export default function CarnetPhotoCaptureModal({
 }: CarnetPhotoCaptureModalProps) {
   const [step, setStep] = useState<'guidelines' | 'camera' | 'crop'>(initialStep);
   const [zoomGuideModal, setZoomGuideModal] = useState(false);
+  const [guideImgIndex, setGuideImgIndex] = useState(0);
+  const [guideImgFailed, setGuideImgFailed] = useState(false);
+  const [guideViewMode, setGuideViewMode] = useState<'visual' | 'image'>('image');
 
   // Hardware & Permission detection state
   const [checkingHardware, setCheckingHardware] = useState(false);
@@ -448,64 +458,90 @@ export default function CarnetPhotoCaptureModal({
           {/* STEP 1: LINEAMIENTOS Y MÉTODO */}
           {step === 'guidelines' && (
             <div className="space-y-5">
-              {/* Official Guidelines Image */}
+              {/* Official Guidelines Image + Recreated Visual Guide */}
               <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-                <div className="px-4 py-3 bg-emerald-900 text-white flex items-center justify-between">
+                <div className="px-4 py-3 bg-emerald-900 text-white flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-300" />
+                    <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0" />
                     <span className="text-xs font-bold tracking-wide uppercase">
                       Guía Oficial de Fotografía para Carnet — Cruz Verde Salvadoreña
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setZoomGuideModal(true)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-2xs font-semibold transition-colors cursor-pointer"
-                  >
-                    <Maximize2 className="w-3 h-3" />
-                    Ampliar Guía
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {!guideImgFailed && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setGuideViewMode((m) => (m === 'image' ? 'visual' : 'image'))
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-2xs font-semibold transition-colors cursor-pointer"
+                      >
+                        {guideViewMode === 'image' ? 'Vista Fácil (Interactiva)' : 'Ver Imagen Oficial'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setZoomGuideModal(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-2xs font-semibold transition-colors cursor-pointer"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                      Ampliar Guía
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-3 bg-slate-100/70">
-                  <button
-                    type="button"
-                    onClick={() => setZoomGuideModal(true)}
-                    className="w-full block rounded-xl overflow-hidden border border-slate-200 bg-white hover:opacity-95 transition-opacity cursor-zoom-in"
-                    title="Clic para ampliar imagen de lineamientos"
-                  >
-                    <img
-                      src={GUIDE_IMAGE_URL}
-                      alt="Requisitos para Fotografía de Carnet Cruz Verde Salvadoreña"
-                      className="w-full h-auto max-h-[340px] object-contain mx-auto"
-                    />
-                  </button>
+                  {guideViewMode === 'image' && !guideImgFailed ? (
+                    <button
+                      type="button"
+                      onClick={() => setZoomGuideModal(true)}
+                      className="w-full block rounded-xl overflow-hidden border border-slate-200 bg-white hover:opacity-95 transition-opacity cursor-zoom-in"
+                      title="Clic para ampliar imagen de lineamientos"
+                    >
+                      <img
+                        src={GUIDE_IMAGE_CANDIDATES[guideImgIndex]}
+                        alt="Requisitos para Fotografía de Carnet Cruz Verde Salvadoreña"
+                        onError={() => {
+                          if (guideImgIndex < GUIDE_IMAGE_CANDIDATES.length - 1) {
+                            setGuideImgIndex((i) => i + 1);
+                          } else {
+                            setGuideImgFailed(true);
+                          }
+                        }}
+                        className="w-full h-auto max-h-[380px] object-contain mx-auto"
+                      />
+                    </button>
+                  ) : (
+                    <CarnetPhotoGuideVisual />
+                  )}
                 </div>
 
-                {/* Summary Checklist */}
-                <div className="p-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {PHOTO_RULES.map((rule, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-2 p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                {/* Summary Checklist (visible when showing raw image for quick text scan) */}
+                {guideViewMode === 'image' && !guideImgFailed && (
+                  <div className="p-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {PHOTO_RULES.map((rule, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-2 p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">{rule.title}</p>
+                          <p className="text-[11px] text-slate-600 leading-snug mt-0.5">{rule.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <div>
-                        <p className="text-xs font-bold text-slate-900">{rule.title}</p>
-                        <p className="text-[11px] text-slate-600 leading-snug mt-0.5">{rule.desc}</p>
+                        <p className="text-xs font-bold text-amber-900">Importante</p>
+                        <p className="text-[11px] text-amber-800 leading-snug mt-0.5">
+                          El fondo debe ser completamente liso y uniforme para facilitar la emisión del carnet oficial.
+                        </p>
                       </div>
                     </div>
-                  ))}
-                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-bold text-amber-900">Importante</p>
-                      <p className="text-[11px] text-amber-800 leading-snug mt-0.5">
-                        El fondo debe ser completamente liso y uniforme para facilitar la emisión del carnet oficial.
-                      </p>
-                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Camera Hardware & Permission Diagnostic Bar */}
@@ -907,11 +943,17 @@ export default function CarnetPhotoCaptureModal({
             >
               <X className="w-5 h-5" /> Cerrar
             </button>
-            <img
-              src={GUIDE_IMAGE_URL}
-              alt="Guía de Fotografía de Carnet Cruz Verde Salvadoreña"
-              className="w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl bg-white"
-            />
+            {guideViewMode === 'image' && !guideImgFailed ? (
+              <img
+                src={GUIDE_IMAGE_CANDIDATES[guideImgIndex]}
+                alt="Guía de Fotografía de Carnet Cruz Verde Salvadoreña"
+                className="w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl bg-white"
+              />
+            ) : (
+              <div className="max-h-[85vh] overflow-y-auto rounded-2xl shadow-2xl">
+                <CarnetPhotoGuideVisual />
+              </div>
+            )}
           </div>
         </div>
       )}

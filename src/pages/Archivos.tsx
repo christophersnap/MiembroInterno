@@ -12,6 +12,22 @@ import { logActivity } from '../lib/logger';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const DEMO_SEED_IDS = new Set(['arc-001', 'arc-002', 'arc-003']);
+const DEMO_SEED_TITLES = new Set([
+  'Manual de Primeros Auxilios Básicos y Avanzados 2026',
+  'Formato Oficial de Hoja de Servicio y Turnos de Ambulancia',
+  'Reglamento Interno y Código de Ética Institucional',
+]);
+
+const isDemoSeedArchivo = (item: any): boolean => {
+  if (!item) return false;
+  const id = String(item.id || '').trim();
+  if (DEMO_SEED_IDS.has(id)) return true;
+  const titulo = String(item.titulo || '').trim();
+  const url = String(item.url_archivo || '').trim();
+  return DEMO_SEED_TITLES.has(titulo) && url.startsWith('https://images.unsplash.com/');
+};
+
 const generateUuid = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -118,30 +134,29 @@ export default function Archivos() {
       } else if (Array.isArray(data)) {
         supabaseLoaded = true;
         for (const item of data) {
-          if (item && item.activo !== false) {
+          if (item && item.activo !== false && !isDemoSeedArchivo(item)) {
             mergedMap.set(String(item.id), item as ArchivoItem);
           }
         }
       }
 
-      // 2. Complementar con API local sólo si Supabase falló o para registros locales pendientes
+      // 2. Complementar con registros reales en API local que no estén duplicados en Supabase
       try {
         const res = await fetch(getApiUrl('/api/archivos'));
         if (res.ok) {
           const localData = await res.json();
           if (Array.isArray(localData)) {
             for (const item of localData) {
-              if (!item || item.activo === false) continue;
+              if (!item || item.activo === false || isDemoSeedArchivo(item)) continue;
               const idKey = String(item.id);
               if (!mergedMap.has(idKey)) {
-                // Evitar duplicar si ya vino desde Supabase con distinto ID pero mismo título y archivo
-                const dupInSupabase = Array.from(mergedMap.values()).some(
+                const dupInMerged = Array.from(mergedMap.values()).some(
                   (sb) =>
                     sb.titulo === item.titulo &&
                     sb.nombre_archivo === item.nombre_archivo &&
                     sb.url_archivo === item.url_archivo
                 );
-                if (!dupInSupabase && !supabaseLoaded) {
+                if (!dupInMerged) {
                   mergedMap.set(idKey, item as ArchivoItem);
                 }
               }
@@ -152,17 +167,32 @@ export default function Archivos() {
         // Sin API local (ej. producción estática), continuar con Supabase
       }
 
-      // 3. Fallback localStorage si no hubo respuesta ni de Supabase ni de API local
-      if (mergedMap.size === 0 && !supabaseLoaded) {
+      // 3. Fallback localStorage si falló Supabase o para conservar registros locales no-UUID previos
+      try {
         const cached = localStorage.getItem('cruz_verde_archivos_data');
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed)) {
             for (const item of parsed) {
-              if (item) mergedMap.set(String(item.id), item as ArchivoItem);
+              if (!item || item.activo === false || isDemoSeedArchivo(item)) continue;
+              const idKey = String(item.id);
+              const isLegacyLocal = !UUID_REGEX.test(idKey);
+              if ((!supabaseLoaded || isLegacyLocal) && !mergedMap.has(idKey)) {
+                const dupInMerged = Array.from(mergedMap.values()).some(
+                  (sb) =>
+                    sb.titulo === item.titulo &&
+                    sb.nombre_archivo === item.nombre_archivo &&
+                    sb.url_archivo === item.url_archivo
+                );
+                if (!dupInMerged) {
+                  mergedMap.set(idKey, item as ArchivoItem);
+                }
+              }
             }
           }
         }
+      } catch {
+        // Ignorar JSON corrupto en localStorage
       }
 
       const finalList = Array.from(mergedMap.values()).sort(
@@ -500,9 +530,18 @@ export default function Archivos() {
   const totalDescargas = archivos.reduce((acc, a) => acc + (a.descargas_count || 0), 0);
 
   const sqlMigrationCode = `-- ==============================================================================
--- Migración SQL #38: Archivos, RLS completo y Storage sin restricción de MIME
+-- Migración SQL #40: Limpiar archivos de ejemplo + RLS y Storage completo
 -- Ejecuta este código en el SQL Editor de tu panel Supabase
 -- ==============================================================================
+
+-- Eliminar los 3 archivos de ejemplo precargados
+DELETE FROM public.archivos
+WHERE url_archivo LIKE 'https://images.unsplash.com/%'
+  AND titulo IN (
+    'Manual de Primeros Auxilios Básicos y Avanzados 2026',
+    'Formato Oficial de Hoja de Servicio y Turnos de Ambulancia',
+    'Reglamento Interno y Código de Ética Institucional'
+  );
 
 CREATE TABLE IF NOT EXISTS public.archivos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -6,7 +6,6 @@ import {
   ExternalLink,
   Newspaper,
   PlayCircle,
-  User,
   ChevronRight,
   Paperclip,
   Download,
@@ -140,15 +139,6 @@ export default function NoticiaLanding() {
               <span className="text-slate-500 normal-case tracking-normal font-medium inline-flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                 {formattedDate}
-              </span>
-            </>
-          )}
-          {slide.autor_nombre && (
-            <>
-              <span aria-hidden="true" className="text-slate-300">·</span>
-              <span className="text-slate-500 normal-case tracking-normal font-medium inline-flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-slate-400" />
-                {slide.autor_nombre}
               </span>
             </>
           )}

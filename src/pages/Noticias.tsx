@@ -50,6 +50,7 @@ import {
 } from '../lib/noticiasBanner';
 import NoticiaRichEditor from '../components/noticias/NoticiaRichEditor';
 import NoticiasBannerSlider from '../components/dashboard/NoticiasBannerSlider';
+import CountdownManagerSection from '../components/noticias/CountdownManagerSection';
 
 const CATEGORIAS_NOTICIA = [
   'Noticia Institucional',
@@ -147,6 +148,7 @@ export default function Noticias() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [configFeedback, setConfigFeedback] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<'auto' | 'mobile'>('auto');
+  const [activeSection, setActiveSection] = useState<'slider' | 'countdown'>('slider');
 
   // Slide Form Modal
   const [showSlideModal, setShowSlideModal] = useState(false);
@@ -197,12 +199,38 @@ export default function Noticias() {
     enlace_externo: f.enlace_externo || null,
   });
 
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const DEMO_SEED_IDS = new Set(['arc-001', 'arc-002', 'arc-003']);
+  const DEMO_SEED_TITLES = new Set([
+    'Manual de Primeros Auxilios Básicos y Avanzados 2026',
+    'Formato Oficial de Hoja de Servicio y Turnos de Ambulancia',
+    'Reglamento Interno y Código de Ética Institucional',
+  ]);
+
+  const isDemoSeedArchivo = (f: any): boolean => {
+    if (!f) return false;
+    const id = String(f.id || '').trim();
+    if (DEMO_SEED_IDS.has(id)) return true;
+    const titulo = String(f.titulo || '').trim();
+    const url = String(f.url_archivo || '').trim();
+    return DEMO_SEED_TITLES.has(titulo) && url.startsWith('https://images.unsplash.com/');
+  };
+
   const loadAvailableArchivos = async () => {
     setLoadingArchivos(true);
     setArchivosError(null);
     try {
       const merged = new Map<string, NoticiaArchivoAdjunto>();
       let supabaseOk = false;
+
+      const isDuplicateInMerged = (mapped: NoticiaArchivoAdjunto) =>
+        merged.has(mapped.id) ||
+        Array.from(merged.values()).some(
+          (m) =>
+            m.titulo === mapped.titulo &&
+            m.nombre_archivo === mapped.nombre_archivo &&
+            m.url_archivo === mapped.url_archivo
+        );
 
       const { data, error } = await supabase
         .from('archivos')
@@ -212,33 +240,28 @@ export default function Noticias() {
       if (error) {
         console.warn('Error consultando public.archivos desde Noticias:', error);
         setArchivosError(
-          `No se pudo leer la tabla archivos en Supabase (${error.message}). Ejecuta el Script SQL #38 en Supabase.`
+          `No se pudo leer la tabla archivos en Supabase (${error.message}). Ejecuta el Script SQL #40 en Supabase.`
         );
       } else if (Array.isArray(data)) {
         supabaseOk = true;
         for (const f of data) {
-          if (f && f.activo !== false) {
+          if (f && f.activo !== false && !isDemoSeedArchivo(f)) {
             const mapped = mapArchivoItem(f);
             merged.set(mapped.id, mapped);
           }
         }
       }
 
-      // Complementar desde API local si hubo error en Supabase, si está vacío o si hay registros locales heredados (id arc-*)
+      // Complementar con archivos reales guardados en API local que aún no estén en Supabase
       try {
         const res = await fetch(getApiUrl('/api/archivos'));
         if (res.ok) {
           const apiData = await res.json();
           if (Array.isArray(apiData)) {
             for (const f of apiData) {
-              if (!f || f.activo === false) continue;
+              if (!f || f.activo === false || isDemoSeedArchivo(f)) continue;
               const mapped = mapArchivoItem(f);
-              const alreadyExists =
-                merged.has(mapped.id) ||
-                Array.from(merged.values()).some(
-                  (m) => m.titulo === mapped.titulo && m.nombre_archivo === mapped.nombre_archivo
-                );
-              if (!alreadyExists && (!supabaseOk || merged.size === 0 || mapped.id.startsWith('arc-'))) {
+              if (!isDuplicateInMerged(mapped)) {
                 merged.set(mapped.id, mapped);
               }
             }
@@ -248,20 +271,24 @@ export default function Noticias() {
         // Sin API local disponible
       }
 
-      // Fallback localStorage si ni Supabase ni API local devolvieron registros
-      if (merged.size === 0 && !supabaseOk) {
+      // Complementar desde localStorage si falló Supabase o si hay archivos locales heredados no-UUID
+      try {
         const cached = localStorage.getItem('cruz_verde_archivos_data');
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed)) {
             for (const f of parsed) {
-              if (f && f.activo !== false) {
-                const mapped = mapArchivoItem(f);
+              if (!f || f.activo === false || isDemoSeedArchivo(f)) continue;
+              const mapped = mapArchivoItem(f);
+              const isLegacyLocal = !UUID_REGEX.test(mapped.id);
+              if ((!supabaseOk || isLegacyLocal) && !isDuplicateInMerged(mapped)) {
                 merged.set(mapped.id, mapped);
               }
             }
           }
         }
+      } catch {
+        // Ignorar error de lectura localStorage
       }
 
       setAvailableArchivos(Array.from(merged.values()));
@@ -676,38 +703,74 @@ export default function Noticias() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowSqlModal(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap"
-          >
-            <Database className="w-4 h-4 text-emerald-700" />
-            <span>Script SQL Supabase</span>
-          </button>
+          {activeSection === 'slider' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap"
+              >
+                <Database className="w-4 h-4 text-emerald-700" />
+                <span>Script SQL Supabase</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={loadData}
-            disabled={loading}
-            className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
-            title="Recargar slides y ajustes"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-          </button>
+              <button
+                type="button"
+                onClick={loadData}
+                disabled={loading}
+                className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
+                title="Recargar slides y ajustes"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
+              </button>
 
-          {canEdit && (
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Agregar Nuevo Slide</span>
-            </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar Nuevo Slide</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
 
+      {/* Selector de Módulo dentro de Noticias */}
+      <div className="inline-flex items-center gap-1 p-1.5 bg-slate-100 rounded-xl border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveSection('slider')}
+          className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSection === 'slider'
+              ? 'bg-white text-slate-900 shadow-2xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Newspaper className="w-4 h-4 text-emerald-700" />
+          <span>Banner Slide de Noticias</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('countdown')}
+          className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSection === 'countdown'
+              ? 'bg-white text-slate-900 shadow-2xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Clock className="w-4 h-4 text-emerald-700" />
+          <span>Banner Countdown (Eventos)</span>
+        </button>
+      </div>
+
+      {activeSection === 'countdown' ? (
+        <CountdownManagerSection canEdit={canEdit} />
+      ) : (
+        <>
       {/* Ajustes Generales del Banner Slide */}
       <section className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -1016,6 +1079,8 @@ export default function Noticias() {
           </div>
         )}
       </section>
+        </>
+      )}
 
       {/* MODAL CREAR / EDITAR SLIDE Y CONTENIDO */}
       {showSlideModal && (
