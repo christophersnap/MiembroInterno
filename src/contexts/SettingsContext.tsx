@@ -306,10 +306,19 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           }
           if (row.clave === 'verificacion_titulo') newSettings.verificacion.titulo = row.valor;
           if (row.clave === 'verificacion_mensaje') newSettings.verificacion.mensaje = row.valor;
-          if (row.clave === 'verificacion_fields' && row.verificacion_fields) {
-            newSettings.verificacion.fields = row.verificacion_fields;
-          } else if (row.clave === 'verificacion_fields' && row.valor) {
-            try { newSettings.verificacion.fields = { ...newSettings.verificacion.fields, ...JSON.parse(row.valor) }; } catch(e){}
+          if (row.clave === 'verificacion_fields') {
+            let parsedFields: any = null;
+            if (row.valor) {
+              try {
+                parsedFields = typeof row.valor === 'string' ? JSON.parse(row.valor) : row.valor;
+              } catch (e) {}
+            }
+            if (!parsedFields && row.verificacion_fields && typeof row.verificacion_fields === 'object') {
+              parsedFields = row.verificacion_fields;
+            }
+            if (parsedFields && typeof parsedFields === 'object') {
+              newSettings.verificacion.fields = { ...newSettings.verificacion.fields, ...parsedFields };
+            }
           }
           if (row.clave === 'login_show_solicitar') {
              newSettings.loginShowSolicitar = row.valor === 'true';

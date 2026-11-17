@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Cropper from 'react-easy-crop';
 import {
   Newspaper,
   Plus,
@@ -24,14 +25,21 @@ import {
   Info,
   Loader2,
   RefreshCw,
+  Crop,
+  Paperclip,
+  Search,
+  FileText,
+  Move,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import getCroppedImg from '../utils/cropImage';
 import {
   DEFAULT_BANNER_CONFIG,
   fetchNoticiasBannerData,
+  NoticiaArchivoAdjunto,
   NoticiaBannerSlide,
   NoticiasBannerConfig,
   NoticiaVideo,
@@ -60,8 +68,10 @@ CREATE TABLE IF NOT EXISTS public.noticias_banner (
   subtitulo TEXT,
   categoria TEXT DEFAULT 'Noticia',
   imagen_url TEXT NOT NULL,
+  imagen_banner_url TEXT,
   contenido_html TEXT DEFAULT '',
   videos JSONB DEFAULT '[]'::jsonb,
+  archivos_adjuntos JSONB DEFAULT '[]'::jsonb,
   accion_click TEXT DEFAULT 'landing' CHECK (accion_click IN ('landing', 'url')),
   enlace_redireccion TEXT,
   enlace_texto TEXT DEFAULT 'Más información',
@@ -72,6 +82,10 @@ CREATE TABLE IF NOT EXISTS public.noticias_banner (
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+ALTER TABLE public.noticias_banner
+  ADD COLUMN IF NOT EXISTS imagen_banner_url TEXT,
+  ADD COLUMN IF NOT EXISTS archivos_adjuntos JSONB DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_noticias_banner_activo ON public.noticias_banner(activo);
 CREATE INDEX IF NOT EXISTS idx_noticias_banner_orden ON public.noticias_banner(orden ASC, created_at DESC);
@@ -143,9 +157,13 @@ export default function Noticias() {
   const [formSubtitulo, setFormSubtitulo] = useState('');
   const [formCategoria, setFormCategoria] = useState(CATEGORIAS_NOTICIA[0]);
   const [formImagenUrl, setFormImagenUrl] = useState('');
+  const [formImagenBannerUrl, setFormImagenBannerUrl] = useState('');
   const [uploadingBannerImg, setUploadingBannerImg] = useState(false);
   const [formContenidoHtml, setFormContenidoHtml] = useState('');
   const [formVideos, setFormVideos] = useState<NoticiaVideo[]>([]);
+  const [formArchivosAdjuntos, setFormArchivosAdjuntos] = useState<NoticiaArchivoAdjunto[]>([]);
+  const [availableArchivos, setAvailableArchivos] = useState<NoticiaArchivoAdjunto[]>([]);
+  const [archivoSearch, setArchivoSearch] = useState('');
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newVideoTitle, setNewVideoTitle] = useState('');
   const [formAccionClick, setFormAccionClick] = useState<'landing' | 'url'>('landing');
@@ -153,9 +171,74 @@ export default function Noticias() {
   const [formEnlaceTexto, setFormEnlaceTexto] = useState('Más información');
   const [formActivo, setFormActivo] = useState(true);
 
+  // Banner Drag-Crop State
+  const [showBannerCropper, setShowBannerCropper] = useState(false);
+  const [cropSourceUrl, setCropSourceUrl] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [cropZoom, setCropZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+  const [savingCrop, setSavingCrop] = useState(false);
+
   // SQL Modal
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
+
+  const loadAvailableArchivos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('archivos')
+        .select('id, titulo, nombre_archivo, url_archivo, extension, tamano_legible, categoria, enlace_externo, activo')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        setAvailableArchivos(
+          data
+            .filter((f: any) => f.activo !== false)
+            .map((f: any) => ({
+              id: String(f.id),
+              titulo: f.titulo || f.nombre_archivo || 'Archivo',
+              nombre_archivo: f.nombre_archivo || f.titulo || 'archivo',
+              url_archivo: f.url_archivo || f.enlace_externo || '',
+              extension: f.extension,
+              tamano_legible: f.tamano_legible,
+              categoria: f.categoria,
+              enlace_externo: f.enlace_externo || null,
+            }))
+        );
+        return;
+      }
+
+      const res = await fetch(getApiUrl('/api/archivos'));
+      if (res.ok) {
+        const apiData = await res.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          setAvailableArchivos(
+            apiData.map((f: any) => ({
+              id: String(f.id),
+              titulo: f.titulo || f.nombre_archivo || 'Archivo',
+              nombre_archivo: f.nombre_archivo || f.titulo || 'archivo',
+              url_archivo: f.url_archivo || f.enlace_externo || '',
+              extension: f.extension,
+              tamano_legible: f.tamano_legible,
+              categoria: f.categoria,
+              enlace_externo: f.enlace_externo || null,
+            }))
+          );
+          return;
+        }
+      }
+
+      const cached = localStorage.getItem('cruz_verde_archivos_data');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setAvailableArchivos(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn('Error cargando catálogo de archivos:', err);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -172,6 +255,7 @@ export default function Noticias() {
 
   useEffect(() => {
     loadData();
+    loadAvailableArchivos();
   }, []);
 
   const persistSlidesLocal = (list: NoticiaBannerSlide[]) => {
@@ -202,8 +286,11 @@ export default function Noticias() {
     setFormSubtitulo('');
     setFormCategoria(CATEGORIAS_NOTICIA[0]);
     setFormImagenUrl('');
+    setFormImagenBannerUrl('');
     setFormContenidoHtml('');
     setFormVideos([]);
+    setFormArchivosAdjuntos([]);
+    setArchivoSearch('');
     setNewVideoUrl('');
     setNewVideoTitle('');
     setFormAccionClick('landing');
@@ -212,6 +299,7 @@ export default function Noticias() {
     setFormActivo(true);
     setSlideError(null);
     setShowSlideModal(true);
+    loadAvailableArchivos();
   };
 
   const openEditModal = (slide: NoticiaBannerSlide) => {
@@ -220,8 +308,11 @@ export default function Noticias() {
     setFormSubtitulo(slide.subtitulo || '');
     setFormCategoria(slide.categoria || CATEGORIAS_NOTICIA[0]);
     setFormImagenUrl(slide.imagen_url || '');
+    setFormImagenBannerUrl(slide.imagen_banner_url || '');
     setFormContenidoHtml(slide.contenido_html || '');
     setFormVideos(Array.isArray(slide.videos) ? slide.videos : []);
+    setFormArchivosAdjuntos(Array.isArray(slide.archivos_adjuntos) ? slide.archivos_adjuntos : []);
+    setArchivoSearch('');
     setNewVideoUrl('');
     setNewVideoTitle('');
     setFormAccionClick(slide.accion_click === 'url' ? 'url' : 'landing');
@@ -230,6 +321,45 @@ export default function Noticias() {
     setFormActivo(Boolean(slide.activo));
     setSlideError(null);
     setShowSlideModal(true);
+    loadAvailableArchivos();
+  };
+
+  const onBannerCropComplete = useCallback((_: any, croppedPixels: any) => {
+    setCroppedAreaPixels(croppedPixels);
+  }, []);
+
+  const openBannerFramer = (sourceUrl: string) => {
+    if (!sourceUrl) return;
+    setCropSourceUrl(sourceUrl);
+    setCrop({ x: 0, y: 0 });
+    setCropZoom(1);
+    setShowBannerCropper(true);
+  };
+
+  const handleApplyBannerCrop = async () => {
+    if (!cropSourceUrl || !croppedAreaPixels) return;
+    setSavingCrop(true);
+    setSlideError(null);
+    try {
+      const croppedObjUrl = await getCroppedImg(cropSourceUrl, croppedAreaPixels);
+      if (!croppedObjUrl) {
+        throw new Error('No se pudo recortar la imagen.');
+      }
+      const res = await fetch(croppedObjUrl);
+      const blob = await res.blob();
+      const file = new File([blob], `banner_crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const uploadedCropUrl = await uploadNoticiaMedia(file, 1920);
+      setFormImagenBannerUrl(uploadedCropUrl);
+      setShowBannerCropper(false);
+    } catch (err: any) {
+      setSlideError(
+        err?.message ||
+          'No se pudo procesar el recorte panorámico (verifica si la imagen externa permite CORS o vuelve a subirla desde tu dispositivo).'
+      );
+      setShowBannerCropper(false);
+    } finally {
+      setSavingCrop(false);
+    }
   };
 
   const handleUploadBannerImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,9 +371,13 @@ export default function Noticias() {
     }
     setSlideError(null);
     setUploadingBannerImg(true);
+    const localPreviewUrl = URL.createObjectURL(file);
     try {
       const url = await uploadNoticiaMedia(file, 1920);
       setFormImagenUrl(url);
+      // Abrir automáticamente el encuadre panorámico para el banner dejando la imagen completa intacta para la nota
+      setFormImagenBannerUrl('');
+      openBannerFramer(localPreviewUrl);
     } catch (err: any) {
       setSlideError(err?.message || 'Error al subir la imagen destacada.');
     } finally {
@@ -273,6 +407,16 @@ export default function Noticias() {
     setFormVideos((prev) => prev.filter((v) => v.id !== vidId));
   };
 
+  const handleToggleArchivoAdjunto = (file: NoticiaArchivoAdjunto) => {
+    setFormArchivosAdjuntos((prev) => {
+      const exists = prev.some((f) => String(f.id) === String(file.id));
+      if (exists) {
+        return prev.filter((f) => String(f.id) !== String(file.id));
+      }
+      return [...prev, file];
+    });
+  };
+
   const handleSaveSlide = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitulo.trim()) {
@@ -297,8 +441,10 @@ export default function Noticias() {
         subtitulo: formSubtitulo.trim() || null,
         categoria: formCategoria.trim() || 'Noticia Institucional',
         imagen_url: formImagenUrl.trim(),
+        imagen_banner_url: formImagenBannerUrl.trim() || null,
         contenido_html: formContenidoHtml || '',
         videos: formVideos,
+        archivos_adjuntos: formArchivosAdjuntos,
         accion_click: formAccionClick,
         enlace_redireccion: formEnlaceRedireccion.trim() || null,
         enlace_texto: formEnlaceTexto.trim() || 'Más información',
@@ -309,11 +455,27 @@ export default function Noticias() {
         updated_at: new Date().toISOString(),
       };
 
+      const { imagen_banner_url: _ib, archivos_adjuntos: _aa, ...legacyPayload } = payload;
+
       if (editingSlide) {
-        const { error: sbErr } = await supabase
+        let { error: sbErr } = await supabase
           .from('noticias_banner')
           .update(payload)
           .eq('id', editingSlide.id);
+
+        if (
+          sbErr &&
+          (sbErr.code === '42703' ||
+            sbErr.code === 'PGRST204' ||
+            sbErr.message?.includes('imagen_banner_url') ||
+            sbErr.message?.includes('archivos_adjuntos'))
+        ) {
+          const retry = await supabase
+            .from('noticias_banner')
+            .update(legacyPayload)
+            .eq('id', editingSlide.id);
+          sbErr = retry.error;
+        }
 
         if (sbErr) {
           await fetch(getApiUrl(`/api/noticias-banner/${encodeURIComponent(editingSlide.id)}`), {
@@ -345,7 +507,20 @@ export default function Noticias() {
           created_at: new Date().toISOString(),
         };
 
-        const { error: sbErr } = await supabase.from('noticias_banner').insert([newRecord]);
+        const { imagen_banner_url: _ib2, archivos_adjuntos: _aa2, ...legacyRecord } = newRecord;
+
+        let { error: sbErr } = await supabase.from('noticias_banner').insert([newRecord]);
+
+        if (
+          sbErr &&
+          (sbErr.code === '42703' ||
+            sbErr.code === 'PGRST204' ||
+            sbErr.message?.includes('imagen_banner_url') ||
+            sbErr.message?.includes('archivos_adjuntos'))
+        ) {
+          const retry = await supabase.from('noticias_banner').insert([legacyRecord]);
+          sbErr = retry.error;
+        }
 
         if (sbErr) {
           await fetch(getApiUrl('/api/noticias-banner'), {
@@ -700,7 +875,7 @@ export default function Noticias() {
                 {/* Thumbnail */}
                 <div className="w-full md:w-56 aspect-[16/9] md:aspect-[16/7] rounded-xl overflow-hidden bg-slate-100 border border-slate-200/70 shrink-0">
                   <img
-                    src={slide.imagen_url}
+                    src={slide.imagen_banner_url || slide.imagen_url}
                     alt={slide.titulo}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover object-center"
@@ -892,13 +1067,61 @@ export default function Noticias() {
                 </div>
 
                 {formImagenUrl && (
-                  <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-[24/8] relative">
-                    <img
-                      src={formImagenUrl}
-                      alt="Vista previa de imagen destacada"
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover object-center"
-                    />
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-600">
+                        Vista previa dual: arriba cómo se verá recortado en el Banner del Dashboard; abajo la imagen completa que se abrirá al ver la nota.
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {formImagenBannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setFormImagenBannerUrl('')}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-600 cursor-pointer"
+                          >
+                            Restablecer encuadre
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openBannerFramer(formImagenUrl)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-black text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
+                        >
+                          <Crop className="w-3.5 h-3.5" />
+                          <span>{formImagenBannerUrl ? 'Reajustar encuadre del Banner' : 'Arrastrar / Encuadrar zona del Banner'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-700 block">
+                          Portada Banner Slide (Dashboard)
+                        </span>
+                        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-[24/8] relative">
+                          <img
+                            src={formImagenBannerUrl || formImagenUrl}
+                            alt="Encuadre banner"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover object-center"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">
+                          Imagen Completa (Al abrir &ldquo;Más información&rdquo;)
+                        </span>
+                        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-950/5 h-28 sm:h-32 flex items-center justify-center">
+                          <img
+                            src={formImagenUrl}
+                            alt="Imagen completa en landing"
+                            referrerPolicy="no-referrer"
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1095,6 +1318,110 @@ export default function Noticias() {
                       </div>
                     )}
                   </div>
+
+                  {/* 6. Adjuntar Documentos de la pestaña Archivos */}
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-slate-900 inline-flex items-center gap-1.5">
+                        <Paperclip className="w-4 h-4 text-emerald-700" />
+                        4. Adjuntar Documentos existentes de la pestaña Archivos (Opcional)
+                      </label>
+                      <span className="text-[11px] font-semibold text-emerald-700">
+                        {formArchivosAdjuntos.length} archivo(s) adjunto(s)
+                      </span>
+                    </div>
+
+                    {formArchivosAdjuntos.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {formArchivosAdjuntos.map((adj) => (
+                          <span
+                            key={adj.id}
+                            className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-900"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                            <span className="max-w-[200px] truncate">{adj.titulo || adj.nombre_archivo}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleArchivoAdjunto(adj)}
+                              className="p-0.5 rounded hover:bg-emerald-200/70 text-emerald-800 cursor-pointer"
+                              title="Quitar adjunto"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={archivoSearch}
+                        onChange={(e) => setArchivoSearch(e.target.value)}
+                        placeholder="Buscar archivos subidos en el repositorio..."
+                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-emerald-600"
+                      />
+                    </div>
+
+                    {availableArchivos.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 italic">
+                        No hay archivos cargados en la pestaña Archivos todavía.
+                      </p>
+                    ) : (
+                      <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+                        {availableArchivos
+                          .filter((f) => {
+                            const q = archivoSearch.trim().toLowerCase();
+                            if (!q) return true;
+                            return (
+                              (f.titulo || '').toLowerCase().includes(q) ||
+                              (f.nombre_archivo || '').toLowerCase().includes(q) ||
+                              (f.categoria || '').toLowerCase().includes(q)
+                            );
+                          })
+                          .map((file) => {
+                            const selected = formArchivosAdjuntos.some(
+                              (a) => String(a.id) === String(file.id)
+                            );
+                            return (
+                              <label
+                                key={file.id}
+                                className={`flex items-center justify-between gap-3 px-3 py-2 text-xs cursor-pointer transition-colors ${
+                                  selected ? 'bg-emerald-50/70' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={() => handleToggleArchivoAdjunto(file)}
+                                    className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-slate-900 truncate">
+                                      {file.titulo || file.nombre_archivo}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 truncate">
+                                      {[file.categoria, file.extension?.toUpperCase(), file.tamano_legible]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold shrink-0 ${
+                                    selected ? 'text-emerald-700' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {selected ? 'Adjunto' : 'Adjuntar'}
+                                </span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
 
@@ -1143,6 +1470,89 @@ export default function Noticias() {
         </div>
       )}
 
+      {/* MODAL ENCUADRE / ARRASTRE PARA BANNER SLIDE */}
+      {showBannerCropper && cropSourceUrl && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col">
+            <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Move className="w-4 h-4 text-emerald-700" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Encuadrar Parte Visible en el Banner del Dashboard
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Arrastra la imagen o usa el zoom para elegir qué zona se mostrará en el slider panorámico. Al abrir la nota se verá la imagen completa.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={savingCrop}
+                onClick={() => setShowBannerCropper(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative w-full h-72 sm:h-96 bg-slate-900">
+              <Cropper
+                image={cropSourceUrl}
+                crop={crop}
+                zoom={cropZoom}
+                aspect={24 / 8}
+                onCropChange={setCrop}
+                onCropComplete={onBannerCropComplete}
+                onZoomChange={setCropZoom}
+              />
+            </div>
+
+            <div className="p-4 sm:p-5 bg-white border-t border-slate-200 space-y-4">
+              <div className="flex items-center gap-4">
+                <span className="text-xs font-semibold text-slate-600 shrink-0">Zoom del encuadre</span>
+                <input
+                  type="range"
+                  value={cropZoom}
+                  min={1}
+                  max={3}
+                  step={0.05}
+                  onChange={(e) => setCropZoom(Number(e.target.value))}
+                  className="flex-1 accent-emerald-700"
+                />
+                <span className="text-xs font-mono text-slate-500 w-10 text-right">
+                  {cropZoom.toFixed(1)}x
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={savingCrop}
+                  onClick={() => setShowBannerCropper(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                >
+                  Usar imagen sin recorte
+                </button>
+                <button
+                  type="button"
+                  disabled={savingCrop}
+                  onClick={handleApplyBannerCrop}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold shadow-xs disabled:opacity-50 cursor-pointer"
+                >
+                  {savingCrop ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>{savingCrop ? 'Aplicando encuadre...' : 'Aplicar Encuadre al Banner'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL SQL SUPABASE */}
       {showSqlModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 backdrop-blur-xs flex items-center justify-center p-4">
@@ -1152,10 +1562,10 @@ export default function Noticias() {
                 <Database className="w-5 h-5 text-emerald-700" />
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    Script SQL para Supabase (Migración 32)
+                    Script SQL para Supabase (Migración 32 + 36)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Ejecuta este script en el SQL Editor de Supabase para habilitar la tabla noticias_banner y permisos.
+                    Ejecuta este script en el SQL Editor de Supabase para habilitar la tabla noticias_banner, encuadre y adjuntos.
                   </p>
                 </div>
               </div>

@@ -185,7 +185,7 @@ export default function Configuracion() {
             if (row.clave === 'verificacion_fields') {
               let parsedFields: any = null;
               if (row.valor) {
-                try { parsedFields = JSON.parse(row.valor); } catch (e) {}
+                try { parsedFields = typeof row.valor === 'string' ? JSON.parse(row.valor) : row.valor; } catch (e) {}
               }
               if (!parsedFields && row.verificacion_fields && typeof row.verificacion_fields === 'object') {
                 parsedFields = row.verificacion_fields;
@@ -409,17 +409,25 @@ export default function Configuracion() {
   // Función genérica para guardar pares clave/valor en Supabase
   const saveConfigPairs = async (pairs: { clave: string; valor: string }[]) => {
     for (const pair of pairs) {
-      const { data: existing } = await supabase.from('configuracion').select('id').eq('clave', pair.clave).maybeSingle();
-      const payload: Record<string, any> = { valor: pair.valor };
-      if (pair.clave === 'verificacion_fields') {
-        try {
-          payload.verificacion_fields = JSON.parse(pair.valor);
-        } catch (e) {}
-      }
+      const { data: existing, error: selectErr } = await supabase
+        .from('configuracion')
+        .select('id')
+        .eq('clave', pair.clave)
+        .maybeSingle();
+
+      if (selectErr) throw selectErr;
+
       if (existing) {
-        await supabase.from('configuracion').update(payload).eq('id', existing.id);
+        const { error: updErr } = await supabase
+          .from('configuracion')
+          .update({ valor: pair.valor })
+          .eq('id', existing.id);
+        if (updErr) throw updErr;
       } else {
-        await supabase.from('configuracion').insert({ clave: pair.clave, ...payload });
+        const { error: insErr } = await supabase
+          .from('configuracion')
+          .insert({ clave: pair.clave, valor: pair.valor });
+        if (insErr) throw insErr;
       }
     }
     await refreshSettings();
@@ -701,35 +709,34 @@ export default function Configuracion() {
 
       await saveConfigPairs(pairs);
 
-      // Asegurar actualización directa con JSON en Supabase
+      // Sincronización opcional de columna JSONB si existe en la BD (no bloqueante)
       try {
         await supabase
           .from('configuracion')
           .update({
-            valor: JSON.stringify(config.verificacion_fields || {}),
             verificacion_fields: config.verificacion_fields || {}
           })
           .eq('clave', 'verificacion_fields');
       } catch (err) {
-        console.warn('Sync directo verificacion_fields:', err);
+        console.warn('Sync opcional columna verificacion_fields:', err);
       }
 
-      // Sincronizar también con backend API si existe
+      // Sincronizar también con backend API (PUT esperado por SQLite server.ts)
       try {
         await fetch(getApiUrl('/api/configuracion'), {
-          method: 'POST',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            verificacion_titulo: config.verificacion_titulo,
-            verificacion_mensaje: config.verificacion_mensaje,
-            verificacion_fields: config.verificacion_fields,
-            qr_base_url: config.qr_base_url,
-            qr_link_format: config.qr_link_format
+            verificacion_titulo: config.verificacion_titulo || '',
+            verificacion_mensaje: config.verificacion_mensaje || '',
+            verificacion_fields: JSON.stringify(config.verificacion_fields || {}),
+            qr_base_url: config.qr_base_url || 'https://cruzverdesv.org/miembros',
+            qr_link_format: config.qr_link_format || 'short'
           })
         });
       } catch (e) {}
 
-      // Subir public config json para acceso público sin login
+      // Subir public config json como respaldo adicional para acceso público sin login
       try {
         const publicConfig = {
           verificacion_titulo: config.verificacion_titulo,
@@ -743,6 +750,7 @@ export default function Configuracion() {
         const configBlob = new Blob([JSON.stringify(publicConfig)], { type: 'application/json' });
         await supabase.storage.from('socorristas').upload('public_config.json', configBlob, {
           upsert: true,
+          cacheControl: '0',
           contentType: 'application/json'
         });
       } catch (e) {}
@@ -1104,16 +1112,16 @@ export default function Configuracion() {
               </div>
 
               {/* Vista previa del enlace generado */}
-              <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                  <span className="text-xs text-emerald-900 font-medium">Enlace Oficial de Escaneo:</span>
-                  <code className="text-xs font-mono bg-white px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 font-bold">
-                    {(config.qr_base_url || 'https://cruzverdesv.org/miembros').replace(/\/$/, '')}/v/CV-1024
+              <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></div>
+                  <span className="text-xs text-emerald-900 font-medium shrink-0">Enlace Seguro (Token QR):</span>
+                  <code className="text-xs font-mono bg-white px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 font-bold truncate">
+                    {(config.qr_base_url || 'https://cruzverdesv.org/miembros').replace(/\/$/, '')}/v/a8f4e219c03b7d12
                   </code>
                 </div>
-                <span className="text-3xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                  Acceso Público Sin Login
+                <span className="text-3xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full shrink-0">
+                  Sin código de carnet en URL
                 </span>
               </div>
             </div>

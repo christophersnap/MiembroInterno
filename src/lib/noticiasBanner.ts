@@ -7,14 +7,27 @@ export interface NoticiaVideo {
   url: string;
 }
 
+export interface NoticiaArchivoAdjunto {
+  id: string;
+  titulo: string;
+  nombre_archivo: string;
+  url_archivo: string;
+  extension?: string;
+  tamano_legible?: string;
+  categoria?: string;
+  enlace_externo?: string | null;
+}
+
 export interface NoticiaBannerSlide {
   id: string;
   titulo: string;
   subtitulo?: string | null;
   categoria?: string | null;
   imagen_url: string;
+  imagen_banner_url?: string | null;
   contenido_html: string;
   videos: NoticiaVideo[];
+  archivos_adjuntos: NoticiaArchivoAdjunto[];
   accion_click: 'landing' | 'url';
   enlace_redireccion?: string | null;
   enlace_texto?: string | null;
@@ -182,14 +195,26 @@ function normalizeSlide(row: any): NoticiaBannerSlide {
     } catch {}
   }
 
+  let parsedAdjuntos: NoticiaArchivoAdjunto[] = [];
+  if (Array.isArray(row.archivos_adjuntos)) {
+    parsedAdjuntos = row.archivos_adjuntos;
+  } else if (typeof row.archivos_adjuntos === 'string') {
+    try {
+      const a = JSON.parse(row.archivos_adjuntos);
+      if (Array.isArray(a)) parsedAdjuntos = a;
+    } catch {}
+  }
+
   return {
     id: String(row.id),
     titulo: row.titulo || '',
     subtitulo: row.subtitulo || null,
     categoria: row.categoria || 'Noticia',
     imagen_url: row.imagen_url || '',
+    imagen_banner_url: row.imagen_banner_url || null,
     contenido_html: row.contenido_html || '',
     videos: parsedVideos,
+    archivos_adjuntos: parsedAdjuntos,
     accion_click: row.accion_click === 'url' ? 'url' : 'landing',
     enlace_redireccion: row.enlace_redireccion || null,
     enlace_texto: row.enlace_texto || null,

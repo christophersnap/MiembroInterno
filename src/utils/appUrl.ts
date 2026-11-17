@@ -40,11 +40,11 @@ export function getOfficialFormUrl(slug: string): string {
 }
 
 /**
- * URL oficial para verificación pública de carnets físicos mediante QR o código
+ * URL oficial para verificación pública de carnets físicos mediante token QR seguro (nunca código de carnet)
  */
-export function getOfficialVerifyUrl(carnetOrToken: string, format: 'short' | 'long' = 'short'): string {
+export function getOfficialVerifyUrl(secureToken: string, format: 'short' | 'long' = 'short'): string {
   const prefix = format === 'long' ? '/verificar' : '/v';
-  const clean = encodeURIComponent((carnetOrToken || '').trim());
+  const clean = encodeURIComponent((secureToken || '').trim());
   return `${getAppBaseUrl()}${prefix}/${clean}`;
 }
 

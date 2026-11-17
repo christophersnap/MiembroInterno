@@ -129,7 +129,8 @@ export default function NoticiasBannerSlider({
         style={{ transform: `translateX(-${safeIndex * 100}%)` }}
       >
         {activeSlides.map((slide) => {
-          const imgFailed = failedImages[slide.id] || !slide.imagen_url;
+          const bannerSrc = slide.imagen_banner_url || slide.imagen_url;
+          const imgFailed = failedImages[slide.id] || !bannerSrc;
           const formattedDate = slide.created_at
             ? new Date(slide.created_at).toLocaleDateString('es-SV', {
                 day: 'numeric',
@@ -155,7 +156,7 @@ export default function NoticiasBannerSlider({
             >
               {!imgFailed ? (
                 <img
-                  src={slide.imagen_url}
+                  src={bannerSrc}
                   alt={slide.titulo}
                   referrerPolicy="no-referrer"
                   onError={() => setFailedImages((prev) => ({ ...prev, [slide.id]: true }))}

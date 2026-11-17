@@ -8,6 +8,9 @@ import {
   PlayCircle,
   User,
   ChevronRight,
+  Paperclip,
+  Download,
+  FileText,
 } from 'lucide-react';
 import {
   fetchNoticiaById,
@@ -162,18 +165,18 @@ export default function NoticiaLanding() {
         )}
       </header>
 
-      {/* Featured Image */}
-      <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm">
+      {/* Featured Image (Imagen Completa sin recorte) */}
+      <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-950/5 shadow-sm flex items-center justify-center">
         {!heroError && slide.imagen_url ? (
           <img
             src={slide.imagen_url}
             alt={slide.titulo}
             referrerPolicy="no-referrer"
             onError={() => setHeroError(true)}
-            className="w-full max-h-[520px] object-cover object-center"
+            className="w-full max-h-[760px] object-contain mx-auto"
           />
         ) : (
-          <div className="h-56 sm:h-72 bg-gradient-to-br from-emerald-950 to-slate-900 flex flex-col items-center justify-center text-emerald-200/80">
+          <div className="w-full h-56 sm:h-72 bg-gradient-to-br from-emerald-950 to-slate-900 flex flex-col items-center justify-center text-emerald-200/80">
             <Newspaper className="w-12 h-12 mb-2 stroke-[1.5]" />
             <span className="text-sm font-medium">{slide.titulo}</span>
           </div>
@@ -196,7 +199,7 @@ export default function NoticiaLanding() {
             dangerouslySetInnerHTML={{ __html: cleanHtml }}
           />
         ) : (
-          !slide.videos?.length && (
+          !slide.videos?.length && !slide.archivos_adjuntos?.length && (
             <p className="text-sm text-slate-500 italic">
               Esta noticia no contiene texto adicional desarrollado.
             </p>
@@ -291,6 +294,57 @@ export default function NoticiaLanding() {
           </section>
         )}
 
+        {/* Attached Institutional Files from Archivos */}
+        {Array.isArray(slide.archivos_adjuntos) && slide.archivos_adjuntos.length > 0 && (
+          <section className="pt-6 border-t border-slate-200/80 space-y-4">
+            <div className="flex items-center gap-2">
+              <Paperclip className="w-5 h-5 text-emerald-700" />
+              <h2 className="text-lg font-bold text-slate-900">
+                Documentos y Archivos Adjuntos
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {slide.archivos_adjuntos.map((file, idx) => {
+                const targetUrl = file.url_archivo || file.enlace_externo || '#';
+                return (
+                  <a
+                    key={file.id || idx}
+                    href={targetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-center justify-between gap-3 p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 hover:bg-emerald-50/70 hover:border-emerald-300 transition-all"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-emerald-700 shrink-0 shadow-2xs">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm font-bold text-slate-900 truncate group-hover:text-emerald-900">
+                          {file.titulo || file.nombre_archivo}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {[
+                            file.categoria,
+                            file.extension ? file.extension.toUpperCase() : null,
+                            file.tamano_legible,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] font-semibold text-emerald-700 group-hover:bg-emerald-700 group-hover:text-white group-hover:border-emerald-700 transition-colors shrink-0">
+                      <Download className="w-3.5 h-3.5" />
+                      Abrir
+                    </span>
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Optional External Link CTA */}
         {slide.enlace_redireccion && (
           <div className="pt-4 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
@@ -334,7 +388,7 @@ export default function NoticiaLanding() {
               >
                 <div className="w-24 h-16 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200/60">
                   <img
-                    src={other.imagen_url}
+                    src={other.imagen_banner_url || other.imagen_url}
                     alt={other.titulo}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

@@ -25,6 +25,7 @@ import {
   fetchLatestCarnetRequestsMap,
   formatCarnetRequestDate,
   isBlockingCarnetState,
+  resubmitCarnetSolicitudSafe,
 } from '../utils/solicitudesCarnet';
 
 export default function SolicitudCarnet() {
@@ -41,7 +42,8 @@ export default function SolicitudCarnet() {
     seccionalNombre: string;
     carnet: string;
   } | null>(null);
-  const [observedRequestInfo, setObservedRequestInfo] = useState<CarnetRequestStatusInfo | null>(null);
+  const [previousReviewInfo, setPreviousReviewInfo] = useState<CarnetRequestStatusInfo | null>(null);
+  const [resubmitMode, setResubmitMode] = useState<'modify' | 'new'>('modify');
   
   const [tipoSolicitud, setTipoSolicitud] = useState('Nuevo');
   const [motivo, setMotivo] = useState('');
@@ -84,7 +86,7 @@ export default function SolicitudCarnet() {
     setLoadingSearch(true);
     setSearchError('');
     setBlockedRequestInfo(null);
-    setObservedRequestInfo(null);
+    setPreviousReviewInfo(null);
     setSocorrista(null);
 
     try {
@@ -131,9 +133,20 @@ export default function SolicitudCarnet() {
           setSocorrista(data);
           setFotoFile(null);
           setFotoPreview(null);
-          setPhotoDecision(data.foto_url ? 'keep' : 'replace');
-          if (latestReq && latestReq.estado_solicitud === 'Observada') {
-            setObservedRequestInfo(latestReq);
+          if (latestReq && (latestReq.estado_solicitud === 'Observada' || latestReq.estado_solicitud === 'Rechazada')) {
+            setPreviousReviewInfo(latestReq);
+            setResubmitMode('modify');
+            setTipoSolicitud(latestReq.tipo_solicitud || 'Nuevo');
+            setMotivo(latestReq.motivo || '');
+            setDetallesMotivo(latestReq.detalles_motivo || '');
+            setPhotoDecision('replace');
+          } else {
+            setPreviousReviewInfo(null);
+            setResubmitMode('new');
+            setTipoSolicitud('Nuevo');
+            setMotivo('');
+            setDetallesMotivo('');
+            setPhotoDecision(data.foto_url ? 'keep' : 'replace');
           }
         }
       }
@@ -222,7 +235,7 @@ export default function SolicitudCarnet() {
       const seccionalNombreResolved = secObj?.nombre || null;
       const nombreElemento = `${socorrista.primer_nombre} ${socorrista.primer_apellido}`.trim();
 
-      const saveRes = await createCarnetSolicitudSafe({
+      const commonInput = {
         socorrista_id: socorrista.id,
         carnet: socorrista.carnet || carnet,
         nombre_completo: nombreElemento,
@@ -235,7 +248,15 @@ export default function SolicitudCarnet() {
         solicitado_por: userName || nombreElemento,
         solicitado_por_email: user?.email || null,
         es_lote: false,
-      });
+      };
+
+      const saveRes =
+        previousReviewInfo && resubmitMode === 'modify'
+          ? await resubmitCarnetSolicitudSafe({
+              ...commonInput,
+              previousRequest: previousReviewInfo,
+            })
+          : await createCarnetSolicitudSafe(commonInput);
 
       if (!saveRes.ok) {
         throw new Error(saveRes.error || 'No se pudo registrar la solicitud.');
@@ -407,20 +428,123 @@ export default function SolicitudCarnet() {
             </form>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
-              {observedRequestInfo && (
-                <div className="rounded-xl bg-orange-50 border border-orange-300 p-4 flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-orange-950 space-y-1">
-                    <p className="font-bold">Tu solicitud anterior recibió una observación</p>
-                    <p>
-                      Fecha previa: <strong>{formatCarnetRequestDate(observedRequestInfo.fecha_solicitud)}</strong>
-                    </p>
-                    {observedRequestInfo.observaciones && (
+              {previousReviewInfo && (
+                <div
+                  className={`rounded-2xl border p-4 space-y-3 ${
+                    previousReviewInfo.estado_solicitud === 'Rechazada'
+                      ? 'bg-rose-50 border-rose-300 text-rose-950'
+                      : 'bg-orange-50 border-orange-300 text-orange-950'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle
+                      className={`w-5 h-5 shrink-0 mt-0.5 ${
+                        previousReviewInfo.estado_solicitud === 'Rechazada'
+                          ? 'text-rose-600'
+                          : 'text-orange-600'
+                      }`}
+                    />
+                    <div className="flex-1 min-w-0 text-xs space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold text-sm">
+                          {previousReviewInfo.estado_solicitud === 'Rechazada'
+                            ? 'Tu solicitud anterior fue Rechazada'
+                            : 'Tu solicitud anterior recibió una Observación'}
+                        </p>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            previousReviewInfo.estado_solicitud === 'Rechazada'
+                              ? 'bg-rose-100 text-rose-800 border-rose-300'
+                              : 'bg-orange-100 text-orange-800 border-orange-300'
+                          }`}
+                        >
+                          {previousReviewInfo.estado_solicitud}
+                        </span>
+                      </div>
+
                       <p>
-                        <strong>Observación:</strong> {observedRequestInfo.observaciones}
+                        Fecha de solicitud previa:{' '}
+                        <strong>{formatCarnetRequestDate(previousReviewInfo.fecha_solicitud)}</strong>
                       </p>
-                    )}
-                    <p className="text-orange-800">Puedes corregir tu fotografía o información y volver a enviarla.</p>
+
+                      {previousReviewInfo.observaciones && (
+                        <div className="p-2.5 rounded-xl bg-white/85 border border-black/10">
+                          <strong className="block mb-0.5">
+                            {previousReviewInfo.estado_solicitud === 'Rechazada'
+                              ? 'Motivo del rechazo:'
+                              : 'Observación registrada:'}
+                          </strong>
+                          <p className="leading-relaxed">{previousReviewInfo.observaciones}</p>
+                        </div>
+                      )}
+
+                      <div className="pt-1 flex flex-wrap items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPhotoDecision('replace');
+                            setShowPhotoModal(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>
+                            {fotoPreview
+                              ? 'Cambiar Nueva Fotografía'
+                              : 'Cambiar / Actualizar Fotografía Ahora'}
+                          </span>
+                        </button>
+                        {fotoPreview && (
+                          <span className="text-[11px] font-bold text-emerald-700">
+                            ✓ Nueva fotografía lista para reenviar
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Elegir entre modificar la solicitud existente o crear una nueva */}
+                  <div className="pt-2 border-t border-black/10 space-y-2">
+                    <span className="text-[11px] font-bold block">
+                      ¿Cómo deseas proceder con esta solicitud?
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setResubmitMode('modify')}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          resubmitMode === 'modify'
+                            ? 'bg-white border-emerald-600 ring-2 ring-emerald-500/20 text-slate-900 shadow-2xs'
+                            : 'bg-white/60 border-slate-300/80 text-slate-700 hover:bg-white'
+                        }`}
+                      >
+                        <p className="text-xs font-bold flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 text-emerald-700" />
+                          Modificar y reenviar esta solicitud
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Actualiza la fotografía/datos de esta solicitud y la envía nuevamente a revisión.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setResubmitMode('new')}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          resubmitMode === 'new'
+                            ? 'bg-white border-emerald-600 ring-2 ring-emerald-500/20 text-slate-900 shadow-2xs'
+                            : 'bg-white/60 border-slate-300/80 text-slate-700 hover:bg-white'
+                        }`}
+                      >
+                        <p className="text-xs font-bold flex items-center gap-1.5">
+                          <Send className="w-3.5 h-3.5 text-slate-700" />
+                          Enviar como nueva solicitud
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Registra una nueva solicitud independiente conservando el historial previo.
+                        </p>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

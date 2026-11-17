@@ -237,3 +237,81 @@ export async function createCarnetSolicitudSafe(
     return { ok: false, via: 'config', error: e?.message || err3.message || err1.message };
   }
 }
+
+export interface ResubmitCarnetSolicitudInput extends CreateCarnetSolicitudInput {
+  previousRequest: CarnetRequestStatusInfo;
+}
+
+export async function resubmitCarnetSolicitudSafe(
+  input: ResubmitCarnetSolicitudInput
+): Promise<{ ok: boolean; via: 'db' | 'config'; error?: string }> {
+  const nowIso = new Date().toISOString();
+  const prev = input.previousRequest;
+
+  const updateFields = {
+    tipo_solicitud: input.tipo_solicitud,
+    motivo: input.motivo || null,
+    detalles_motivo: input.detalles_motivo || null,
+    foto_url: input.foto_url || prev.foto_url || null,
+    estado_solicitud: 'Pendiente',
+    observaciones: null,
+    revisado_por: null,
+    fecha_revision: null,
+    solicitado_por: input.solicitado_por ?? input.nombre_completo ?? prev.solicitado_por ?? null,
+    solicitado_por_email: input.solicitado_por_email ?? null,
+    fecha_solicitud: nowIso,
+    updated_at: nowIso,
+  };
+
+  if (prev.source === 'config' && prev.config_clave) {
+    try {
+      const updatedCfgPayload = {
+        socorrista_id: input.socorrista_id,
+        carnet: input.carnet || '',
+        nombre_completo: input.nombre_completo || '',
+        seccional_id: input.seccional_id ?? null,
+        seccional_nombre: input.seccional_nombre ?? null,
+        ...updateFields,
+        lote_id: prev.lote_id ?? null,
+        es_lote: Boolean(prev.es_lote),
+      };
+      const { error: cfgUpdErr } = await supabase
+        .from('configuracion')
+        .update({ valor: JSON.stringify(updatedCfgPayload) })
+        .eq('clave', prev.config_clave);
+
+      if (!cfgUpdErr) return { ok: true, via: 'config' };
+    } catch {}
+  }
+
+  if (prev.source === 'db' && prev.id !== undefined && prev.id !== null) {
+    try {
+      const { data: updRows, error: updErr } = await supabase
+        .from('solicitudes_carnet')
+        .update(updateFields)
+        .eq('id', prev.id)
+        .select('id');
+
+      if (!updErr && Array.isArray(updRows) && updRows.length > 0) {
+        return { ok: true, via: 'db' };
+      }
+
+      // Fallback sin columnas opcionales revisado_por / updated_at / solicitado_por_email
+      const { revisado_por: _r, fecha_revision: _fr, solicitado_por_email: _e, updated_at: _u, ...minimalUpdate } =
+        updateFields;
+      const { data: retryRows, error: retryErr } = await supabase
+        .from('solicitudes_carnet')
+        .update(minimalUpdate)
+        .eq('id', prev.id)
+        .select('id');
+
+      if (!retryErr && Array.isArray(retryRows) && retryRows.length > 0) {
+        return { ok: true, via: 'db' };
+      }
+    } catch {}
+  }
+
+  // Fallback seguro si RLS aún no permite UPDATE a usuarios públicos sobre filas Observadas/Rechazadas:
+  // crear nueva solicitud para que el cambio quede registrado de inmediato.
+  return createCarnetSolicitudSafe(input);
+}

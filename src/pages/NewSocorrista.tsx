@@ -8,11 +8,18 @@ import { useAuth } from '../contexts/AuthContext';
 import DateInput from '../components/DateInput';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 import CargosSelector from '../components/socorristas/CargosSelector';
+import SocorristaConfirmModal from '../components/socorristas/SocorristaConfirmModal';
 import {
   normalizeDocumentForCompare,
   normalizeTextForCompare,
   saveSocorristaCargosSecundariosFallback,
 } from '../utils/cargosCatalog';
+import {
+  COUNTRY_PHONE_CODES,
+  composePhoneWithCountry,
+  formatPhoneWithMask,
+  getCountryMask,
+} from '../utils/phoneMask';
 
 export default function NewSocorrista() {
   const navigate = useNavigate();
@@ -38,6 +45,7 @@ export default function NewSocorrista() {
   const [nameDuplicates, setNameDuplicates] = useState<any[]>([]);
   const [checkingNames, setCheckingNames] = useState(false);
   const [confirmHomonym, setConfirmHomonym] = useState(false);
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
   const [formData, setFormData] = useState({
     primer_nombre: '',
     segundo_nombre: '',
@@ -71,6 +79,8 @@ export default function NewSocorrista() {
   const [esMayorDeEdad, setEsMayorDeEdad] = useState(true);
   const [tieneCarnetMinoridad, setTieneCarnetMinoridad] = useState(false);
   const [countryCode, setCountryCode] = useState('+503');
+  const [emergenciaCountryCode1, setEmergenciaCountryCode1] = useState('+503');
+  const [emergenciaCountryCode2, setEmergenciaCountryCode2] = useState('+503');
   const [foto, setFoto] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   
@@ -307,8 +317,15 @@ export default function NewSocorrista() {
     }
 
     if (name === 'telefono') {
-      const currentCountry = countries.find(c => c.code === countryCode) || countries[0];
-      value = formatPhone(value, currentCountry.mask);
+      value = formatPhoneWithMask(value, countryCode);
+    }
+
+    if (name === 'contacto_emergencia_telefono') {
+      value = formatPhoneWithMask(value, emergenciaCountryCode1);
+    }
+
+    if (name === 'contacto_emergencia_telefono_2') {
+      value = formatPhoneWithMask(value, emergenciaCountryCode2);
     }
 
     setFormError(null);
@@ -581,6 +598,28 @@ export default function NewSocorrista() {
         }
       }
 
+      // Todos los datos validados: abrir modal de verificación de seguridad antes de guardar
+      setLoading(false);
+      setShowSaveConfirmModal(true);
+    } catch (error: any) {
+      console.error('Error en validación previa:', error);
+      setFormError(error.message || 'Error al validar los datos.');
+      setLoading(false);
+    }
+  };
+
+  const executeCreateSocorrista = async () => {
+    setFormError(null);
+    setLoading(true);
+    try {
+      const seccionalId = parseInt(formData.seccional_id, 10);
+      if (isNaN(seccionalId)) {
+        setFormError('La seccional seleccionada no es válida.');
+        setShowSaveConfirmModal(false);
+        setLoading(false);
+        return;
+      }
+
       let foto_url = null;
       if (foto) {
         const fileName = `${Date.now()}_photo.jpg`;
@@ -621,6 +660,9 @@ export default function NewSocorrista() {
 
       const { tiene_licencia_vehiculo, tiene_licencia_moto, ...restFormData } = formData;
 
+      const cleanEmergenciaTel1 = composePhoneWithCountry(emergenciaCountryCode1, restFormData.contacto_emergencia_telefono);
+      const cleanEmergenciaTel2 = composePhoneWithCountry(emergenciaCountryCode2, restFormData.contacto_emergencia_telefono_2);
+
       const insertData = {
         ...(nextId ? { id: nextId } : {}),
         ...restFormData,
@@ -628,6 +670,8 @@ export default function NewSocorrista() {
         segundo_nombre: cleanSegundoNombre,
         primer_apellido: cleanPrimerApellido,
         segundo_apellido: cleanSegundoApellido,
+        contacto_emergencia_telefono: cleanEmergenciaTel1,
+        contacto_emergencia_telefono_2: cleanEmergenciaTel2,
         cargos_secundarios: cargosSecundarios,
         licencia_vehiculo_numero: tiene_licencia_vehiculo ? restFormData.licencia_vehiculo_numero : null,
         licencia_vehiculo_clase: tiene_licencia_vehiculo ? restFormData.licencia_vehiculo_clase : null,
@@ -683,13 +727,13 @@ export default function NewSocorrista() {
         await saveSocorristaCargosSecundariosFallback(insertedRecord.id, cargosSecundarios);
       }
 
-      if (insertedRecord && (formData.contacto_emergencia_telefono || formData.contacto_emergencia_telefono_2)) {
+      if (insertedRecord && (cleanEmergenciaTel1 || cleanEmergenciaTel2)) {
         try {
           const emergenciaData = {
             contacto_emergencia_nombre: formData.contacto_emergencia_nombre || '',
-            contacto_emergencia_telefono: formData.contacto_emergencia_telefono || '',
+            contacto_emergencia_telefono: cleanEmergenciaTel1,
             contacto_emergencia_nombre_2: formData.contacto_emergencia_nombre_2 || '',
-            contacto_emergencia_telefono_2: formData.contacto_emergencia_telefono_2 || '',
+            contacto_emergencia_telefono_2: cleanEmergenciaTel2,
             created_at: new Date().toISOString()
           };
           await supabase
@@ -713,6 +757,7 @@ export default function NewSocorrista() {
         }
 
         setSuccessMessage('Elemento agregado con éxito');
+        setShowSaveConfirmModal(false);
 
         await logActivity('Creó socorrista', 'Socorrista', insertedRecord.id, {
           nombre: `${cleanPrimerNombre} ${cleanPrimerApellido}`,
@@ -727,6 +772,7 @@ export default function NewSocorrista() {
       }
     } catch (error: any) {
       console.error('ERROR CRÍTICO EN SUBMIT:', error);
+      setShowSaveConfirmModal(false);
       setFormError(error.message || 'Error al guardar el registro. Intente nuevamente.');
     } finally {
       setLoading(false);
@@ -908,9 +954,17 @@ export default function NewSocorrista() {
 
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Nombres <span className="text-red-500">*</span></label>
-                <div className="mt-1 sm:mt-0 sm:col-span-2 grid grid-cols-2 gap-4">
-                  <input type="text" name="primer_nombre" required value={formData.primer_nombre} onChange={handleChange} placeholder="PRIMER NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
-                  <input type="text" name="segundo_nombre" value={formData.segundo_nombre} onChange={handleChange} placeholder="SEGUNDO NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-2.5">
+                  <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-950 flex items-start gap-2 max-w-xl">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Importante:</strong> Los campos de nombres y apellidos deben llenarse <strong>tal cual el nombre completo aparece en el DUI o Documento de Identidad</strong> (sin abreviaturas).
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <input type="text" name="primer_nombre" required value={formData.primer_nombre} onChange={handleChange} placeholder="PRIMER NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                    <input type="text" name="segundo_nombre" value={formData.segundo_nombre} onChange={handleChange} placeholder="SEGUNDO NOMBRE" className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2 uppercase" />
+                  </div>
                 </div>
               </div>
 
@@ -1281,7 +1335,7 @@ export default function NewSocorrista() {
                     Hasta 2 números telefónicos de familiares o tutores para contacto rápido ante emergencias o validación en carnet.
                   </p>
                 </div>
-                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-4 max-w-lg">
+                <div className="mt-1 sm:mt-0 sm:col-span-2 space-y-4 max-w-xl">
                   {/* Contacto 1 */}
                   <div className="p-3 bg-red-50/40 rounded-xl border border-red-200/80 space-y-3">
                     <span className="text-xs font-bold text-red-700 uppercase tracking-wide block">Contacto de Emergencia 1 (Principal)</span>
@@ -1298,15 +1352,39 @@ export default function NewSocorrista() {
                         />
                       </div>
                       <div>
-                        <label className="block text-2xs font-medium text-gray-700 mb-1">Teléfono</label>
-                        <input
-                          type="text"
-                          name="contacto_emergencia_telefono"
-                          value={formData.contacto_emergencia_telefono}
-                          onChange={handleChange}
-                          placeholder="Ej. 7000-0000"
-                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
-                        />
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">
+                          Código de País y Teléfono
+                        </label>
+                        <div className="flex space-x-1.5">
+                          <select
+                            aria-label="Código de país contacto emergencia 1"
+                            value={emergenciaCountryCode1}
+                            onChange={(e) => {
+                              const nextCode = e.target.value;
+                              setEmergenciaCountryCode1(nextCode);
+                              setFormData(prev => ({
+                                ...prev,
+                                contacto_emergencia_telefono: formatPhoneWithMask(prev.contacto_emergencia_telefono, nextCode),
+                              }));
+                            }}
+                            className="w-24 shrink-0 shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white font-medium"
+                          >
+                            {COUNTRY_PHONE_CODES.map(c => (
+                              <option key={c.code} value={c.code}>{c.code} ({c.name})</option>
+                            ))}
+                          </select>
+                          <input
+                            type="tel"
+                            name="contacto_emergencia_telefono"
+                            value={formData.contacto_emergencia_telefono}
+                            onChange={handleChange}
+                            placeholder={getCountryMask(emergenciaCountryCode1).placeholder}
+                            className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs font-mono border-gray-300 rounded-lg p-2 border bg-white"
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-500 mt-1 block">
+                          Formato {getCountryMask(emergenciaCountryCode1).name}: {getCountryMask(emergenciaCountryCode1).placeholder}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1327,15 +1405,39 @@ export default function NewSocorrista() {
                         />
                       </div>
                       <div>
-                        <label className="block text-2xs font-medium text-gray-700 mb-1">Teléfono</label>
-                        <input
-                          type="text"
-                          name="contacto_emergencia_telefono_2"
-                          value={formData.contacto_emergencia_telefono_2}
-                          onChange={handleChange}
-                          placeholder="Ej. 7111-2222"
-                          className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white"
-                        />
+                        <label className="block text-2xs font-medium text-gray-700 mb-1">
+                          Código de País y Teléfono
+                        </label>
+                        <div className="flex space-x-1.5">
+                          <select
+                            aria-label="Código de país contacto emergencia 2"
+                            value={emergenciaCountryCode2}
+                            onChange={(e) => {
+                              const nextCode = e.target.value;
+                              setEmergenciaCountryCode2(nextCode);
+                              setFormData(prev => ({
+                                ...prev,
+                                contacto_emergencia_telefono_2: formatPhoneWithMask(prev.contacto_emergencia_telefono_2, nextCode),
+                              }));
+                            }}
+                            className="w-24 shrink-0 shadow-2xs focus:ring-primary focus:border-primary text-xs border-gray-300 rounded-lg p-2 border bg-white font-medium"
+                          >
+                            {COUNTRY_PHONE_CODES.map(c => (
+                              <option key={c.code} value={c.code}>{c.code} ({c.name})</option>
+                            ))}
+                          </select>
+                          <input
+                            type="tel"
+                            name="contacto_emergencia_telefono_2"
+                            value={formData.contacto_emergencia_telefono_2}
+                            onChange={handleChange}
+                            placeholder={getCountryMask(emergenciaCountryCode2).placeholder}
+                            className="w-full shadow-2xs focus:ring-primary focus:border-primary text-xs font-mono border-gray-300 rounded-lg p-2 border bg-white"
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-500 mt-1 block">
+                          Formato {getCountryMask(emergenciaCountryCode2).name}: {getCountryMask(emergenciaCountryCode2).placeholder}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1442,6 +1544,23 @@ export default function NewSocorrista() {
           </div>
         </form>
       </div>
+
+      <SocorristaConfirmModal
+        isOpen={showSaveConfirmModal}
+        mode="create"
+        loading={loading}
+        primerNombre={formData.primer_nombre}
+        segundoNombre={formData.segundo_nombre}
+        primerApellido={formData.primer_apellido}
+        segundoApellido={formData.segundo_apellido}
+        dui={formData.dui}
+        seccionalNombre={
+          seccionales.find((s) => String(s.id) === String(formData.seccional_id))?.nombre || ''
+        }
+        cargoInstitucional={formData.cargo_institucional}
+        onClose={() => setShowSaveConfirmModal(false)}
+        onConfirm={executeCreateSocorrista}
+      />
     </div>
   );
 }

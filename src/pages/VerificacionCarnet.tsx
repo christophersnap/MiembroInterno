@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, Loader2, Clock, Phone, PhoneCall } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { ShieldCheck, ShieldAlert, Loader2, Clock, Phone, PhoneCall, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { generateSecureQrToken } from '../utils/qrSecurity';
+import { generateSecureQrToken, isSecureQrToken } from '../utils/qrSecurity';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
+import { getApiUrl } from '../lib/api';
+import { toTelHref } from '../utils/phoneMask';
 
 export default function VerificacionCarnet() {
   const { carnetId } = useParams<{ carnetId: string }>();
@@ -61,39 +63,70 @@ export default function VerificacionCarnet() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const { data: { publicUrl } } = supabase.storage
-          .from('socorristas')
-          .getPublicUrl('public_config.json');
+        let confObj: any = {};
+        let foundFields: Record<string, boolean> | null = null;
 
-        try {
-          const res = await fetch(`${publicUrl}?t=${Date.now()}`);
-          if (res.ok) {
-            const data = await res.json();
-            setConfig(data);
-            if (data.verificacion_fields) {
-              setAllowedFields(prev => ({ ...prev, ...data.verificacion_fields }));
-            }
-            return;
-          }
-        } catch (e) {
-          console.warn('Could not fetch public_config.json', e);
-        }
-
+        // 1. Fuente principal autoritativa: tabla configuracion en Supabase (lectura pública)
         const { data, error: confErr } = await supabase.from('configuracion').select('*');
-        if (confErr) throw confErr;
-        if (data) {
-          const confObj: any = {};
-          data.forEach(item => {
+        if (!confErr && data) {
+          data.forEach((item: any) => {
             if (item.clave === 'verificacion_titulo') confObj.verificacion_titulo = item.valor;
             if (item.clave === 'verificacion_mensaje') confObj.verificacion_mensaje = item.valor;
             if (item.clave === 'logos' && item.valor) {
               try { confObj.logos = JSON.parse(item.valor); } catch (e) {}
             }
-            if (item.clave === 'verificacion_fields' && item.valor) {
-              try { setAllowedFields(prev => ({ ...prev, ...JSON.parse(item.valor) })); } catch (e) {}
+            if (item.clave === 'verificacion_fields') {
+              let parsed: any = null;
+              if (item.valor) {
+                try { parsed = typeof item.valor === 'string' ? JSON.parse(item.valor) : item.valor; } catch (e) {}
+              }
+              if (!parsed && item.verificacion_fields && typeof item.verificacion_fields === 'object') {
+                parsed = item.verificacion_fields;
+              }
+              if (parsed && typeof parsed === 'object') {
+                foundFields = parsed;
+              }
             }
           });
-          setConfig(confObj);
+        }
+
+        // 2. Respaldo desde API local SQLite si faltan campos
+        if (!foundFields) {
+          try {
+            const apiRes = await fetch(getApiUrl('/api/configuracion'));
+            if (apiRes.ok) {
+              const apiJson = await apiRes.json();
+              if (apiJson.verificacion_titulo && !confObj.verificacion_titulo) confObj.verificacion_titulo = apiJson.verificacion_titulo;
+              if (apiJson.verificacion_mensaje && !confObj.verificacion_mensaje) confObj.verificacion_mensaje = apiJson.verificacion_mensaje;
+              if (apiJson.verificacion_fields) {
+                foundFields = typeof apiJson.verificacion_fields === 'string'
+                  ? JSON.parse(apiJson.verificacion_fields)
+                  : apiJson.verificacion_fields;
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 3. Último respaldo: public_config.json en Storage (solo para completar lo que falte)
+        if (!foundFields || !confObj.logos) {
+          try {
+            const { data: { publicUrl } } = supabase.storage
+              .from('socorristas')
+              .getPublicUrl('public_config.json');
+            const res = await fetch(`${publicUrl}?t=${Date.now()}`);
+            if (res.ok) {
+              const pubData = await res.json();
+              if (!confObj.verificacion_titulo && pubData.verificacion_titulo) confObj.verificacion_titulo = pubData.verificacion_titulo;
+              if (!confObj.verificacion_mensaje && pubData.verificacion_mensaje) confObj.verificacion_mensaje = pubData.verificacion_mensaje;
+              if (!confObj.logos && pubData.logos) confObj.logos = pubData.logos;
+              if (!foundFields && pubData.verificacion_fields) foundFields = pubData.verificacion_fields;
+            }
+          } catch (e) {}
+        }
+
+        setConfig(confObj);
+        if (foundFields) {
+          setAllowedFields(prev => ({ ...prev, ...foundFields }));
         }
       } catch (err) {
         console.error('Error loading config from Supabase', err);
@@ -108,27 +141,28 @@ export default function VerificacionCarnet() {
     const fetchSocorrista = async () => {
       try {
         const cleanParam = (carnetId || '').trim();
-        let targetCarnet = cleanParam;
+        let targetCarnet = '';
 
-        // Si es un token criptográfico no secuencial de 16 caracteres hex del QR
-        if (/^[0-9a-fA-F]{16}$/.test(cleanParam)) {
-          const { data: allSocs, error: socListErr } = await supabase
-            .from('socorristas')
-            .select('id, carnet');
+        // Seguridad estricta: únicamente se permite consultar mediante token criptográfico no secuencial (16 hex)
+        if (!isSecureQrToken(cleanParam)) {
+          throw new Error('Por seguridad institucional, no se permite consultar carnets directamente mediante el código en la URL. Utiliza el código QR oficial o el verificador de credenciales.');
+        }
 
-          if (!socListErr && allSocs && allSocs.length > 0) {
-            const matched = allSocs.find(s => 
-              generateSecureQrToken(s.carnet, s.id).toLowerCase() === cleanParam.toLowerCase()
-            );
-            if (matched) {
-              targetCarnet = matched.carnet;
-            } else {
-              throw new Error('Código QR de verificación no válido o expirado.');
-            }
-          }
+        const { data: allSocs, error: socListErr } = await supabase
+          .from('socorristas')
+          .select('id, carnet');
+
+        if (socListErr) {
+          throw new Error('No se pudo validar el token de verificación.');
+        }
+
+        const matched = (allSocs || []).find(s =>
+          generateSecureQrToken(s.carnet, s.id).toLowerCase() === cleanParam.toLowerCase()
+        );
+        if (matched && matched.carnet) {
+          targetCarnet = matched.carnet;
         } else {
-          // Consulta directa por código de carnet institucional
-          targetCarnet = cleanParam;
+          throw new Error('Código QR de verificación no válido o expirado.');
         }
 
         const { data, error: fetchErr } = await supabase
@@ -285,10 +319,18 @@ export default function VerificacionCarnet() {
   if (error || !socorrista) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
-          <ShieldAlert className="h-20 w-20 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Verificación Fallida</h1>
-          <p className="text-gray-600">{error || 'El carnet escaneado no existe en nuestros registros.'}</p>
+        <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md w-full text-center space-y-4">
+          <ShieldAlert className="h-20 w-20 text-red-500 mx-auto" />
+          <h1 className="text-2xl font-bold text-gray-900">Verificación Fallida</h1>
+          <p className="text-sm text-gray-600 leading-relaxed">{error || 'El carnet escaneado no existe en nuestros registros.'}</p>
+          <div className="pt-2">
+            <Link
+              to="/verificar"
+              className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold transition"
+            >
+              Ir al Verificador de Credenciales
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -426,7 +468,7 @@ export default function VerificacionCarnet() {
                           </span>
                         </div>
                         <a
-                          href={`tel:${socorrista.contacto_emergencia_telefono}`}
+                          href={toTelHref(socorrista.contacto_emergencia_telefono)}
                           className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all shadow-xs shrink-0"
                         >
                           <Phone className="w-3.5 h-3.5 mr-1.5" />
@@ -443,7 +485,7 @@ export default function VerificacionCarnet() {
                           </span>
                         </div>
                         <a
-                          href={`tel:${socorrista.contacto_emergencia_telefono_2}`}
+                          href={toTelHref(socorrista.contacto_emergencia_telefono_2)}
                           className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all shadow-xs shrink-0"
                         >
                           <Phone className="w-3.5 h-3.5 mr-1.5" />
@@ -505,15 +547,25 @@ export default function VerificacionCarnet() {
                 </div>
               )}
               {allowedFields.estado !== false && (
-                <div className="py-3 flex justify-between">
-                  <dt className="text-sm font-medium text-gray-500">Estado</dt>
-                  <dd className="text-sm">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      socorrista.estado === 'Activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {socorrista.estado}
-                    </span>
-                  </dd>
+                <div className="py-3 space-y-2">
+                  <div className="flex justify-between items-center gap-3">
+                    <dt className="text-sm font-medium text-gray-500 shrink-0">Estado</dt>
+                    <dd className="text-sm flex items-center flex-wrap justify-end gap-2">
+                      <span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        socorrista.estado === 'Activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {socorrista.estado}
+                      </span>
+                    </dd>
+                  </div>
+                  {socorrista.estado !== 'Activo' && (
+                    <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <span>
+                        Consulte con su director de seccional sobre su última asistencia o para reactivar
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </dl>

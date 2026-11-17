@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShieldCheck, IdCard, ArrowLeft, ArrowRight, QrCode, AlertCircle, Search, Camera, X, Upload } from 'lucide-react';
+import { ShieldCheck, IdCard, ArrowLeft, ArrowRight, QrCode, AlertCircle, Search, Camera, X, Upload, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { supabase } from '../lib/supabase';
+import { generateSecureQrToken, isSecureQrToken } from '../utils/qrSecurity';
 
 export default function VerificarCodigo() {
   const { user } = useAuth();
@@ -11,6 +13,7 @@ export default function VerificarCodigo() {
 
   const [carnet, setCarnet] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [searching, setSearching] = useState(false);
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -33,30 +36,60 @@ export default function VerificarCodigo() {
     setCarnet(formatted);
   };
 
-  const handleVerifyCarnet = (e: React.FormEvent) => {
+  const resolveCarnetToTokenAndNavigate = async (rawCarnet: string) => {
+    const cleanCarnet = rawCarnet.trim().toUpperCase();
+    setSearching(true);
+    setErrorMsg('');
+    try {
+      const { data, error } = await supabase
+        .from('socorristas')
+        .select('id, carnet')
+        .ilike('carnet', cleanCarnet)
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data || !data.carnet) {
+        setErrorMsg('No se encontró ninguna credencial registrada con el código ingresado.');
+        return;
+      }
+
+      const secureToken = generateSecureQrToken(data.carnet, data.id);
+      navigate(`/v/${secureToken}`);
+    } catch (err) {
+      setErrorMsg('No se pudo verificar el carnet en este momento. Intenta de nuevo.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleVerifyCarnet = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCarnet = carnet.trim();
+    const cleanCarnet = carnet.trim().toUpperCase();
     if (cleanCarnet.length < 5) {
       setErrorMsg('Ingresa el código oficial de carnet (ejemplo: CVS-1024-SV)');
       return;
     }
-    navigate(`/v/${encodeURIComponent(cleanCarnet)}`);
+    await resolveCarnetToTokenAndNavigate(cleanCarnet);
   };
 
-  // Extraer el carnet o token a partir del contenido escaneado
-  const processQrResult = (qrText: string) => {
+  // Extraer token seguro a partir del contenido escaneado (sin exponer código de carnet en la URL)
+  const processQrResult = async (qrText: string) => {
     if (!qrText) return;
     let code = qrText.trim();
-    // Si viene en formato URL (ej: https://.../v/CVS-1024-SV o /verificar/CVS-1024-SV)
     if (code.includes('/v/')) {
       code = code.split('/v/').pop() || code;
     } else if (code.includes('/verificar/')) {
       code = code.split('/verificar/').pop() || code;
     }
-    code = code.split('?')[0].split('#')[0].trim();
-    
+    code = decodeURIComponent(code.split('?')[0].split('#')[0].trim());
+
     closeScanner();
-    navigate(`/v/${encodeURIComponent(code)}`);
+    if (isSecureQrToken(code)) {
+      navigate(`/v/${code.toLowerCase()}`);
+      return;
+    }
+
+    await resolveCarnetToTokenAndNavigate(code);
   };
 
   // Iniciar cámara al abrir modal de scanner
@@ -139,15 +172,15 @@ export default function VerificarCodigo() {
         await img.decode();
         const barcodes = await barcodeDetector.detect(img);
         if (barcodes.length > 0 && barcodes[0].rawValue) {
-          processQrResult(barcodes[0].rawValue);
+          await processQrResult(barcodes[0].rawValue);
           return;
         }
-        alert('No se detectó un código QR legible en la imagen subida.');
+        setCameraError('No se detectó un código QR legible en la imagen subida.');
       } catch (err) {
-        alert('No se pudo leer el código QR de la imagen.');
+        setCameraError('No se pudo leer el código QR de la imagen.');
       }
     } else {
-      alert('Para procesar imágenes de QR, use un navegador compatible con cámara o ingrese el código del carnet.');
+      setCameraError('Para procesar imágenes de QR, use un navegador compatible con cámara o ingrese el código del carnet.');
     }
   };
 
@@ -261,11 +294,21 @@ export default function VerificarCodigo() {
 
               <button
                 type="submit"
-                className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-600 transition cursor-pointer"
+                disabled={searching}
+                className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-600 transition cursor-pointer disabled:opacity-60"
               >
-                <Search className="w-4 h-4 mr-2" />
-                <span>Consultar Credencial Oficial</span>
-                <ArrowRight className="w-4 h-4 ml-2" />
+                {searching ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <span>Validando credencial...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-4 h-4 mr-2" />
+                    <span>Consultar Credencial Oficial</span>
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </>
+                )}
               </button>
 
               <div className="pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">

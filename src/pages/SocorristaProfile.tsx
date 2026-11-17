@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle, AlertTriangle, Lock } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
@@ -11,11 +11,20 @@ import DateInput from '../components/DateInput';
 import DocumentosSocorristaCard from '../components/socorristas/DocumentosSocorristaCard';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 import CargosSelector from '../components/socorristas/CargosSelector';
+import SocorristaConfirmModal from '../components/socorristas/SocorristaConfirmModal';
 import {
   normalizeDocumentForCompare,
   parseCargosSecundarios,
   saveSocorristaCargosSecundariosFallback,
 } from '../utils/cargosCatalog';
+import {
+  COUNTRY_PHONE_CODES,
+  composePhoneWithCountry,
+  formatPhoneWithMask,
+  getCountryMask,
+  parsePhoneWithCountry,
+  toTelHref,
+} from '../utils/phoneMask';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
@@ -26,6 +35,7 @@ export default function SocorristaProfile() {
   const [meritosList, setMeritosList] = useState<any[]>([]);
   const [loadingMeritos, setLoadingMeritos] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
 
   const downloadImageWithWatermark = async (format: 'png' | 'jpeg') => {
     if (!carnetGeneradoUrl) return;
@@ -93,6 +103,8 @@ export default function SocorristaProfile() {
   const [seccionales, setSeccionales] = useState<any[]>([]);
   const [editForm, setEditForm] = useState<any>({});
   const [countryCode, setCountryCode] = useState('+503');
+  const [emergenciaCountryCode1, setEmergenciaCountryCode1] = useState('+503');
+  const [emergenciaCountryCode2, setEmergenciaCountryCode2] = useState('+503');
   const [fotoFile, setFotoFile] = useState<File | null>(null);
 
   const countries = [
@@ -155,8 +167,15 @@ export default function SocorristaProfile() {
     }
 
     if (name === 'telefono') {
-      const currentCountry = countries.find(c => c.code === countryCode) || countries[0];
-      value = formatPhone(value, currentCountry.mask);
+      value = formatPhoneWithMask(value, countryCode);
+    }
+
+    if (name === 'contacto_emergencia_telefono') {
+      value = formatPhoneWithMask(value, emergenciaCountryCode1);
+    }
+
+    if (name === 'contacto_emergencia_telefono_2') {
+      value = formatPhoneWithMask(value, emergenciaCountryCode2);
     }
 
     setFormError(null);
@@ -286,9 +305,16 @@ export default function SocorristaProfile() {
         }))
       };
 
+      const parsedEm1 = parsePhoneWithCountry(contactoTelefono);
+      const parsedEm2 = parsePhoneWithCountry(contactoTelefono2);
+      setEmergenciaCountryCode1(parsedEm1.countryCode);
+      setEmergenciaCountryCode2(parsedEm2.countryCode);
+
       setSocorrista(formattedSocorrista);
       setEditForm({
         ...formattedSocorrista,
+        contacto_emergencia_telefono: parsedEm1.localNumber,
+        contacto_emergencia_telefono_2: parsedEm2.localNumber,
         tiene_licencia_vehiculo: !!formattedSocorrista.licencia_vehiculo_numero,
         tiene_licencia_moto: !!formattedSocorrista.licencia_moto_numero
       });
@@ -478,6 +504,14 @@ export default function SocorristaProfile() {
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canAccessSeccionalSocorristas(socorrista?.seccional_id, 'edit')) {
+      setFormError('No tienes permiso de edición sobre los elementos de esta seccional (Acceso solo lectura).');
+      return;
+    }
+    if (!editForm.primer_nombre?.trim() || !editForm.primer_apellido?.trim()) {
+      setFormError('El Primer Nombre y Primer Apellido son obligatorios.');
+      return;
+    }
     setFormError(null);
     setLoading(true);
 
@@ -565,6 +599,21 @@ export default function SocorristaProfile() {
         }
       }
 
+      // Validación aprobada: abrir modal de verificación de seguridad antes de guardar
+      setLoading(false);
+      setShowSaveConfirmModal(true);
+    } catch (error: any) {
+      console.error('Error en validación previa de edición:', error);
+      setFormError('Error al validar los datos: ' + (error.message || 'Error desconocido'));
+      setLoading(false);
+    }
+  };
+
+  const executeEditSave = async () => {
+    setFormError(null);
+    setLoading(true);
+    try {
+      const targetSeccionalId = parseInt(editForm.seccional_id, 10);
       let foto_url = editForm.foto_url;
       if (fotoFile) {
         const fileExt = fotoFile.name.split('.').pop();
@@ -589,6 +638,9 @@ export default function SocorristaProfile() {
       const cleanPrimerApellido = (editForm.primer_apellido || '').trim().toUpperCase();
       const cleanSegundoApellido = (editForm.segundo_apellido || '').trim().toUpperCase();
       const cleanCargosSecundarios = Array.isArray(editForm.cargos_secundarios) ? editForm.cargos_secundarios : [];
+
+      const composedEm1 = composePhoneWithCountry(emergenciaCountryCode1, editForm.contacto_emergencia_telefono);
+      const composedEm2 = composePhoneWithCountry(emergenciaCountryCode2, editForm.contacto_emergencia_telefono_2);
 
       const updatePayload: any = {
         primer_nombre: cleanPrimerNombre,
@@ -616,9 +668,9 @@ export default function SocorristaProfile() {
         licencia_moto_numero: editForm.tiene_licencia_moto ? editForm.licencia_moto_numero : null,
         licencia_moto_vencimiento: (editForm.tiene_licencia_moto && editForm.licencia_moto_vencimiento) ? editForm.licencia_moto_vencimiento : null,
         contacto_emergencia_nombre: editForm.contacto_emergencia_nombre || null,
-        contacto_emergencia_telefono: editForm.contacto_emergencia_telefono || null,
+        contacto_emergencia_telefono: composedEm1 || null,
         contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || null,
-        contacto_emergencia_telefono_2: editForm.contacto_emergencia_telefono_2 || null
+        contacto_emergencia_telefono_2: composedEm2 || null
       };
 
       if (id) {
@@ -629,9 +681,9 @@ export default function SocorristaProfile() {
       try {
         const emergenciaData = {
           contacto_emergencia_nombre: editForm.contacto_emergencia_nombre || '',
-          contacto_emergencia_telefono: editForm.contacto_emergencia_telefono || '',
+          contacto_emergencia_telefono: composedEm1 || '',
           contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || '',
-          contacto_emergencia_telefono_2: editForm.contacto_emergencia_telefono_2 || '',
+          contacto_emergencia_telefono_2: composedEm2 || '',
           updated_at: new Date().toISOString()
         };
         const { data: existingConf } = await supabase
@@ -727,10 +779,12 @@ export default function SocorristaProfile() {
         mensaje: 'Se actualizaron los datos del socorrista'
       });
 
+      setShowSaveConfirmModal(false);
       setIsEditing(false);
       fetchProfile();
     } catch (error: any) {
       console.error(error);
+      setShowSaveConfirmModal(false);
       setFormError('Error al actualizar el perfil: ' + (error.message || 'Error desconocido'));
     } finally {
       setLoading(false);
@@ -840,7 +894,30 @@ export default function SocorristaProfile() {
     return new Date(fecha_vencimiento) >= new Date();
   };
 
+  const canViewThisSocorrista = canAccessSeccionalSocorristas(socorrista?.seccional_id, 'view');
   const canEditThisSocorrista = canAccessSeccionalSocorristas(socorrista?.seccional_id, 'edit');
+
+  if (!canViewThisSocorrista) {
+    return (
+      <div className="max-w-xl mx-auto mt-10 bg-white rounded-2xl border border-rose-200 shadow-sm p-8 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+          <Lock className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900">Sin permisos para ver este perfil</h2>
+        <p className="text-sm text-slate-600">
+          No cuentas con permiso de visualización para la seccional a la que pertenece este elemento.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/socorristas')}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Volver al listado de Personal
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -866,8 +943,18 @@ export default function SocorristaProfile() {
             <>
               <button 
                 onClick={() => {
+                  const p1 = parsePhoneWithCountry(socorrista?.contacto_emergencia_telefono);
+                  const p2 = parsePhoneWithCountry(socorrista?.contacto_emergencia_telefono_2);
+                  setEmergenciaCountryCode1(p1.countryCode);
+                  setEmergenciaCountryCode2(p2.countryCode);
                   setIsEditing(false);
-                  setEditForm(socorrista);
+                  setEditForm({
+                    ...socorrista,
+                    contacto_emergencia_telefono: p1.localNumber,
+                    contacto_emergencia_telefono_2: p2.localNumber,
+                    tiene_licencia_vehiculo: !!socorrista?.licencia_vehiculo_numero,
+                    tiene_licencia_moto: !!socorrista?.licencia_moto_numero,
+                  });
                   setFotoFile(null);
                 }}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
@@ -941,6 +1028,12 @@ export default function SocorristaProfile() {
                 <div>
                   <h3 className="text-lg leading-6 font-medium text-gray-900">Editar Información Personal</h3>
                   <p className="mt-1 text-sm text-gray-500">Actualice la información del socorrista.</p>
+                  <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Importante:</strong> Los nombres y apellidos deben llenarse <strong>tal cual el nombre completo aparece en el DUI o Documento de Identidad</strong> (sin abreviaturas).
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
@@ -1197,15 +1290,37 @@ export default function SocorristaProfile() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Teléfono de Emergencia</label>
-                          <input 
-                            type="text" 
-                            name="contacto_emergencia_telefono"
-                            value={editForm.contacto_emergencia_telefono || ''} 
-                            onChange={handleEditChange}
-                            placeholder="Ej. 7000-0000 o +503 7000-0000"
-                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
-                          />
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Código de País y Teléfono</label>
+                          <div className="flex space-x-1.5">
+                            <select
+                              aria-label="Código de país contacto emergencia 1"
+                              value={emergenciaCountryCode1}
+                              onChange={(e) => {
+                                const nextCode = e.target.value;
+                                setEmergenciaCountryCode1(nextCode);
+                                setEditForm((prev: any) => ({
+                                  ...prev,
+                                  contacto_emergencia_telefono: formatPhoneWithMask(prev.contacto_emergencia_telefono || '', nextCode),
+                                }));
+                              }}
+                              className="w-24 shrink-0 shadow-sm focus:ring-primary focus:border-primary sm:text-xs border-gray-300 rounded-md p-2 border bg-white font-medium"
+                            >
+                              {COUNTRY_PHONE_CODES.map(c => (
+                                <option key={c.code} value={c.code}>{c.code} ({c.name})</option>
+                              ))}
+                            </select>
+                            <input 
+                              type="tel" 
+                              name="contacto_emergencia_telefono"
+                              value={editForm.contacto_emergencia_telefono || ''} 
+                              onChange={handleEditChange}
+                              placeholder={getCountryMask(emergenciaCountryCode1).placeholder}
+                              className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs font-mono border-gray-300 rounded-md p-2 border"
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-500 mt-1 block">
+                            Formato {getCountryMask(emergenciaCountryCode1).name}: {getCountryMask(emergenciaCountryCode1).placeholder}
+                          </span>
                         </div>
                       </div>
 
@@ -1224,15 +1339,37 @@ export default function SocorristaProfile() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Teléfono de Emergencia</label>
-                          <input 
-                            type="text" 
-                            name="contacto_emergencia_telefono_2"
-                            value={editForm.contacto_emergencia_telefono_2 || ''} 
-                            onChange={handleEditChange}
-                            placeholder="Ej. 7111-2222 o +503 7111-2222"
-                            className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs border-gray-300 rounded-md p-2 border"
-                          />
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Código de País y Teléfono</label>
+                          <div className="flex space-x-1.5">
+                            <select
+                              aria-label="Código de país contacto emergencia 2"
+                              value={emergenciaCountryCode2}
+                              onChange={(e) => {
+                                const nextCode = e.target.value;
+                                setEmergenciaCountryCode2(nextCode);
+                                setEditForm((prev: any) => ({
+                                  ...prev,
+                                  contacto_emergencia_telefono_2: formatPhoneWithMask(prev.contacto_emergencia_telefono_2 || '', nextCode),
+                                }));
+                              }}
+                              className="w-24 shrink-0 shadow-sm focus:ring-primary focus:border-primary sm:text-xs border-gray-300 rounded-md p-2 border bg-white font-medium"
+                            >
+                              {COUNTRY_PHONE_CODES.map(c => (
+                                <option key={c.code} value={c.code}>{c.code} ({c.name})</option>
+                              ))}
+                            </select>
+                            <input 
+                              type="tel" 
+                              name="contacto_emergencia_telefono_2"
+                              value={editForm.contacto_emergencia_telefono_2 || ''} 
+                              onChange={handleEditChange}
+                              placeholder={getCountryMask(emergenciaCountryCode2).placeholder}
+                              className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-xs font-mono border-gray-300 rounded-md p-2 border"
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-500 mt-1 block">
+                            Formato {getCountryMask(emergenciaCountryCode2).name}: {getCountryMask(emergenciaCountryCode2).placeholder}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1513,7 +1650,7 @@ export default function SocorristaProfile() {
                           <div className="flex-1 min-w-0">
                             <span className="font-semibold text-gray-900 block text-xs truncate">{socorrista.contacto_emergencia_nombre || 'Contacto Principal'}</span>
                             <a 
-                              href={`tel:${socorrista.contacto_emergencia_telefono}`}
+                              href={toTelHref(socorrista.contacto_emergencia_telefono)}
                               className="text-emerald-700 hover:text-emerald-900 font-mono font-medium inline-flex items-center text-xs mt-0.5"
                             >
                               <Phone className="w-3 h-3 mr-1 text-emerald-600 shrink-0" />
@@ -1528,7 +1665,7 @@ export default function SocorristaProfile() {
                           <div className="flex-1 min-w-0">
                             <span className="font-semibold text-gray-900 block text-xs truncate">{socorrista.contacto_emergencia_nombre_2 || 'Contacto Secundario'}</span>
                             <a 
-                              href={`tel:${socorrista.contacto_emergencia_telefono_2}`}
+                              href={toTelHref(socorrista.contacto_emergencia_telefono_2)}
                               className="text-emerald-700 hover:text-emerald-900 font-mono font-medium inline-flex items-center text-xs mt-0.5"
                             >
                               <Phone className="w-3 h-3 mr-1 text-emerald-600 shrink-0" />
@@ -1621,7 +1758,7 @@ export default function SocorristaProfile() {
       <div className="bg-white shadow sm:rounded-lg">
         <div className="px-4 py-5 sm:px-6 flex justify-between items-center border-b border-gray-200">
           <h3 className="text-lg leading-6 font-medium text-gray-900">Cursos y Certificaciones</h3>
-          {role !== 'socorrista' && (
+          {role !== 'socorrista' && canEditThisSocorrista && (
             <button 
               onClick={() => setShowAddCurso(!showAddCurso)}
               className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
@@ -1807,6 +1944,25 @@ export default function SocorristaProfile() {
       <DocumentosSocorristaCard 
         socorristaId={Number(id)} 
         socorristaNombre={`${socorrista.primer_nombre} ${socorrista.primer_apellido}`} 
+      />
+
+      <SocorristaConfirmModal
+        isOpen={showSaveConfirmModal}
+        mode="edit"
+        loading={loading}
+        primerNombre={editForm.primer_nombre || ''}
+        segundoNombre={editForm.segundo_nombre || ''}
+        primerApellido={editForm.primer_apellido || ''}
+        segundoApellido={editForm.segundo_apellido || ''}
+        dui={editForm.dui || ''}
+        seccionalNombre={
+          seccionales.find((s) => String(s.id) === String(editForm.seccional_id))?.nombre ||
+          socorrista?.seccional_nombre ||
+          ''
+        }
+        cargoInstitucional={editForm.cargo_institucional || ''}
+        onClose={() => setShowSaveConfirmModal(false)}
+        onConfirm={executeEditSave}
       />
 
     </div>

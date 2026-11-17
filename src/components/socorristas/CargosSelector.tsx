@@ -35,7 +35,6 @@ export default function CargosSelector({
   const initial = getCachedCargosCatalog();
   const [institucionales, setInstitucionales] = useState<string[]>(initial.institucionales || DEFAULT_CARGOS_INSTITUCIONALES);
   const [administrativos, setAdministrativos] = useState<string[]>(initial.administrativos || DEFAULT_CARGOS_ADMINISTRATIVOS);
-  const [customSecondaryInput, setCustomSecondaryInput] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -176,7 +175,7 @@ export default function CargosSelector({
       {/* Quick add from catalog */}
       {!disabledAll && (
         <div className="space-y-2">
-          {availableSecondaryOptions.length > 0 && (
+          {availableSecondaryOptions.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {availableSecondaryOptions.map((opt) => (
                 <button
@@ -190,34 +189,14 @@ export default function CargosSelector({
                 </button>
               ))}
             </div>
+          ) : (
+            <p className="text-[11px] text-slate-500 italic">
+              Todas las especialidades del catálogo ya han sido agregadas.
+            </p>
           )}
-
-          <div className="flex gap-2 max-w-sm">
-            <input
-              type="text"
-              value={customSecondaryInput}
-              onChange={(e) => setCustomSecondaryInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddSecondary(customSecondaryInput);
-                  setCustomSecondaryInput('');
-                }
-              }}
-              placeholder="Otra especialidad / cargo secundario..."
-              className="flex-1 px-2.5 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-primary focus:border-primary outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                handleAddSecondary(customSecondaryInput);
-                setCustomSecondaryInput('');
-              }}
-              className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold cursor-pointer"
-            >
-              Añadir
-            </button>
-          </div>
+          <p className="text-[11px] text-slate-500">
+            Las especialidades y cargos se administran únicamente desde <strong>Configuración &gt; Cargos y Rangos</strong>.
+          </p>
         </div>
       )}
 

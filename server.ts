@@ -248,8 +248,10 @@ db.exec(`
     subtitulo TEXT,
     categoria TEXT DEFAULT 'Noticia',
     imagen_url TEXT NOT NULL,
+    imagen_banner_url TEXT,
     contenido_html TEXT DEFAULT '',
     videos TEXT DEFAULT '[]',
+    archivos_adjuntos TEXT DEFAULT '[]',
     accion_click TEXT DEFAULT 'landing',
     enlace_redireccion TEXT,
     enlace_texto TEXT DEFAULT 'Más información',
@@ -261,6 +263,9 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+try { db.exec(`ALTER TABLE noticias_banner ADD COLUMN imagen_banner_url TEXT;`); } catch {}
+try { db.exec(`ALTER TABLE noticias_banner ADD COLUMN archivos_adjuntos TEXT DEFAULT '[]';`); } catch {}
 
 try {
   const formCount = db.prepare('SELECT COUNT(*) as c FROM formularios').get() as any;
@@ -957,6 +962,9 @@ async function startServer() {
         activo: Boolean(r.activo),
         videos: (() => {
           try { return JSON.parse(r.videos || '[]'); } catch { return []; }
+        })(),
+        archivos_adjuntos: (() => {
+          try { return JSON.parse(r.archivos_adjuntos || '[]'); } catch { return []; }
         })()
       }));
       res.json(rows);
@@ -974,6 +982,9 @@ async function startServer() {
         activo: Boolean(row.activo),
         videos: (() => {
           try { return JSON.parse(row.videos || '[]'); } catch { return []; }
+        })(),
+        archivos_adjuntos: (() => {
+          try { return JSON.parse(row.archivos_adjuntos || '[]'); } catch { return []; }
         })()
       });
     } catch (error: any) {
@@ -989,8 +1000,10 @@ async function startServer() {
         subtitulo = null,
         categoria = 'Noticia',
         imagen_url,
+        imagen_banner_url = null,
         contenido_html = '',
         videos = [],
+        archivos_adjuntos = [],
         accion_click = 'landing',
         enlace_redireccion = null,
         enlace_texto = 'Más información',
@@ -1006,17 +1019,19 @@ async function startServer() {
 
       db.prepare(`
         INSERT INTO noticias_banner (
-          id, titulo, subtitulo, categoria, imagen_url, contenido_html, videos,
-          accion_click, enlace_redireccion, enlace_texto, activo, orden, autor_id, autor_nombre
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, titulo, subtitulo, categoria, imagen_url, imagen_banner_url, contenido_html, videos,
+          archivos_adjuntos, accion_click, enlace_redireccion, enlace_texto, activo, orden, autor_id, autor_nombre
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         titulo,
         subtitulo,
         categoria,
         imagen_url,
+        imagen_banner_url,
         contenido_html,
         JSON.stringify(Array.isArray(videos) ? videos : []),
+        JSON.stringify(Array.isArray(archivos_adjuntos) ? archivos_adjuntos : []),
         accion_click === 'url' ? 'url' : 'landing',
         enlace_redireccion,
         enlace_texto,
@@ -1030,7 +1045,8 @@ async function startServer() {
       res.json({
         ...created,
         activo: Boolean(created.activo),
-        videos: (() => { try { return JSON.parse(created.videos || '[]'); } catch { return []; } })()
+        videos: (() => { try { return JSON.parse(created.videos || '[]'); } catch { return []; } })(),
+        archivos_adjuntos: (() => { try { return JSON.parse(created.archivos_adjuntos || '[]'); } catch { return []; } })()
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1047,8 +1063,10 @@ async function startServer() {
         subtitulo,
         categoria,
         imagen_url,
+        imagen_banner_url,
         contenido_html,
         videos,
+        archivos_adjuntos,
         accion_click,
         enlace_redireccion,
         enlace_texto,
@@ -1062,8 +1080,10 @@ async function startServer() {
           subtitulo = ?,
           categoria = COALESCE(?, categoria),
           imagen_url = COALESCE(?, imagen_url),
+          imagen_banner_url = ?,
           contenido_html = COALESCE(?, contenido_html),
           videos = COALESCE(?, videos),
+          archivos_adjuntos = COALESCE(?, archivos_adjuntos),
           accion_click = COALESCE(?, accion_click),
           enlace_redireccion = ?,
           enlace_texto = COALESCE(?, enlace_texto),
@@ -1076,8 +1096,10 @@ async function startServer() {
         subtitulo !== undefined ? subtitulo : current.subtitulo,
         categoria !== undefined ? categoria : null,
         imagen_url !== undefined ? imagen_url : null,
+        imagen_banner_url !== undefined ? imagen_banner_url : current.imagen_banner_url,
         contenido_html !== undefined ? contenido_html : null,
         videos !== undefined ? JSON.stringify(Array.isArray(videos) ? videos : []) : null,
+        archivos_adjuntos !== undefined ? JSON.stringify(Array.isArray(archivos_adjuntos) ? archivos_adjuntos : []) : null,
         accion_click !== undefined ? accion_click : null,
         enlace_redireccion !== undefined ? enlace_redireccion : current.enlace_redireccion,
         enlace_texto !== undefined ? enlace_texto : null,
@@ -1090,7 +1112,8 @@ async function startServer() {
       res.json({
         ...updated,
         activo: Boolean(updated.activo),
-        videos: (() => { try { return JSON.parse(updated.videos || '[]'); } catch { return []; } })()
+        videos: (() => { try { return JSON.parse(updated.videos || '[]'); } catch { return []; } })(),
+        archivos_adjuntos: (() => { try { return JSON.parse(updated.archivos_adjuntos || '[]'); } catch { return []; } })()
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1354,9 +1377,9 @@ async function startServer() {
     }
   });
 
-  app.put('/api/configuracion', (req, res) => {
+  const handleUpsertConfiguracion = (req: any, res: any) => {
     try {
-      const config = req.body;
+      const config = req.body || {};
       const stmt = db.prepare('INSERT OR REPLACE INTO configuracion (id, clave, valor) VALUES ((SELECT id FROM configuracion WHERE clave = ?), ?, ?)');
       
       const transaction = db.transaction((conf) => {
@@ -1365,7 +1388,8 @@ async function startServer() {
           if (clave === 'smtp_pass' && (valor === '••••••••' || !valor)) {
             continue;
           }
-          stmt.run(clave, clave, String(valor));
+          const serialized = (valor !== null && typeof valor === 'object') ? JSON.stringify(valor) : String(valor ?? '');
+          stmt.run(clave, clave, serialized);
         }
       });
       
@@ -1374,7 +1398,10 @@ async function startServer() {
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
-  });
+  };
+
+  app.put('/api/configuracion', handleUpsertConfiguracion);
+  app.post('/api/configuracion', handleUpsertConfiguracion);
 
   // --- API: Solicitudes de Registro (Garantiza captura sin fallar por RLS de Supabase) ---
   app.get('/api/solicitudes-registro', (req, res) => {

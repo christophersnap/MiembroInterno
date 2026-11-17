@@ -711,6 +711,7 @@ export default function SolicitudCarnetLote() {
                     const req = requestsMap[s.id];
                     const blocked = Boolean(req && isBlockingCarnetState(req.estado_solicitud));
                     const observed = req?.estado_solicitud === 'Observada';
+                    const rejected = req?.estado_solicitud === 'Rechazada';
                     const staged = stagedPhotos[s.id];
                     const effectivePhoto = staged?.previewUrl || s.foto_url || null;
                     const hasPhoto = Boolean(effectivePhoto);
@@ -861,20 +862,42 @@ export default function SolicitudCarnetLote() {
                                 Bloqueado: debe esperar hasta que la solicitud sea completada/finalizada o reciba una observación.
                               </p>
                             </div>
-                          ) : observed && req ? (
-                            <div className="p-2.5 rounded-xl bg-orange-50 border border-orange-200 space-y-1 max-w-sm">
+                          ) : (observed || rejected) && req ? (
+                            <div
+                              className={`p-2.5 rounded-xl border space-y-1 max-w-sm ${
+                                rejected
+                                  ? 'bg-rose-50 border-rose-200'
+                                  : 'bg-orange-50 border-orange-200'
+                              }`}
+                            >
                               <div className="flex items-center gap-1.5">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-300">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                    rejected
+                                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                      : 'bg-orange-100 text-orange-800 border-orange-300'
+                                  }`}
+                                >
                                   <AlertTriangle className="w-3 h-3" />
-                                  Observada (Habilitada para reenviar)
+                                  {rejected
+                                    ? 'Rechazada (Habilitada para reenviar)'
+                                    : 'Observada (Habilitada para reenviar)'}
                                 </span>
                               </div>
-                              <p className="text-[11px] font-semibold text-orange-900">
+                              <p
+                                className={`text-[11px] font-semibold ${
+                                  rejected ? 'text-rose-900' : 'text-orange-900'
+                                }`}
+                              >
                                 Solicitud previa: {formatCarnetRequestDate(req.fecha_solicitud)}
                               </p>
                               {req.observaciones && (
-                                <p className="text-[11px] text-orange-800 leading-snug">
-                                  <strong>Observación:</strong> {req.observaciones}
+                                <p
+                                  className={`text-[11px] leading-snug ${
+                                    rejected ? 'text-rose-800' : 'text-orange-800'
+                                  }`}
+                                >
+                                  <strong>{rejected ? 'Motivo:' : 'Observación:'}</strong> {req.observaciones}
                                 </p>
                               )}
                             </div>
