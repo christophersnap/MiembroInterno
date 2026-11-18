@@ -17,6 +17,7 @@ import {
 } from '../../lib/emailNotification';
 import { getApiUrl, sendEmailNotification } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
+import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
 
 interface ModalDisenadorCorreosProps {
   isOpen: boolean;
@@ -97,15 +98,21 @@ export default function ModalDisenadorCorreos({
 
   // Subir imagen para la plantilla de correo con URL pública
   const handleUploadEmailLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      alert('Por favor selecciona una imagen válida (PNG, JPG, SVG o WEBP).');
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+    if (!rawFile.type.startsWith('image/')) {
+      setLogoUploadMsg('Selecciona una imagen válida (PNG, JPG, SVG o WEBP).');
       return;
     }
 
     setUploadingLogo(true);
-    setLogoUploadMsg('Procesando y subiendo imagen...');
+    setLogoUploadMsg('Procesando y optimizando imagen...');
+
+    const file = await optimizeImageForUpload(rawFile, {
+      profile: 'email_logo',
+      modulo: 'correo',
+      bucketId: 'socorristas',
+    });
 
     // 1. Vista previa local inmediata vía data URL
     try {
@@ -120,7 +127,7 @@ export default function ModalDisenadorCorreos({
 
     // 2. Subida a Supabase Storage y Backend
     try {
-      const ext = file.name.split('.').pop() || 'png';
+      const ext = getExtensionFromFile(file, 'png');
       const fileName = `email_logo_${Date.now()}.${ext}`;
       const filePath = `logos/${fileName}`;
 
@@ -130,7 +137,11 @@ export default function ModalDisenadorCorreos({
       try {
         const { error: sbErr } = await supabase.storage
           .from('socorristas')
-          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: true,
+            contentType: file.type || undefined,
+          });
 
         if (!sbErr) {
           const { data } = supabase.storage.from('socorristas').getPublicUrl(filePath);

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getApiUrl } from './api';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
 
 export type TipoCasoSoporte =
   | 'Sistema'
@@ -134,7 +135,12 @@ const normalizeTicket = (row: any): SoporteTicket => ({
   updated_at: row.updated_at || row.created_at || new Date().toISOString(),
 });
 
-export async function uploadSoporteImage(file: File): Promise<SoporteImagen> {
+export async function uploadSoporteImage(rawFile: File): Promise<SoporteImagen> {
+  const file = await optimizeImageForUpload(rawFile, {
+    profile: 'general',
+    modulo: 'soporte',
+    bucketId: 'socorristas',
+  });
   const safeName = file.name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -152,7 +158,7 @@ export async function uploadSoporteImage(file: File): Promise<SoporteImagen> {
       if (!error) {
         const { data } = supabase.storage.from(bucket).getPublicUrl(path);
         if (data?.publicUrl) {
-          return { url: data.publicUrl, nombre: file.name };
+          return { url: data.publicUrl, nombre: rawFile.name };
         }
       }
     } catch {

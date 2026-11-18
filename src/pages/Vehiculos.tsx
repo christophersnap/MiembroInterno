@@ -8,6 +8,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 
 export interface Vehiculo {
   id: number;
@@ -383,9 +384,14 @@ export default function Vehiculos() {
   };
 
   // Subir archivo a Supabase Storage con fallback seguro a Data URL base64
-  const uploadImageFile = async (file: File, folder: string): Promise<string> => {
+  const uploadImageFile = async (rawFile: File, folder: string): Promise<string> => {
+    const file = await optimizeImageForUpload(rawFile, {
+      profile: 'general',
+      modulo: 'vehiculos',
+      bucketId: 'socorristas',
+    });
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
+      const ext = getExtensionFromFile(file, 'jpg');
       const cleanFileName = `vehiculos/${folder}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
 
       // Intentar subir a bucket socorristas (que ya existe)
@@ -393,7 +399,8 @@ export default function Vehiculos() {
         .from('socorristas')
         .upload(cleanFileName, file, {
           cacheControl: '3600',
-          upsert: true
+          upsert: true,
+          contentType: file.type || undefined,
         });
 
       if (!error) {

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { 
   Save, Settings, Info, Palette, Image as ImageIcon, Mail, FileText, Truck, 
   Shield, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, Sparkles, Check, QrCode,
-  ShoppingCart, Fuel
+  ShoppingCart, Fuel, HardDrive
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
@@ -15,6 +15,8 @@ import PersonalizacionColores from '../components/configuracion/PersonalizacionC
 import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
 import ConfiguracionCargos from '../components/configuracion/ConfiguracionCargos';
+import ConfiguracionImagenes from '../components/configuracion/ConfiguracionImagenes';
+import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 import { CompraConfig, DEFAULT_COMPRA_CONFIG, DEFAULT_COMPRA_BLOCKS } from '../types/compra';
 import { CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, DEFAULT_COMBUSTIBLE_BLOCKS } from '../types/combustible';
 
@@ -53,13 +55,13 @@ export default function Configuracion() {
   const urlTab = searchParams.get('tab') as any;
   
   // Categoría activa seleccionada
-  const [activeCategory, setActiveCategory] = useState<'plantillas' | 'correo' | 'flota' | 'cargos' | 'verificacion' | 'colores' | 'identidad'>(
-    urlTab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad'].includes(urlTab) ? urlTab : 'colores'
+  const [activeCategory, setActiveCategory] = useState<'plantillas' | 'correo' | 'flota' | 'cargos' | 'verificacion' | 'colores' | 'identidad' | 'imagenes'>(
+    urlTab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad', 'imagenes'].includes(urlTab) ? urlTab : 'colores'
   );
 
   useEffect(() => {
     const tab = searchParams.get('tab') as any;
-    if (tab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad'].includes(tab)) {
+    if (tab && ['plantillas', 'correo', 'flota', 'cargos', 'verificacion', 'colores', 'identidad', 'imagenes'].includes(tab)) {
       setActiveCategory(tab);
     }
   }, [searchParams]);
@@ -370,16 +372,25 @@ export default function Configuracion() {
   const uploadLogo = async (e: React.ChangeEvent<HTMLInputElement>, fieldName: string) => {
     if (!e.target.files || e.target.files.length === 0) return;
 
-    const file = e.target.files[0];
-    const fileExt = file.name.split('.').pop();
-    const fileName = `logo_${fieldName}_${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
+    const rawFile = e.target.files[0];
 
     try {
       setLoading(true);
+      const file = await optimizeImageForUpload(rawFile, {
+        profile: 'logo',
+        modulo: 'logos',
+        bucketId: 'socorristas',
+      });
+      const fileExt = getExtensionFromFile(file, 'png');
+      const fileName = `logo_${fieldName}_${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
       const { error: uploadError } = await supabase.storage
         .from('socorristas')
-        .upload(`logos/${filePath}`, file);
+        .upload(`logos/${filePath}`, file, {
+          upsert: true,
+          contentType: file.type || undefined,
+        });
 
       if (uploadError) throw uploadError;
 
@@ -400,7 +411,6 @@ export default function Configuracion() {
       showSuccessAlert(`Logo ${fieldName} actualizado exitosamente.`);
     } catch (error: any) {
       console.error('Error uploading logo:', error);
-      alert('Error al subir logo: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -836,6 +846,12 @@ export default function Configuracion() {
       label: 'Logotipos Institucionales', 
       icon: ImageIcon, 
       iconColor: 'bg-rose-500 text-white'
+    },
+    {
+      id: 'imagenes',
+      label: 'Imágenes y Storage',
+      icon: HardDrive,
+      iconColor: 'bg-violet-600 text-white'
     }
   ];
 
@@ -1361,6 +1377,13 @@ export default function Configuracion() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 7. MÓDULO: OPTIMIZACIÓN DE IMÁGENES Y ESTADÍSTICAS SUPABASE STORAGE       */}
+      {/* ========================================================================= */}
+      {activeCategory === 'imagenes' && (
+        <ConfiguracionImagenes onSaved={(msg) => showSuccessAlert(msg)} />
       )}
 
       {/* Modal Diseñador de Plantillas y Remitente No-Reply */}

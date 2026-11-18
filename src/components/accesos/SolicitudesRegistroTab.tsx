@@ -111,16 +111,17 @@ export default function SolicitudesRegistroTab({
     }
 
     try {
-      // 2. Buscar auth_user_id si no vino en la solicitud
+      // 2. Buscar auth_user_id mediante RPC segura si no vino en la solicitud
       let targetAuthId = solAuthUserId;
       if (!targetAuthId && solEmail) {
         try {
-          const { data: uView } = await supabase
-            .from('usuarios_view')
-            .select('id')
-            .ilike('email', solEmail.trim())
-            .maybeSingle();
-          if (uView?.id) targetAuthId = uView.id;
+          const { data: foundUuid, error: rpcFindErr } = await supabase.rpc(
+            'admin_find_user_id_by_email',
+            { target_email: solEmail.trim() }
+          );
+          if (!rpcFindErr && foundUuid) {
+            targetAuthId = String(foundUuid);
+          }
         } catch (errFind) {
           console.warn('Aviso buscando ID de auth por correo:', errFind);
         }

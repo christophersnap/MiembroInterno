@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { getApiUrl } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
 
 export interface ImageUploadConfigCardProps {
   title: string;
@@ -45,11 +46,11 @@ export default function ImageUploadConfigCard({
 
   // Procesa y sube la imagen a Supabase Storage con fallbacks seguros
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
     // Validación de tipo de archivo
-    if (!file.type.startsWith('image/')) {
+    if (!rawFile.type.startsWith('image/')) {
       setUploadError('Por favor seleccione un archivo de imagen válido (PNG, JPG, WEBP o SVG)');
       return;
     }
@@ -59,10 +60,15 @@ export default function ImageUploadConfigCard({
     setUploadSuccess(false);
     setImgLoadFailed(false);
 
-    const fileExt = file.name.split('.').pop() || 'png';
-    const cleanFileName = `logo_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-
     try {
+      const file = await optimizeImageForUpload(rawFile, {
+        profile: 'email_logo',
+        modulo: 'logos',
+        bucketId: 'socorristas',
+      });
+      const fileExt = getExtensionFromFile(file, 'png');
+      const cleanFileName = `logo_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
       // 1. Crear inmediatamente una versión optimizada base64 local para visualización instantánea sin latencia
       const localDataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();

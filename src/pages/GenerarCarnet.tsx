@@ -10,6 +10,7 @@ import { getApiUrl } from '../lib/api';
 import WatermarkImage from '../components/WatermarkImage';
 import SmartStorageImage from '../components/common/SmartStorageImage';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
+import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 
 export const VERIFICATION_FIELD_DEFINITIONS = [
   { id: 'foto', label: 'Fotografía Oficial' },
@@ -640,13 +641,20 @@ export default function GenerarCarnet() {
 
       // Save to Supabase
       try {
-        const fileExt = file.name.split('.').pop();
+        const optimizedTemplate = await optimizeImageForUpload(file, {
+          profile: 'template',
+          modulo: 'plantillas',
+          bucketId: 'assets',
+        });
+        const fileExt = getExtensionFromFile(optimizedTemplate, 'png');
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
         const filePath = `templates/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from('assets')
-          .upload(filePath, file);
+          .upload(filePath, optimizedTemplate, {
+            contentType: optimizedTemplate.type || undefined,
+          });
 
         if (uploadError) throw uploadError;
 
@@ -1257,13 +1265,24 @@ export default function GenerarCarnet() {
 
       if (!blob) throw new Error('Could not generate image');
 
-      const fileName = `carnet_${selectedSocorrista.carnet}_${Date.now()}.png`;
+      const rawCarnetName = `carnet_${selectedSocorrista.carnet}_${Date.now()}.png`;
+      const optimizedCarnetFile = await optimizeImageForUpload(blob, {
+        profile: 'template',
+        modulo: 'carnet',
+        bucketId: 'socorristas',
+        fileNameOverride: rawCarnetName,
+      });
+      const ext = getExtensionFromFile(optimizedCarnetFile, 'png');
+      const fileName = `carnet_${selectedSocorrista.carnet}_${Date.now()}.${ext}`;
       const filePath = `${fileName}`;
 
       // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('socorristas')
-        .upload(filePath, blob, { upsert: true });
+        .upload(filePath, optimizedCarnetFile, {
+          upsert: true,
+          contentType: optimizedCarnetFile.type || 'image/png',
+        });
 
       if (uploadError) throw uploadError;
 

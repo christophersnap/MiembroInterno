@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -260,16 +261,24 @@ export default function Archivos() {
     setUploadStatus(selectedFile ? 'Subiendo archivo a Supabase Storage...' : 'Preparando registro...');
 
     try {
+      const fileToUpload = selectedFile
+        ? await optimizeImageForUpload(selectedFile, {
+            profile: 'general',
+            modulo: 'archivos',
+            bucketId: 'socorristas',
+          })
+        : null;
+
       let finalFileUrl = formEnlaceExterno.trim();
-      const originalFileName = selectedFile ? selectedFile.name : 'Documento_Externo.pdf';
-      const extension = selectedFile ? selectedFile.name.split('.').pop()?.toLowerCase() || '' : 'link';
-      const tamanoLegible = selectedFile ? formatBytes(selectedFile.size) : 'Enlace en la nube';
-      const tamanoBytes = selectedFile ? selectedFile.size : 0;
-      const mimetype = selectedFile ? selectedFile.type || 'application/octet-stream' : 'application/octet-stream';
+      const originalFileName = fileToUpload ? selectedFile!.name : 'Documento_Externo.pdf';
+      const extension = fileToUpload ? fileToUpload.name.split('.').pop()?.toLowerCase() || '' : 'link';
+      const tamanoLegible = fileToUpload ? formatBytes(fileToUpload.size) : 'Enlace en la nube';
+      const tamanoBytes = fileToUpload ? fileToUpload.size : 0;
+      const mimetype = fileToUpload ? fileToUpload.type || 'application/octet-stream' : 'application/octet-stream';
       let storageErrorDetail: string | null = null;
 
-      if (selectedFile) {
-        const safeFileName = selectedFile.name
+      if (fileToUpload) {
+        const safeFileName = fileToUpload.name
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -282,7 +291,7 @@ export default function Archivos() {
           try {
             const { error: storageErr } = await supabase.storage
               .from(bucketName)
-              .upload(objectPath, selectedFile, {
+              .upload(objectPath, fileToUpload, {
                 cacheControl: '3600',
                 upsert: true,
                 contentType: mimetype,
@@ -311,7 +320,7 @@ export default function Archivos() {
           setUploadStatus('Usando servidor de respaldo temporal...');
           try {
             const formData = new FormData();
-            formData.append('archivo', selectedFile);
+            formData.append('archivo', fileToUpload);
             const uploadRes = await fetch(getApiUrl('/api/upload-file'), {
               method: 'POST',
               body: formData,
@@ -328,11 +337,11 @@ export default function Archivos() {
         }
 
         // 3. Último recurso sólo para archivos pequeños (<= 1.5 MB) para no congelar el navegador ni inflar JSON
-        if (!finalFileUrl && selectedFile.size <= 1.5 * 1024 * 1024) {
+        if (!finalFileUrl && fileToUpload.size <= 1.5 * 1024 * 1024) {
           finalFileUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = (ev) => resolve((ev.target?.result as string) || '');
-            reader.readAsDataURL(selectedFile);
+            reader.readAsDataURL(fileToUpload);
           });
         }
 

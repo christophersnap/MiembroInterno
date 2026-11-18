@@ -1,18 +1,26 @@
 import { supabase } from '../lib/supabase';
 import { fileToCompactDataUrl } from './cropImage';
+import { optimizeImageForUpload, getExtensionFromFile } from './imageOptimizer';
 
 export async function uploadCarnetPhotoWithFallback(
-  file: File,
+  rawFile: File,
   prefix: string
 ): Promise<string> {
-  if (!file || file.size < 100) {
+  if (!rawFile || rawFile.size < 100) {
     throw new Error('El archivo de fotografía está vacío o dañado. Vuelve a tomar o seleccionar la imagen.');
   }
+
+  const file = await optimizeImageForUpload(rawFile, {
+    profile: 'carnet',
+    modulo: 'carnet',
+    bucketId: 'socorristas',
+  });
 
   const safePrefix = (prefix || 'carnet')
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 40);
-  const fileName = `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`;
+  const ext = getExtensionFromFile(file, 'jpg');
+  const fileName = `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
 
   try {
     let { error: uploadError } = await supabase.storage

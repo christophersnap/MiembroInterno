@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getApiUrl } from './api';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
 
 export interface NoticiaVideo {
   id: string;
@@ -421,14 +422,24 @@ export async function saveNoticiasBannerConfig(config: NoticiasBannerConfig): Pr
   } catch {}
 }
 
-export async function uploadNoticiaMedia(file: File, maxDimension = 1920): Promise<string> {
+export async function uploadNoticiaMedia(rawFile: File, maxDimension = 1920): Promise<string> {
+  const file = await optimizeImageForUpload(rawFile, {
+    profile: 'banner',
+    modulo: 'noticias',
+    bucketId: 'socorristas',
+    customMaxDim: maxDimension,
+  });
   const cleanName = `noticia_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
   // 1. Try Supabase Storage bucket 'socorristas' -> folder 'noticias/'
   try {
     const { error: uploadErr } = await supabase.storage
       .from('socorristas')
-      .upload(`noticias/${cleanName}`, file, { cacheControl: '3600', upsert: true });
+      .upload(`noticias/${cleanName}`, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type || undefined,
+      });
 
     if (!uploadErr) {
       const { data } = supabase.storage.from('socorristas').getPublicUrl(`noticias/${cleanName}`);

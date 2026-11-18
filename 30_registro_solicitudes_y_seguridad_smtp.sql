@@ -124,34 +124,12 @@ DROP POLICY IF EXISTS "Permitir actualizacion de roles admin" ON public.user_rol
 CREATE POLICY "Permitir actualizacion de roles admin" 
 ON public.user_roles 
 FOR UPDATE 
-TO public, authenticated 
 USING (true);
 
 -- -----------------------------------------------------------------------------------------
--- 4. VISTA: public.usuarios_view (Para sincronizar auth.users con emails en Accesos y Seccionales)
+-- 4. SEGURIDAD: No exponer auth.users mediante vistas públicas (usar RPC de Migración 46)
 -- -----------------------------------------------------------------------------------------
--- Se elimina primero con CASCADE para evitar el error 42P16 de PostgreSQL cuando ya existe con otra estructura de columnas
 DROP VIEW IF EXISTS public.usuarios_view CASCADE;
-
-CREATE VIEW public.usuarios_view AS
-SELECT 
-  u.id,
-  u.email,
-  COALESCE(s.primer_nombre, split_part(u.email, '@', 1)) AS primer_nombre,
-  COALESCE(s.primer_apellido, '') AS primer_apellido,
-  r.role,
-  r.activo,
-  r.estado,
-  s.carnet,
-  s.seccional_id,
-  u.created_at,
-  u.confirmed_at,
-  u.last_sign_in_at
-FROM auth.users u
-LEFT JOIN public.user_roles r ON u.id = r.id
-LEFT JOIN public.socorristas s ON r.socorrista_id = s.id;
-
-GRANT SELECT ON public.usuarios_view TO anon, authenticated, service_role;
 
 -- -----------------------------------------------------------------------------------------
 -- NOTA IMPORTANTE SOBRE CONFIRMACIÓN DE CORREO DE SUPABASE (AUTH SETTINGS):

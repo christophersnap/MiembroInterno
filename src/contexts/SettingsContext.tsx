@@ -326,6 +326,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           if (row.clave === 'login_show_verificar') {
              newSettings.loginShowVerificar = row.valor === 'true';
           }
+          if (row.clave === 'optimizacion_imagenes_config' && row.valor) {
+            try {
+              const parsedOpt = typeof row.valor === 'string' ? JSON.parse(row.valor) : row.valor;
+              localStorage.setItem('cv_image_opt_config', JSON.stringify(parsedOpt));
+            } catch (e) {}
+          }
         });
       } else {
         // Fallback API local

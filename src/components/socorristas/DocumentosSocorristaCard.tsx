@@ -6,6 +6,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { DocumentoSocorrista, TIPOS_DOCUMENTOS } from '../../types/socorrista';
 import { useAuth } from '../../contexts/AuthContext';
+import { optimizeImageForUpload } from '../../utils/imageOptimizer';
 
 interface DocumentosSocorristaCardProps {
   socorristaId: number;
@@ -79,10 +80,10 @@ export default function DocumentosSocorristaCard({
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, tipo: DocumentoSocorrista['tipo_documento']) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
-    if (file.size > 25 * 1024 * 1024) {
+    if (rawFile.size > 25 * 1024 * 1024) {
       setErrorMsg('El documento no debe exceder 25 MB.');
       return;
     }
@@ -92,6 +93,12 @@ export default function DocumentosSocorristaCard({
     setSuccessMsg(null);
 
     try {
+      const file = await optimizeImageForUpload(rawFile, {
+        profile: 'general',
+        modulo: 'documentos',
+        bucketId: 'socorristas',
+      });
+
       // Calcular nueva versión para este tipo de documento
       const existingVersions = documentos.filter(d => d.tipo_documento === tipo);
       const nextVersion = existingVersions.length > 0 
@@ -124,7 +131,7 @@ export default function DocumentosSocorristaCard({
         id: `doc_${Date.now()}`,
         socorrista_id: socorristaId,
         tipo_documento: tipo,
-        nombre_archivo: file.name,
+        nombre_archivo: rawFile.name,
         archivo_url: publicUrl,
         version: nextVersion,
         es_vigente: true,

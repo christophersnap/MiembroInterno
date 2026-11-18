@@ -20,6 +20,7 @@ import {
   formatPhoneWithMask,
   getCountryMask,
 } from '../utils/phoneMask';
+import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 
 export default function NewSocorrista() {
   const navigate = useNavigate();
@@ -622,12 +623,20 @@ export default function NewSocorrista() {
 
       let foto_url = null;
       if (foto) {
-        const fileName = `${Date.now()}_photo.jpg`;
+        const optimizedFoto = await optimizeImageForUpload(foto, {
+          profile: 'carnet',
+          modulo: 'socorristas',
+          bucketId: 'socorristas',
+        });
+        const ext = getExtensionFromFile(optimizedFoto, 'jpg');
+        const fileName = `${Date.now()}_photo.${ext}`;
         const filePath = `${fileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from('socorristas')
-          .upload(filePath, foto);
+          .upload(filePath, optimizedFoto, {
+            contentType: optimizedFoto.type || undefined,
+          });
 
         if (uploadError) {
           throw new Error(`Error al subir la foto: ${uploadError.message}`);

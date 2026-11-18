@@ -9,6 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
 
 export interface AnuncioItem {
   id: string;
@@ -205,9 +206,14 @@ export default function Anuncios() {
     setShowModal(true);
   };
 
-  const handleUploadImage = async (file: File): Promise<string | null> => {
+  const handleUploadImage = async (rawFile: File): Promise<string | null> => {
     setUploadingImage(true);
     try {
+      const file = await optimizeImageForUpload(rawFile, {
+        profile: 'banner',
+        modulo: 'anuncios',
+        bucketId: 'socorristas',
+      });
       const formData = new FormData();
       formData.append('archivo', file);
       const res = await fetch('/api/upload-file', {
@@ -223,7 +229,11 @@ export default function Anuncios() {
       const cleanFileName = `img_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: storageError } = await supabase.storage
         .from('socorristas')
-        .upload(`anuncios/${cleanFileName}`, file, { cacheControl: '3600', upsert: true });
+        .upload(`anuncios/${cleanFileName}`, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type || undefined,
+        });
 
       if (!storageError) {
         const { data: pubData } = supabase.storage
@@ -235,15 +245,20 @@ export default function Anuncios() {
       return URL.createObjectURL(file);
     } catch (err) {
       console.error('Error subiendo imagen de anuncio:', err);
-      return URL.createObjectURL(file);
+      return URL.createObjectURL(rawFile);
     } finally {
       setUploadingImage(false);
     }
   };
 
-  const handleUploadAttachment = async (file: File): Promise<{ url: string; name: string; size: string } | null> => {
+  const handleUploadAttachment = async (rawFile: File): Promise<{ url: string; name: string; size: string } | null> => {
     setUploadingFile(true);
     try {
+      const file = await optimizeImageForUpload(rawFile, {
+        profile: 'banner',
+        modulo: 'anuncios',
+        bucketId: 'socorristas',
+      });
       // 1. Intentar endpoint local /api/upload-file
       const formData = new FormData();
       formData.append('archivo', file);
@@ -257,7 +272,7 @@ export default function Anuncios() {
         const json = await res.json();
         return {
           url: json.url,
-          name: json.originalName || file.name,
+          name: json.originalName || rawFile.name,
           size: json.tamanoLegible || `${(file.size / (1024 * 1024)).toFixed(1)} MB`
         };
       }
@@ -268,7 +283,8 @@ export default function Anuncios() {
         .from('socorristas')
         .upload(`anuncios/${cleanFileName}`, file, {
           cacheControl: '3600',
-          upsert: true
+          upsert: true,
+          contentType: file.type || undefined,
         });
 
       if (!storageError) {
@@ -278,7 +294,7 @@ export default function Anuncios() {
 
         return {
           url: pubData.publicUrl,
-          name: file.name,
+          name: rawFile.name,
           size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`
         };
       }
@@ -288,9 +304,9 @@ export default function Anuncios() {
       console.error('Error subiendo adjunto:', err);
       // Fallback: objeto temporal base64 o simulado
       return {
-        url: URL.createObjectURL(file),
-        name: file.name,
-        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        url: URL.createObjectURL(rawFile),
+        name: rawFile.name,
+        size: `${(rawFile.size / (1024 * 1024)).toFixed(1)} MB`
       };
     } finally {
       setUploadingFile(false);

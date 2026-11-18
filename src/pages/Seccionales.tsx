@@ -35,14 +35,31 @@ export default function Seccionales() {
 
   const fetchDirectors = async () => {
     try {
-      // Fetch users with the "director" role from usuarios_view
-      const { data, error } = await supabase
-        .from('usuarios_view')
-        .select('id, email, primer_nombre, primer_apellido')
+      // Consultar directores mediante función RPC protegida (sin vista expuesta usuarios_view)
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_directores_list');
+      if (!rpcErr && Array.isArray(rpcData)) {
+        setDirectorsList(rpcData);
+        return;
+      }
+
+      // Respaldo seguro sobre user_roles + socorristas si aún no se ha ejecutado Migración 46
+      const { data: roleRows, error: roleErr } = await supabase
+        .from('user_roles')
+        .select('id, nombre_usuario, nombre_completo, socorristas (primer_nombre, primer_apellido, email)')
         .eq('role', 'director');
-      
-      if (error) throw error;
-      setDirectorsList(data || []);
+
+      if (!roleErr && roleRows) {
+        const mapped = roleRows.map((r: any) => {
+          const soc = Array.isArray(r.socorristas) ? r.socorristas[0] : r.socorristas;
+          return {
+            id: r.id,
+            email: soc?.email || '',
+            primer_nombre: soc?.primer_nombre || r.nombre_usuario || r.nombre_completo || 'Director',
+            primer_apellido: soc?.primer_apellido || '',
+          };
+        });
+        setDirectorsList(mapped);
+      }
     } catch (err) {
       console.error('Error fetching directors:', err);
     }

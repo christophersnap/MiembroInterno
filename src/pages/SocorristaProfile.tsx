@@ -25,6 +25,7 @@ import {
   parsePhoneWithCountry,
   toTelHref,
 } from '../utils/phoneMask';
+import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
@@ -616,13 +617,21 @@ export default function SocorristaProfile() {
       const targetSeccionalId = parseInt(editForm.seccional_id, 10);
       let foto_url = editForm.foto_url;
       if (fotoFile) {
-        const fileExt = fotoFile.name.split('.').pop();
-        const fileName = `${id}_${Math.random()}.${fileExt}`;
+        const optimizedFoto = await optimizeImageForUpload(fotoFile, {
+          profile: 'carnet',
+          modulo: 'socorristas',
+          bucketId: 'socorristas',
+        });
+        const fileExt = getExtensionFromFile(optimizedFoto, 'jpg');
+        const fileName = `${id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${fileExt}`;
         const filePath = `${fileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from('socorristas')
-          .upload(filePath, fotoFile, { upsert: true });
+          .upload(filePath, optimizedFoto, {
+            upsert: true,
+            contentType: optimizedFoto.type || undefined,
+          });
 
         if (uploadError) throw uploadError;
 

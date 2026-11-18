@@ -57,39 +57,9 @@ WHERE ur.id = src.role_id
     OR ur.nombre_completo IS NULL OR TRIM(ur.nombre_completo) = ''
   );
 
--- 2. Actualizar vista public.usuarios_view para reflejar nombre_usuario, nombre_completo y email_confirmed_at
+-- 2. Por seguridad (Supabase Security Advisor: auth_users_exposed), NO crear vistas públicas sobre auth.users.
+--    Utilizar las funciones RPC protegidas de la Migración 46 (public.get_usuarios_directory).
 DROP VIEW IF EXISTS public.usuarios_view CASCADE;
-
-CREATE VIEW public.usuarios_view AS
-SELECT
-  u.id,
-  u.email,
-  COALESCE(
-    NULLIF(TRIM(r.nombre_usuario), ''),
-    NULLIF(TRIM(r.nombre_completo), ''),
-    NULLIF(TRIM(s.primer_nombre), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_usuario'), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_completo'), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'full_name'), ''),
-    split_part(u.email, '@', 1)
-  ) AS primer_nombre,
-  COALESCE(s.primer_apellido, '') AS primer_apellido,
-  r.nombre_usuario,
-  r.nombre_completo,
-  r.role,
-  r.activo,
-  r.estado,
-  s.carnet,
-  s.seccional_id,
-  u.created_at,
-  u.confirmed_at,
-  u.email_confirmed_at,
-  u.last_sign_in_at
-FROM auth.users u
-LEFT JOIN public.user_roles r ON u.id = r.id
-LEFT JOIN public.socorristas s ON r.socorrista_id = s.id;
-
-GRANT SELECT ON public.usuarios_view TO anon, authenticated, service_role;
 
 -- 3. Asegurar extensión pgcrypto (para hash bcrypt en restablecimiento de clave por administrador)
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;

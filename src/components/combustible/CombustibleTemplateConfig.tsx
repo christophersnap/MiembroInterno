@@ -15,6 +15,7 @@ import CombustiblePdfModal from './CombustiblePdfModal';
 import ImageUploadConfigCard from '../common/ImageUploadConfigCard';
 import { supabase } from '../../lib/supabase';
 import { getApiUrl } from '../../lib/api';
+import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
 
 interface CombustibleTemplateConfigProps {
   config: CombustibleConfig;
@@ -140,17 +141,24 @@ export default function CombustibleTemplateConfig({
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+
+    const file = await optimizeImageForUpload(rawFile, {
+      profile: 'email_logo',
+      modulo: 'plantillas',
+      bucketId: 'assets',
+    });
 
     try {
-      const ext = file.name.split('.').pop() || 'png';
+      const ext = getExtensionFromFile(file, 'png');
       const cleanName = `logo_combus_header_${Date.now()}.${ext}`;
 
       // 1. Intentar subir al bucket 'assets' de Supabase
       let uploadRes = await supabase.storage.from('assets').upload(`combustible/${cleanName}`, file, {
         cacheControl: '3600',
-        upsert: true
+        upsert: true,
+        contentType: file.type || undefined,
       });
 
       // 2. Si falla assets, intentar en 'socorristas'

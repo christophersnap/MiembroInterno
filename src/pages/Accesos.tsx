@@ -19,6 +19,7 @@ import {
 } from '../lib/emailNotification';
 import { getOfficialLoginUrl } from '../utils/appUrl';
 import { getApiUrl, sendEmailNotification } from '../lib/api';
+import { SQL_MIGRATION_47_TEXT } from '../utils/imageOptimizer';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -92,6 +93,9 @@ export default function Accesos() {
   const [sql43Copied, setSql43Copied] = useState(false);
   const [sql44Copied, setSql44Copied] = useState(false);
   const [sql45Copied, setSql45Copied] = useState(false);
+  const [sql46Copied, setSql46Copied] = useState(false);
+  const [sql47Copied, setSql47Copied] = useState(false);
+  const [usingLegacyExposedView, setUsingLegacyExposedView] = useState(false);
   const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
@@ -105,10 +109,28 @@ export default function Accesos() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch users from view (if exists) and join with roles
-      const { data: viewData, error: viewError } = await supabase
-        .from('usuarios_view')
-        .select('*');
+      // 1. Consultar directorio de usuarios mediante RPC protegida (Migración 46 - evita exponer auth.users en una vista pública)
+      let directoryData: any[] | null = null;
+      let directoryLoaded = false;
+
+      const { data: rpcUsers, error: rpcError } = await supabase.rpc('get_usuarios_directory');
+      if (!rpcError && Array.isArray(rpcUsers)) {
+        directoryData = rpcUsers;
+        directoryLoaded = true;
+        setUsingLegacyExposedView(false);
+      } else {
+        // Respaldo temporal solo si aún no se ha ejecutado la Migración 46 en Supabase
+        const { data: legacyViewData, error: legacyViewError } = await supabase
+          .from('usuarios_view')
+          .select('*');
+        if (!legacyViewError && Array.isArray(legacyViewData)) {
+          directoryData = legacyViewData;
+          directoryLoaded = true;
+          setUsingLegacyExposedView(true);
+        } else {
+          setUsingLegacyExposedView(false);
+        }
+      }
 
       let usersData: any[] | null = null;
       let usersError: any = null;
@@ -168,25 +190,25 @@ export default function Accesos() {
 
       // Merge data
       let mergedUsers = usersData || [];
-      if (!viewError && viewData) {
+      if (directoryLoaded && directoryData) {
         mergedUsers = mergedUsers.map(u => {
-          const viewUser = viewData.find(v => v.id === u.id);
+          const dirUser = directoryData!.find(v => v.id === u.id);
           const viewName =
-            String(viewUser?.nombre_usuario || viewUser?.nombre_completo || '').trim() ||
-            (viewUser?.primer_nombre &&
-            viewUser?.email &&
-            viewUser.primer_nombre !== viewUser.email.split('@')[0]
-              ? `${viewUser.primer_nombre} ${viewUser.primer_apellido || ''}`.trim()
+            String(dirUser?.nombre_usuario || dirUser?.nombre_completo || '').trim() ||
+            (dirUser?.primer_nombre &&
+            dirUser?.email &&
+            dirUser.primer_nombre !== dirUser.email.split('@')[0]
+              ? `${dirUser.primer_nombre} ${dirUser.primer_apellido || ''}`.trim()
               : '');
           return {
             ...u,
-            email: viewUser?.email || 'Email no disponible',
+            email: dirUser?.email || 'Email no disponible',
             view_nombre: viewName,
-            email_confirmed_at: viewUser?.email_confirmed_at || viewUser?.confirmed_at || null,
+            email_confirmed_at: dirUser?.email_confirmed_at || dirUser?.confirmed_at || null,
           };
         });
       } else {
-        mergedUsers = mergedUsers.map(u => ({ ...u, email: 'Requiere vista SQL' }));
+        mergedUsers = mergedUsers.map(u => ({ ...u, email: 'Ejecute Migración 46 SQL' }));
       }
 
       setUsuarios(mergedUsers);
@@ -1453,37 +1475,6 @@ WHERE ur.id = src.role_id
 
 DROP VIEW IF EXISTS public.usuarios_view CASCADE;
 
-CREATE VIEW public.usuarios_view AS
-SELECT
-  u.id,
-  u.email,
-  COALESCE(
-    NULLIF(TRIM(r.nombre_usuario), ''),
-    NULLIF(TRIM(r.nombre_completo), ''),
-    NULLIF(TRIM(s.primer_nombre), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_usuario'), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_completo'), ''),
-    NULLIF(TRIM(u.raw_user_meta_data ->> 'full_name'), ''),
-    split_part(u.email, '@', 1)
-  ) AS primer_nombre,
-  COALESCE(s.primer_apellido, '') AS primer_apellido,
-  r.nombre_usuario,
-  r.nombre_completo,
-  r.role,
-  r.activo,
-  r.estado,
-  s.carnet,
-  s.seccional_id,
-  u.created_at,
-  u.confirmed_at,
-  u.email_confirmed_at,
-  u.last_sign_in_at
-FROM auth.users u
-LEFT JOIN public.user_roles r ON u.id = r.id
-LEFT JOIN public.socorristas s ON r.socorrista_id = s.id;
-
-GRANT SELECT ON public.usuarios_view TO anon, authenticated, service_role;
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 CREATE OR REPLACE FUNCTION public.admin_confirm_user_email(target_user_id UUID)
@@ -1868,6 +1859,226 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql45Copied(false), 3000);
   };
 
+  const handleCopySqlMigration46 = () => {
+    const sqlText = `-- =========================================================================================
+-- MIGRACIÓN 46: CORRECCIÓN CRÍTICA DE SEGURIDAD (SUPABASE SECURITY ADVISOR)
+-- Solventa: "Datos de usuario expuestos a través de una vista" (usuarios_autenticados_expuestos)
+-- =========================================================================================
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_views
+    WHERE schemaname = 'public'
+      AND viewname = 'usuarios_view'
+  ) THEN
+    EXECUTE 'REVOKE ALL ON public.usuarios_view FROM anon, authenticated, PUBLIC';
+    EXECUTE 'DROP VIEW public.usuarios_view CASCADE';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.can_view_accesos_directory()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT := lower(COALESCE(auth.jwt() ->> 'email', ''));
+  v_role TEXT;
+  v_custom JSONB;
+  v_role_perms JSONB;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN FALSE;
+  END IF;
+
+  IF v_email = 'christopher.snap@gmail.com' THEN
+    RETURN TRUE;
+  END IF;
+
+  SELECT ur.role, COALESCE(ur.custom_permissions, '{}'::jsonb)
+  INTO v_role, v_custom
+  FROM public.user_roles ur
+  WHERE ur.id = v_uid
+    AND COALESCE(ur.activo, true) = true
+  LIMIT 1;
+
+  IF v_role IN ('admin', 'superadmin') THEN
+    RETURN TRUE;
+  END IF;
+
+  IF (v_custom ->> 'view_accesos') = 'true' OR (v_custom ->> 'perm_accesos') = 'true' THEN
+    RETURN TRUE;
+  END IF;
+
+  IF v_role IS NOT NULL THEN
+    SELECT COALESCE(rp.permissions, '{}'::jsonb)
+    INTO v_role_perms
+    FROM public.role_permissions rp
+    WHERE rp.role = v_role
+    LIMIT 1;
+
+    IF (v_role_perms ->> 'view_accesos') = 'true' THEN
+      RETURN TRUE;
+    END IF;
+  END IF;
+
+  RETURN FALSE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.can_view_accesos_directory() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.can_view_accesos_directory() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_usuarios_directory()
+RETURNS TABLE (
+  id UUID,
+  email TEXT,
+  primer_nombre TEXT,
+  primer_apellido TEXT,
+  nombre_usuario TEXT,
+  nombre_completo TEXT,
+  role TEXT,
+  activo BOOLEAN,
+  estado TEXT,
+  carnet TEXT,
+  seccional_id INTEGER,
+  created_at TIMESTAMPTZ,
+  confirmed_at TIMESTAMPTZ,
+  email_confirmed_at TIMESTAMPTZ,
+  last_sign_in_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT public.can_view_accesos_directory() THEN
+    RAISE EXCEPTION 'Acceso denegado: no cuenta con permisos para consultar usuarios.';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    u.id::uuid AS id,
+    COALESCE(u.email, '')::text AS email,
+    COALESCE(
+      NULLIF(TRIM(r.nombre_usuario), ''),
+      NULLIF(TRIM(r.nombre_completo), ''),
+      NULLIF(TRIM(s.primer_nombre), ''),
+      NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_usuario'), ''),
+      NULLIF(TRIM(u.raw_user_meta_data ->> 'nombre_completo'), ''),
+      NULLIF(TRIM(u.raw_user_meta_data ->> 'full_name'), ''),
+      split_part(COALESCE(u.email, ''), '@', 1)
+    )::text AS primer_nombre,
+    COALESCE(s.primer_apellido, '')::text AS primer_apellido,
+    r.nombre_usuario::text AS nombre_usuario,
+    r.nombre_completo::text AS nombre_completo,
+    r.role::text AS role,
+    COALESCE(r.activo, true)::boolean AS activo,
+    COALESCE(r.estado, 'activo')::text AS estado,
+    s.carnet::text AS carnet,
+    s.seccional_id::integer AS seccional_id,
+    u.created_at::timestamptz AS created_at,
+    u.email_confirmed_at::timestamptz AS confirmed_at,
+    u.email_confirmed_at::timestamptz AS email_confirmed_at,
+    u.last_sign_in_at::timestamptz AS last_sign_in_at
+  FROM auth.users u
+  LEFT JOIN public.user_roles r ON u.id = r.id
+  LEFT JOIN public.socorristas s ON r.socorrista_id = s.id
+  ORDER BY u.created_at DESC;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_usuarios_directory() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_usuarios_directory() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_directores_list()
+RETURNS TABLE (
+  id UUID,
+  email TEXT,
+  primer_nombre TEXT,
+  primer_apellido TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sesión requerida.';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    u.id::uuid AS id,
+    COALESCE(u.email, '')::text AS email,
+    COALESCE(
+      NULLIF(TRIM(s.primer_nombre), ''),
+      NULLIF(TRIM(r.nombre_usuario), ''),
+      NULLIF(TRIM(r.nombre_completo), ''),
+      split_part(COALESCE(u.email, ''), '@', 1)
+    )::text AS primer_nombre,
+    COALESCE(s.primer_apellido, '')::text AS primer_apellido
+  FROM public.user_roles r
+  INNER JOIN auth.users u ON u.id = r.id
+  LEFT JOIN public.socorristas s ON s.id = r.socorrista_id
+  WHERE r.role = 'director'
+    AND COALESCE(r.activo, true) = true
+  ORDER BY primer_nombre ASC;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_directores_list() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_directores_list() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_find_user_id_by_email(target_email TEXT)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_found_id UUID;
+BEGIN
+  IF NOT public.can_view_accesos_directory() THEN
+    RAISE EXCEPTION 'Acceso denegado.';
+  END IF;
+
+  IF target_email IS NULL OR trim(target_email) = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT u.id
+  INTO v_found_id
+  FROM auth.users u
+  WHERE lower(u.email) = lower(trim(target_email))
+  LIMIT 1;
+
+  RETURN v_found_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.admin_find_user_id_by_email(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_find_user_id_by_email(TEXT) TO authenticated;
+
+REVOKE ALL ON TABLE public.email_confirmation_tokens FROM anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';`;
+
+    navigator.clipboard.writeText(sqlText);
+    setSql46Copied(true);
+    setTimeout(() => setSql46Copied(false), 3000);
+  };
+
+  const handleCopySqlMigration47 = () => {
+    navigator.clipboard.writeText(SQL_MIGRATION_47_TEXT);
+    setSql47Copied(true);
+    setTimeout(() => setSql47Copied(false), 3000);
+  };
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
@@ -2034,6 +2245,41 @@ NOTIFY pgrst, 'reload schema';`;
           <span>Ajustes del Sistema</span>
         </button>
       </div>
+
+      {usingLegacyExposedView && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-rose-900">
+                Corrección de Seguridad Supabase Pendiente (Migración 46)
+              </p>
+              <p className="text-[11px] text-rose-800 mt-0.5">
+                La vista antigua <code className="bg-rose-100 px-1 py-0.5 rounded font-mono">public.usuarios_view</code> aún existe en Supabase y genera la alerta «Datos de usuario expuestos a través de una vista». Copia y ejecuta la <strong>Migración 46</strong> en el SQL Editor de Supabase para eliminarla y activar las funciones protegidas.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleCopySqlMigration46}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs cursor-pointer transition-colors"
+            >
+              {sql46Copied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  ¡SQL 46 Copiado!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 mr-1.5" />
+                  Copiar SQL Migración 46
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden p-5 sm:p-6">
           
@@ -2817,7 +3063,7 @@ NOTIFY pgrst, 'reload schema';`;
                       </span>
                       <div>
                         <span className="text-xs font-semibold text-gray-900 block">Nombre de Usuario, Confirmación y Reseteo Seguro</span>
-                        <span className="text-3xs text-gray-400">Columna nombre_usuario, vista usuarios_view actualizada y funciones de confirmación/clave</span>
+                        <span className="text-3xs text-gray-400">Columna nombre_usuario y funciones administrativas de confirmación/clave</span>
                       </div>
                     </div>
                     <button
@@ -2898,6 +3144,54 @@ NOTIFY pgrst, 'reload schema';`;
                       className="inline-flex items-center px-3 py-1.5 border border-sky-200 bg-white hover:bg-sky-50 rounded-lg text-2xs font-semibold text-sky-800 transition-all cursor-pointer shadow-2xs shrink-0"
                     >
                       {sql45Copied ? <><Check className="w-3 h-3 mr-1 text-sky-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-sky-600" /> Copiar SQL</>}
+                    </button>
+                  </div>
+
+                  {/* Migración 46 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-rose-50/75">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-rose-600 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        46
+                      </span>
+                      <div>
+                        <span className="text-xs font-bold text-rose-950 block">
+                          Seguridad Crítica Supabase: Eliminar Vista Expuesta de Usuarios (usuarios_autenticados_expuestos)
+                        </span>
+                        <span className="text-3xs text-rose-800">
+                          Elimina public.usuarios_view para cerrar el acceso público a auth.users y activa las funciones protegidas con validación de rol
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration46}
+                      className="inline-flex items-center px-3 py-1.5 border border-rose-300 bg-rose-600 hover:bg-rose-700 rounded-lg text-2xs font-bold text-white transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql46Copied ? <><Check className="w-3 h-3 mr-1 text-white" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-white" /> Copiar SQL</>}
+                    </button>
+                  </div>
+
+                  {/* Migración 47 */}
+                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-violet-50/70">
+                    <div className="flex items-center space-x-3">
+                      <span className="w-7 h-7 rounded-lg bg-violet-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
+                        47
+                      </span>
+                      <div>
+                        <span className="text-xs font-bold text-violet-950 block">
+                          Optimización Sin Pérdida (WebP) y Estadísticas Reales de Imágenes en Storage
+                        </span>
+                        <span className="text-3xs text-violet-800">
+                          Habilita WebP en todos los buckets, bitácora de megabytes ahorrados y conteo/espacio exacto de imágenes en Configuración
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopySqlMigration47}
+                      className="inline-flex items-center px-3 py-1.5 border border-violet-300 bg-white hover:bg-violet-50 rounded-lg text-2xs font-bold text-violet-800 transition-all cursor-pointer shadow-2xs shrink-0"
+                    >
+                      {sql47Copied ? <><Check className="w-3 h-3 mr-1 text-violet-700" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-violet-600" /> Copiar SQL</>}
                     </button>
                   </div>
                 </div>
