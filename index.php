@@ -1,12 +1,11 @@
 <?php
 /**
- * Cruz Verde Salvadoreña - Enrutador PHP para Hostinger
- * 
- * Permite servir la aplicación compilada (dist/) de forma nativa
- * en Hostinger cuando se utiliza la integración automática con GitHub.
+ * Cruz Verde Salvadoreña - Enrutador PHP de Producción
+ *
+ * Sirve la aplicación compilada (dist/) y mantiene únicamente la pantalla
+ * institucional de carga mientras el repositorio sincroniza una actualización.
  */
 
-// Posibles ubicaciones de la compilación dist
 $candidates = [
     __DIR__ . '/dist',
     __DIR__ . '/public_html/dist',
@@ -22,6 +21,34 @@ foreach ($candidates as $cand) {
         $distIndex = $cand . '/index.html';
         break;
     }
+}
+
+// Verificar que tanto dist/index.html como su bundle principal de JS estén completos en disco
+$isBuildComplete = false;
+if ($distIndex && file_exists($distIndex)) {
+    $htmlCheck = @file_get_contents($distIndex);
+    if ($htmlCheck !== false && strlen(trim($htmlCheck)) > 0) {
+        if (preg_match('/assets\/(index-[a-zA-Z0-9_-]+\.js)/', $htmlCheck, $matches)) {
+            $mainJsFile = $matches[1];
+            if (
+                ($distDir && file_exists($distDir . '/assets/' . $mainJsFile)) ||
+                file_exists(__DIR__ . '/assets/' . $mainJsFile)
+            ) {
+                $isBuildComplete = true;
+            }
+        } else {
+            $isBuildComplete = true;
+        }
+    }
+}
+
+// Endpoint ligero para consultar si la actualización terminó sin recargar en falso
+if (isset($_GET['__cv_ready']) || isset($_SERVER['HTTP_X_CV_READY_CHECK'])) {
+    header('Content-Type: application/json; charset=UTF-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    echo json_encode(['ready' => $isBuildComplete]);
+    exit;
 }
 
 // 1. Obtener la ruta limpia de la petición
@@ -42,7 +69,6 @@ if (!empty($scriptDir) && strpos($cleanUri, $scriptDir . '/') === 0) {
 } elseif (strpos($cleanUri, 'miembros/') === 0) {
     $cleanUri = substr($cleanUri, 9);
 } elseif ($cleanUri === 'miembros') {
-    // Redirección canónica con trailing slash si se accede sin la barra final
     if (substr($requestUri, -1) !== '/' && strpos($requestUri, '?') === false) {
         header('Location: /miembros/', true, 301);
         exit;
@@ -50,7 +76,7 @@ if (!empty($scriptDir) && strpos($cleanUri, $scriptDir . '/') === 0) {
     $cleanUri = '';
 }
 
-// 1.5. Soporte nativo para Endpoints de API en Hostinger (Envío de correos SMTP, verificación)
+// 1.5. Soporte nativo para Endpoints de API en PHP (Envío de correos SMTP, verificación)
 if (strpos($cleanUri, 'api/') === 0) {
     $apiPath = substr($cleanUri, 4);
     $apiPathClean = preg_replace('/[^a-zA-Z0-9_-]/', '', $apiPath);
@@ -61,29 +87,33 @@ if (strpos($cleanUri, 'api/') === 0) {
     }
 }
 
-// 2. Si se localizó dist/ y se solicita un archivo estático
-if ($distDir && !empty($cleanUri)) {
-    $possiblePaths = [
-        $distDir . '/' . $cleanUri,
-        __DIR__ . '/' . $cleanUri,
-    ];
+// 2. Servir archivos estáticos si existen en dist/ o en la carpeta raíz
+if (!empty($cleanUri)) {
+    $possiblePaths = [];
+    if ($distDir) {
+        $possiblePaths[] = $distDir . '/' . $cleanUri;
+    }
+    $possiblePaths[] = __DIR__ . '/' . $cleanUri;
 
     if (strpos($cleanUri, 'assets/') !== false) {
         $assetSub = substr($cleanUri, strpos($cleanUri, 'assets/'));
-        $possiblePaths[] = $distDir . '/' . $assetSub;
+        if ($distDir) {
+            $possiblePaths[] = $distDir . '/' . $assetSub;
+        }
         $possiblePaths[] = __DIR__ . '/' . $assetSub;
     }
 
     if (strpos($cleanUri, 'dist/') === 0) {
-        $possiblePaths[] = $distDir . '/' . substr($cleanUri, 5);
+        if ($distDir) {
+            $possiblePaths[] = $distDir . '/' . substr($cleanUri, 5);
+        }
         $possiblePaths[] = __DIR__ . '/' . substr($cleanUri, 5);
     }
 
-    // Respaldo Inteligente: Si el navegador solicita un bundle principal (ej: index-*.js o index-*.css)
-    // que fue reemplazado por un nuevo hash o proviene de una caché anterior, localizar el bundle actual disponible
+    // Respaldo inteligente si cambió el hash del bundle durante una actualización
     if (preg_match('/assets\/index-[a-zA-Z0-9_-]+\.js$/', $cleanUri)) {
         $jsFiles = array_merge(
-            glob($distDir . '/assets/index-*.js') ?: [],
+            $distDir ? (glob($distDir . '/assets/index-*.js') ?: []) : [],
             glob(__DIR__ . '/assets/index-*.js') ?: []
         );
         if (!empty($jsFiles)) {
@@ -92,7 +122,7 @@ if ($distDir && !empty($cleanUri)) {
     }
     if (preg_match('/assets\/index-[a-zA-Z0-9_-]+\.css$/', $cleanUri)) {
         $cssFiles = array_merge(
-            glob($distDir . '/assets/index-*.css') ?: [],
+            $distDir ? (glob($distDir . '/assets/index-*.css') ?: []) : [],
             glob(__DIR__ . '/assets/index-*.css') ?: []
         );
         if (!empty($cssFiles)) {
@@ -124,7 +154,7 @@ if ($distDir && !empty($cleanUri)) {
             if (isset($mimes[$ext])) {
                 header('Content-Type: ' . $mimes[$ext]);
             }
-            
+
             header('Access-Control-Allow-Origin: *');
 
             if (strpos($file, '/assets/') !== false) {
@@ -132,33 +162,29 @@ if ($distDir && !empty($cleanUri)) {
             } else {
                 header('Cache-Control: no-cache, must-revalidate');
             }
-            
+
             header('Content-Length: ' . filesize($file));
             readfile($file);
             exit;
         }
     }
 
-    // 2.5. Si se solicitó un archivo estático específico (.js, .css, etc.) y NO se encontró
-    // devolver 404 en texto plano para que el navegador sepa el estado y no intente parsear HTML
     $ext = strtolower(pathinfo($cleanUri, PATHINFO_EXTENSION));
     $staticExts = ['js', 'mjs', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'woff', 'woff2', 'ttf', 'json', 'map'];
     if (in_array($ext, $staticExts)) {
         http_response_code(404);
         header('Content-Type: text/plain; charset=UTF-8');
         header('Access-Control-Allow-Origin: *');
-        exit("Archivo estático no encontrado en el servidor: {$cleanUri}");
+        exit('');
     }
 }
 
-// 3. Servir la aplicación React compilada (dist/index.html) para rutas SPA
-if ($distIndex && file_exists($distIndex)) {
+// 3. Servir la aplicación React compilada (dist/index.html) cuando está lista
+if ($isBuildComplete && $distIndex && file_exists($distIndex)) {
     header('Content-Type: text/html; charset=UTF-8');
     header('Cache-Control: no-cache, no-store, must-revalidate');
-    header('X-CruzVerde-Host: Hostinger-Production');
-    
+
     $html = file_get_contents($distIndex);
-    // Asegurar que la etiqueta <base href="/miembros/"> esté presente para la correcta resolución de rutas relativas
     if (strpos($html, '<base ') === false) {
         $html = str_replace('<head>', "<head>\n    <base href=\"/miembros/\">", $html);
     }
@@ -166,180 +192,88 @@ if ($distIndex && file_exists($distIndex)) {
     exit;
 }
 
-// 4. Si la carpeta dist/ aún no existe en el servidor, mostrar pantalla instructiva clara
-http_response_code(503);
+// 4. Mientras el repositorio se actualiza / sincroniza, mantener únicamente el círculo de carga institucional
+// (Usamos 200 + no-store para evitar que el servidor de hosting sustituya la respuesta por su propia página 503)
+http_response_code(200);
 header('Content-Type: text/html; charset=UTF-8');
-
-$dirContents = @scandir(__DIR__) ?: [];
-$foldersOnly = array_filter($dirContents, function($item) {
-    return $item !== '.' && $item !== '..' && is_dir(__DIR__ . '/' . $item);
-});
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 ?>
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cruz Verde Salvadoreña - Despliegue en Hostinger</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f1f5f9;
-      color: #0f172a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 24px;
-      box-sizing: border-box;
-    }
-    .card {
-      background: #ffffff;
-      max-width: 600px;
-      width: 100%;
-      padding: 36px 32px;
-      border-radius: 20px;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
-      border: 1px solid #e2e8f0;
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      background: #ecfdf5;
-      color: #047857;
-      border: 1px solid #a7f3d0;
-      border-radius: 9999px;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }
-    h1 {
-      font-size: 22px;
-      margin: 16px 0 8px 0;
-      color: #111827;
-      font-weight: 800;
-    }
-    p.subtitle {
-      font-size: 14px;
-      color: #475569;
-      line-height: 1.5;
-      margin: 0;
-    }
-    .solution-box {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 12px;
-      padding: 18px;
-      margin-bottom: 20px;
-      text-align: left;
-    }
-    .solution-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: #008f39;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .steps {
-      margin: 0;
-      padding-left: 20px;
-      font-size: 13px;
-      color: #334155;
-      line-height: 1.7;
-    }
-    .steps code {
-      background: #e2e8f0;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 12px;
-      color: #0f172a;
-    }
-    .diagnostics {
-      background: #0f172a;
-      color: #94a3b8;
-      border-radius: 10px;
-      padding: 14px;
-      font-family: ui-monospace, monospace;
-      font-size: 12px;
-      margin-bottom: 24px;
-      text-align: left;
-      overflow-x: auto;
-    }
-    .diagnostics strong {
-      color: #f8fafc;
-    }
-    .actions {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: #008f39;
-      color: #ffffff;
-      padding: 12px 24px;
-      border-radius: 10px;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 14px;
-      border: none;
-      cursor: pointer;
-      box-shadow: 0 4px 6px -1px rgba(0, 143, 57, 0.2);
-    }
-    .btn:hover {
-      background: #007a31;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="header">
-      <div class="badge">
-        <span>🚑</span> Cruz Verde Salvadoreña
-      </div>
-      <h1>Despliegue en Hostinger</h1>
-      <p class="subtitle">
-        El repositorio se ha sincronizado correctamente en Hostinger, pero la carpeta compilada <strong>dist/</strong> aún no ha sido descargada.
-      </p>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cruz Verde Salvadoreña - Admin</title>
+    <noscript>
+      <meta http-equiv="refresh" content="4" />
+    </noscript>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f9fafb;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      .app-loader {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #f9fafb;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+      }
+      .app-spinner {
+        width: 44px;
+        height: 44px;
+        border: 4px solid #e5e7eb;
+        border-top-color: #008f39;
+        border-radius: 50%;
+        animation: cv-spin 0.8s linear infinite;
+        margin-bottom: 16px;
+      }
+      @keyframes cv-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-loader" role="status" aria-live="polite">
+      <div class="app-spinner"></div>
+      <div style="color: #374151; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;">Cargando Cruz Verde Salvadoreña...</div>
     </div>
-
-    <div class="solution-box">
-      <div class="solution-title">
-        <span>🔑</span> Paso necesario en GitHub (Permiso de Escritura para GitHub Actions):
-      </div>
-      <ol class="steps">
-        <li>Abre tu repositorio en <strong>GitHub</strong>.</li>
-        <li>Entra a <strong>Settings</strong> (pestaña superior derecha de la rueda dentada).</li>
-        <li>En la barra lateral izquierda, haz clic en <strong>Actions</strong> &gt; <strong>General</strong>.</li>
-        <li>Baja hasta la sección <strong>Workflow permissions</strong>.</li>
-        <li>Marca la opción: <strong>"Read and write permissions"</strong>.</li>
-        <li>Haz clic en el botón verde <strong>Save</strong>.</li>
-        <li>Vuelve a la pestaña <strong>Actions</strong> de tu repositorio, entra al último workflow y haz clic en <strong>Re-run all jobs</strong>.</li>
-      </ol>
-    </div>
-
-    <div class="diagnostics">
-      <div><strong>Ubicación actual:</strong> <?php echo htmlspecialchars(__DIR__); ?></div>
-      <div><strong>Carpetas encontradas:</strong> <?php echo htmlspecialchars(implode(', ', $foldersOnly) ?: 'Ninguna'); ?></div>
-      <div><strong>Buscando:</strong> <?php echo htmlspecialchars(__DIR__ . '/dist/index.html'); ?> (No encontrado aún)</div>
-    </div>
-
-    <div class="actions">
-      <button onclick="location.reload()" class="btn">🔄 Recargar Página</button>
-    </div>
-  </div>
-</body>
+    <script>
+      (function () {
+        var checking = false;
+        function checkReady() {
+          if (checking) return;
+          checking = true;
+          var sep = window.location.search ? '&' : '?';
+          var checkUrl = window.location.pathname + window.location.search + sep + '__cv_ready=1&_t=' + Date.now();
+          fetch(checkUrl, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: { 'X-CV-Ready-Check': '1' }
+          })
+            .then(function (res) { return res.ok ? res.json() : null; })
+            .then(function (data) {
+              if (data && data.ready === true) {
+                window.location.replace(window.location.href);
+                return;
+              }
+              checking = false;
+            })
+            .catch(function () {
+              checking = false;
+            });
+        }
+        setInterval(checkReady, 2000);
+        setTimeout(checkReady, 1200);
+      })();
+    </script>
+  </body>
 </html>

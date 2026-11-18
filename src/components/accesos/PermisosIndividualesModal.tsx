@@ -1,32 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Shield,
   Check,
   X,
   Search,
   RotateCcw,
-  CheckCircle2,
-  XCircle,
-  Sliders,
-  HelpCircle,
-  FolderDown,
-  Car,
-  Users,
-  Sparkles,
-  Megaphone,
-  FileSpreadsheet,
-  MapPin,
-  IdCard,
-  Fuel,
-  FileText,
-  Globe,
-  Building2,
-  User,
-  Lock,
-  Eye,
-  Edit3,
-  Plus,
   Copy,
+  ChevronDown,
 } from 'lucide-react';
 import {
   ModuleScope,
@@ -52,19 +31,19 @@ interface PermisosIndividualesModalProps {
   ) => Promise<void>;
 }
 
-const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: string[] }> = {
+const PERMISSION_CATEGORIES: Record<string, { label: string; keys: string[] }> = {
   socorristas: {
-    label: 'Socorristas y Méritos',
-    icon: Users,
+    label: 'Socorristas y Conoce a tu Socorrista',
     keys: [
       'view_socorristas',
       'add_socorristas',
       'edit_socorristas',
+      'descargar_ficha_conoce_socorrista',
+      'descargar_excel_socorristas',
       'subir_expediente_socorrista',
       'ver_expediente_socorrista',
       'descargar_expediente_socorrista',
       'cambiar_estado_socorrista',
-      'descargar_excel_socorristas',
       'ver_imagenes_socorristas',
       'view_carnet',
       'descargar_carnet',
@@ -75,8 +54,7 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
     ],
   },
   vehiculos: {
-    label: 'Vehículos y Solicitudes',
-    icon: Car,
+    label: 'Solicitudes y Vehículos',
     keys: [
       'view_vehiculos',
       'edit_vehiculos',
@@ -99,7 +77,6 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
   },
   contenido: {
     label: 'Archivos y Seccionales',
-    icon: FolderDown,
     keys: [
       'view_dashboard',
       'view_archivos',
@@ -114,7 +91,6 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
   },
   comunicacion: {
     label: 'Anuncios, Noticias y Formularios',
-    icon: Megaphone,
     keys: [
       'view_anuncios',
       'crear_anuncios',
@@ -127,16 +103,22 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
       'ver_todos_formularios',
     ],
   },
+  soporte: {
+    label: 'Soporte Técnico e Incidencias',
+    keys: [
+      'view_soporte',
+      'crear_soporte',
+      'view_soporte_seccional',
+      'view_soporte_historial',
+      'edit_soporte_estado',
+    ],
+  },
   admin: {
     label: 'Seguridad y Sistema',
-    icon: Shield,
     keys: [
       'ver_todas_seccionales',
       'ver_personas_conectadas',
       'personalizar_colores',
-      'view_soporte',
-      'view_soporte_historial',
-      'edit_soporte_estado',
       'view_config',
       'view_activity',
       'view_accesos',
@@ -147,28 +129,19 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; icon: any; keys: st
 const SCOPED_MODULES: {
   key: ScopedModuleKey;
   label: string;
-  desc: string;
-  icon: any;
+  subtitle: string;
   viewKey: string;
   editKeys: string[];
   createKey?: string;
+  resolveKey?: string;
   historialKey?: string;
   plantillasKey?: string;
   pdfPreviewKey?: string;
 }[] = [
   {
-    key: 'formularios',
-    label: 'Formularios',
-    desc: 'Control de formularios institucionales y respuestas (sin opción de eliminar).',
-    icon: FileSpreadsheet,
-    viewKey: 'view_formularios',
-    editKeys: ['edit_formularios', 'crear_formularios'],
-  },
-  {
     key: 'solicitudes_combustible',
     label: 'Solicitudes de Combustible',
-    desc: 'Gestión de vales, dotación y aprobaciones (sin opción de eliminar).',
-    icon: Fuel,
+    subtitle: 'Vales, dotación y autorizaciones',
     viewKey: 'view_solicitudes_combustible',
     editKeys: ['edit_solicitudes_combustible', 'aprobar_solicitudes_combustible'],
     createKey: 'crear_solicitudes_combustible',
@@ -179,8 +152,7 @@ const SCOPED_MODULES: {
   {
     key: 'solicitudes_compra',
     label: 'Solicitudes de Compra',
-    desc: 'Requisiciones de insumos, repuestos y mantenimiento (sin opción de eliminar).',
-    icon: FileText,
+    subtitle: 'Insumos, repuestos y mantenimiento',
     viewKey: 'view_solicitudes_compra',
     editKeys: ['edit_solicitudes_compra', 'aprobar_solicitudes_compra'],
     createKey: 'crear_solicitudes_compra',
@@ -191,10 +163,25 @@ const SCOPED_MODULES: {
   {
     key: 'solicitudes_carnet',
     label: 'Solicitudes de Carnet',
-    desc: 'Control de solicitudes pendientes, observadas y completadas (sin opción de eliminar).',
-    icon: IdCard,
+    subtitle: 'Revisión y estados de emisión',
     viewKey: 'view_solicitudes_carnet',
     editKeys: ['edit_solicitudes_carnet'],
+  },
+  {
+    key: 'soporte',
+    label: 'Soporte Técnico',
+    subtitle: 'Crear reportes, ver por seccional y solventar solicitudes',
+    viewKey: 'view_soporte',
+    editKeys: ['edit_soporte_estado'],
+    createKey: 'crear_soporte',
+    resolveKey: 'edit_soporte_estado',
+  },
+  {
+    key: 'formularios',
+    label: 'Formularios Institucionales',
+    subtitle: 'Formularios activos y respuestas',
+    viewKey: 'view_formularios',
+    editKeys: ['edit_formularios', 'crear_formularios'],
   },
 ];
 
@@ -205,60 +192,95 @@ const SIMPLE_VIEW_EDIT_MODULES: {
   editKeys: string[];
 }[] = [
   {
-    label: 'Noticias y Ajustes de Banner (Dashboard)',
-    desc: 'Ver la pestaña de Noticias y configurar slides, imágenes, editor y tiempos del banner.',
+    label: 'Socorristas (Módulo general)',
+    desc: 'Ver listado o registrar y editar perfiles',
+    viewKey: 'view_socorristas',
+    editKeys: ['add_socorristas', 'edit_socorristas'],
+  },
+  {
+    label: 'Carnets Digitales',
+    desc: 'Generar y descargar carnets institucionales',
+    viewKey: 'view_carnet',
+    editKeys: ['descargar_carnet'],
+  },
+  {
+    label: 'Noticias y Banner de Inicio',
+    desc: 'Ver noticias o administrar slides del banner',
     viewKey: 'view_noticias_ajustes',
     editKeys: ['edit_noticias_banner'],
   },
   {
     label: 'Anuncios Institucionales',
-    desc: 'Publicar, editar o solo leer avisos y boletines.',
+    desc: 'Leer avisos o publicar y editar comunicados',
     viewKey: 'view_anuncios',
     editKeys: ['edit_anuncios', 'crear_anuncios'],
   },
   {
     label: 'Archivos Descargables',
-    desc: 'Subir y administrar documentos o solo descargar.',
+    desc: 'Consultar documentos o subir nuevos archivos',
     viewKey: 'view_archivos',
     editKeys: ['edit_archivos', 'subir_archivos'],
   },
   {
-    label: 'Méritos y Premios',
-    desc: 'Registrar condecoraciones y enlaces o solo consultar.',
-    viewKey: 'view_meritos',
-    editKeys: ['edit_meritos'],
-  },
-  {
     label: 'Flota de Vehículos',
-    desc: 'Crear/editar vehículos y mantenimientos o solo visualizar.',
+    desc: 'Visualizar unidades o gestionar mantenimientos',
     viewKey: 'view_vehiculos',
     editKeys: ['edit_vehiculos'],
   },
   {
-    label: 'Socorristas (Nivel General)',
-    desc: 'Acceso base al módulo de socorristas; las seccionales específicas se configuran en la pestaña de Seccionales.',
-    viewKey: 'view_socorristas',
-    editKeys: ['edit_socorristas'],
+    label: 'Méritos y Reconocimientos',
+    desc: 'Consultar distinciones o registrar nuevas',
+    viewKey: 'view_meritos',
+    editKeys: ['edit_meritos'],
   },
   {
     label: 'Seccionales',
-    desc: 'Crear y modificar información de seccionales o solo consultar.',
+    desc: 'Consultar sedes o editar información',
     viewKey: 'view_seccionales',
     editKeys: ['edit_seccionales'],
   },
   {
-    label: 'Directorio y Directores',
-    desc: 'Editar contactos institucionales y directorio o solo lectura.',
+    label: 'Directorio Institucional',
+    desc: 'Ver teléfonos o actualizar contactos',
     viewKey: 'view_directorio',
     editKeys: ['edit_directorio'],
   },
   {
-    label: 'Soporte Técnico (Historial Global y Finalizar Casos)',
-    desc: 'Permitir ver el historial completo de reportes de soporte de todos los usuarios, agregar notas y cambiar el estado a Finalizado.',
-    viewKey: 'view_soporte_historial',
+    label: 'Soporte Técnico',
+    desc: 'Acceder a soporte o solventar y finalizar solicitudes',
+    viewKey: 'view_soporte',
     editKeys: ['edit_soporte_estado'],
   },
 ];
+
+function IosSwitch({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={onChange}
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
+        checked ? 'bg-emerald-500' : 'bg-slate-200'
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ${
+          checked ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
 
 export default function PermisosIndividualesModal({
   user,
@@ -300,11 +322,16 @@ export default function PermisosIndividualesModal({
       subir_expediente_socorrista: false,
       ver_expediente_socorrista: false,
       descargar_expediente_socorrista: false,
+      descargar_ficha_conoce_socorrista: false,
       ver_personas_conectadas: false,
       view_meritos: true,
       view_anuncios: true,
       view_formularios: true,
       view_soporte: true,
+      crear_soporte: true,
+      view_soporte_seccional: false,
+      view_soporte_historial: false,
+      edit_soporte_estado: false,
     };
   };
 
@@ -313,9 +340,18 @@ export default function PermisosIndividualesModal({
     [selectedRole, rolePermissions, permissionLabels]
   );
 
-  const userDefaultSeccionalId = user?.socorristas?.seccional_id ? Number(user.socorristas.seccional_id) : null;
+  const userDefaultSeccionalId = user?.socorristas?.seccional_id
+    ? Number(user.socorristas.seccional_id)
+    : null;
 
-  // Extract ONLY boolean overrides safely (preserve _module_scopes, _module_seccionales and _seccionales_socorristas separately)
+  const userDefaultSeccionalName = useMemo(() => {
+    if (user?.socorristas?.seccionales?.nombre) return user.socorristas.seccionales.nombre;
+    if (userDefaultSeccionalId) {
+      return seccionales.find((s) => s.id === userDefaultSeccionalId)?.nombre || null;
+    }
+    return null;
+  }, [user, userDefaultSeccionalId, seccionales]);
+
   const [customOverrides, setCustomOverrides] = useState<Record<string, boolean>>(() => {
     const raw = user.custom_permissions || {};
     const initial: Record<string, boolean> = {};
@@ -332,11 +368,31 @@ export default function PermisosIndividualesModal({
 
   const [moduleScopes, setModuleScopes] = useState<Record<ScopedModuleKey, ModuleScope>>(() => {
     const rawScopes = user.custom_permissions?._module_scopes || {};
+    const cp = user.custom_permissions || {};
+    const effSoporteGlobal =
+      typeof cp.view_soporte_historial === 'boolean'
+        ? cp.view_soporte_historial
+        : Boolean(baseRolePermissions.view_soporte_historial);
+    const effSoporteSec =
+      typeof cp.view_soporte_seccional === 'boolean'
+        ? cp.view_soporte_seccional
+        : Boolean(baseRolePermissions.view_soporte_seccional);
+
     return {
-      formularios: rawScopes.formularios || (baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario'),
-      solicitudes_combustible: rawScopes.solicitudes_combustible || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
-      solicitudes_compra: rawScopes.solicitudes_compra || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
-      solicitudes_carnet: rawScopes.solicitudes_carnet || (baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional'),
+      formularios:
+        rawScopes.formularios || (baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario'),
+      solicitudes_combustible:
+        rawScopes.solicitudes_combustible ||
+        (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_compra:
+        rawScopes.solicitudes_compra ||
+        (baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_carnet:
+        rawScopes.solicitudes_carnet ||
+        (baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional'),
+      soporte:
+        rawScopes.soporte ||
+        (effSoporteGlobal ? 'global' : effSoporteSec ? 'seccional' : 'usuario'),
     };
   });
 
@@ -344,12 +400,15 @@ export default function PermisosIndividualesModal({
     const rawModSeccs = user.custom_permissions?._module_seccionales || {};
     const fallbackArr = userDefaultSeccionalId ? [userDefaultSeccionalId] : [];
     const parseArr = (val: any) =>
-      Array.isArray(val) ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0))) : fallbackArr;
+      Array.isArray(val)
+        ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0)))
+        : fallbackArr;
     return {
       formularios: parseArr(rawModSeccs.formularios),
       solicitudes_combustible: parseArr(rawModSeccs.solicitudes_combustible),
       solicitudes_compra: parseArr(rawModSeccs.solicitudes_compra),
       solicitudes_carnet: parseArr(rawModSeccs.solicitudes_carnet),
+      soporte: parseArr(rawModSeccs.soporte),
     };
   });
 
@@ -392,15 +451,19 @@ export default function PermisosIndividualesModal({
     return { mode: 'default', seccionales: {} };
   });
 
-  const [activeTab, setActiveTab] = useState<'alcances' | 'seccionales' | 'modulos' | 'todos'>('alcances');
+  const [activeTab, setActiveTab] = useState<'alcances' | 'modulos' | 'todos'>('alcances');
+  const [expandedScopedModule, setExpandedScopedModule] = useState<ScopedModuleKey | null>(
+    'solicitudes_combustible'
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [secSearchTerm, setSecSearchTerm] = useState('');
   const [scopeSecSearch, setScopeSecSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'todos' | 'permitidos' | 'denegados' | 'personalizados'>('todos');
+  const [activeFilter, setActiveFilter] = useState<'todos' | 'permitidos' | 'personalizados'>('todos');
   const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Copiar accesos desde otro usuario
+  // Copiar configuración de otro usuario (plegable para no saturar)
+  const [showCopyBar, setShowCopyBar] = useState(false);
   const [copySourceUserId, setCopySourceUserId] = useState<string>('');
   const [copyIncludeBaseRole, setCopyIncludeBaseRole] = useState<boolean>(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -415,8 +478,8 @@ export default function PermisosIndividualesModal({
       String(u.nombre_usuario || u.nombre_completo || '').trim() ||
       (u.socorristas ? `${u.socorristas.primer_nombre} ${u.socorristas.primer_apellido}` : '') ||
       u.email ||
-      u.id;
-    return `${name} (${u.email || 'sin correo'}) — Rol: ${u.role}`;
+      'Usuario';
+    return `${name} · ${u.role}`;
   };
 
   const handleCopyFromUser = () => {
@@ -434,7 +497,6 @@ export default function PermisosIndividualesModal({
       setSelectedRole(srcRole);
     }
 
-    // Construir overrides booleanos
     const nextOverrides: Record<string, boolean> = {};
     if (copyIncludeBaseRole) {
       Object.keys(srcCp).forEach((k) => {
@@ -446,7 +508,6 @@ export default function PermisosIndividualesModal({
         nextOverrides.subir_archivos = true;
       }
     } else {
-      // Materializar cualquier permiso efectivo del usuario origen que difiera del rol destino actual
       Object.keys(permissionLabels).forEach((k) => {
         const srcEffective =
           typeof srcCp[k] === 'boolean' ? Boolean(srcCp[k]) : Boolean(srcRolePerms[k]);
@@ -461,27 +522,40 @@ export default function PermisosIndividualesModal({
     }
     setCustomOverrides(nextOverrides);
 
-    // Copiar alcances de módulos
     const srcScopes = srcCp._module_scopes || {};
+    const srcSoporteGlobal =
+      typeof srcCp.view_soporte_historial === 'boolean'
+        ? srcCp.view_soporte_historial
+        : Boolean(srcRolePerms.view_soporte_historial);
+    const srcSoporteSec =
+      typeof srcCp.view_soporte_seccional === 'boolean'
+        ? srcCp.view_soporte_seccional
+        : Boolean(srcRolePerms.view_soporte_seccional);
     setModuleScopes({
       formularios: srcScopes.formularios || (srcRolePerms.ver_todos_formularios ? 'global' : 'usuario'),
-      solicitudes_combustible: srcScopes.solicitudes_combustible || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
-      solicitudes_compra: srcScopes.solicitudes_compra || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
-      solicitudes_carnet: srcScopes.solicitudes_carnet || (srcRolePerms.ver_todas_seccionales ? 'global' : 'seccional'),
+      solicitudes_combustible:
+        srcScopes.solicitudes_combustible || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_compra:
+        srcScopes.solicitudes_compra || (srcRolePerms.ver_todas_seccionales ? 'global' : 'usuario'),
+      solicitudes_carnet:
+        srcScopes.solicitudes_carnet || (srcRolePerms.ver_todas_seccionales ? 'global' : 'seccional'),
+      soporte:
+        srcScopes.soporte || (srcSoporteGlobal ? 'global' : srcSoporteSec ? 'seccional' : 'usuario'),
     });
 
-    // Copiar seccionales por módulo
     const srcModSeccs = srcCp._module_seccionales || {};
     const parseArr = (val: any) =>
-      Array.isArray(val) ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0))) : [];
+      Array.isArray(val)
+        ? Array.from(new Set(val.map(Number).filter((n) => !isNaN(n) && n > 0)))
+        : [];
     setModuleSeccionales({
       formularios: parseArr(srcModSeccs.formularios),
       solicitudes_combustible: parseArr(srcModSeccs.solicitudes_combustible),
       solicitudes_compra: parseArr(srcModSeccs.solicitudes_compra),
       solicitudes_carnet: parseArr(srcModSeccs.solicitudes_carnet),
+      soporte: parseArr(srcModSeccs.soporte),
     });
 
-    // Copiar alcances de creación
     const srcCreate = srcCp._create_scopes || {};
     const resolveCreate = (k: CreateSolicitudModuleKey): CreateSolicitudScope => {
       if (srcCreate[k] === 'global' || srcCreate[k] === 'seccional') return srcCreate[k];
@@ -504,7 +578,6 @@ export default function PermisosIndividualesModal({
       solicitudes_compra: parseSingleSec('solicitudes_compra'),
     });
 
-    // Copiar permisos por seccional (Socorristas)
     const srcSecCfg = srcCp._seccionales_socorristas;
     if (srcSecCfg && (srcSecCfg.mode === 'all' || srcSecCfg.mode === 'custom' || srcSecCfg.mode === 'default')) {
       setSecConfig({
@@ -519,7 +592,7 @@ export default function PermisosIndividualesModal({
       String(source.nombre_usuario || source.nombre_completo || '').trim() ||
       (source.socorristas ? `${source.socorristas.primer_nombre} ${source.socorristas.primer_apellido}` : '') ||
       source.email;
-    setCopyNotice(`Configuración de acceso copiada de "${srcName}". Ya puedes modificar cualquier permiso abajo antes de guardar.`);
+    setCopyNotice(`Accesos copiados de ${srcName}. Revisa y guarda para aplicar.`);
   };
 
   const getPermissionStatus = (key: string) => {
@@ -542,6 +615,14 @@ export default function PermisosIndividualesModal({
       else copy[key] = false;
       return copy;
     });
+  };
+
+  const handleToggleBooleanPerm = (key: string) => {
+    const current = getPermissionStatus(key).effectiveValue;
+    setCustomOverrides((prev) => ({
+      ...prev,
+      [key]: !current,
+    }));
   };
 
   const setMultipleKeys = (keys: string[], value: boolean | 'role') => {
@@ -586,6 +667,138 @@ export default function PermisosIndividualesModal({
     });
   };
 
+  // Nivel rápido: Global vs Seccional vs Según Rol
+  const generalScopePreset = useMemo<'global' | 'seccional' | 'rol'>(() => {
+    const isAllScopesGlobal =
+      moduleScopes.formularios === 'global' &&
+      moduleScopes.solicitudes_combustible === 'global' &&
+      moduleScopes.solicitudes_compra === 'global' &&
+      moduleScopes.solicitudes_carnet === 'global' &&
+      moduleScopes.soporte === 'global';
+
+    if (
+      (secConfig.mode === 'all' || getPermissionStatus('ver_todas_seccionales').effectiveValue) &&
+      isAllScopesGlobal &&
+      createScopes.solicitudes_combustible === 'global' &&
+      createScopes.solicitudes_compra === 'global'
+    ) {
+      return 'global';
+    }
+
+    if (
+      secConfig.mode === 'default' &&
+      customOverrides.ver_todas_seccionales === undefined &&
+      customOverrides.ver_todos_formularios === undefined &&
+      Object.keys(customOverrides).length === 0
+    ) {
+      return 'rol';
+    }
+
+    return 'seccional';
+  }, [secConfig.mode, moduleScopes, createScopes, customOverrides, baseRolePermissions]);
+
+  const applyQuickGeneralScope = (preset: 'global' | 'seccional' | 'rol') => {
+    if (preset === 'global') {
+      setCustomOverrides((prev) => ({
+        ...prev,
+        ver_todas_seccionales: true,
+        ver_todos_formularios: true,
+        view_soporte_historial: true,
+        view_soporte_seccional: false,
+      }));
+      setSecConfig((prev) => ({ ...prev, mode: 'all' }));
+      setModuleScopes({
+        formularios: 'global',
+        solicitudes_combustible: 'global',
+        solicitudes_compra: 'global',
+        solicitudes_carnet: 'global',
+        soporte: 'global',
+      });
+      setCreateScopes({
+        solicitudes_combustible: 'global',
+        solicitudes_compra: 'global',
+      });
+      return;
+    }
+
+    if (preset === 'seccional') {
+      const defaultSec = userDefaultSeccionalId || seccionales[0]?.id || null;
+      const defaultArr = defaultSec ? [defaultSec] : [];
+      setCustomOverrides((prev) => ({
+        ...prev,
+        ver_todas_seccionales: false,
+        ver_todos_formularios: false,
+        view_soporte_historial: false,
+        view_soporte_seccional: true,
+      }));
+      setSecConfig((prev) => {
+        const hasAny = Object.values(prev.seccionales || {}).some((v) => v.view || v.add || v.edit);
+        if (hasAny) return { ...prev, mode: 'custom' };
+        return {
+          mode: 'custom',
+          seccionales: defaultSec ? { [defaultSec]: { view: true, add: false, edit: false } } : {},
+        };
+      });
+      setModuleScopes({
+        formularios: 'seccional',
+        solicitudes_combustible: 'seccional',
+        solicitudes_compra: 'seccional',
+        solicitudes_carnet: 'seccional',
+        soporte: 'seccional',
+      });
+      setModuleSeccionales((prev) => ({
+        formularios: prev.formularios.length ? prev.formularios : defaultArr,
+        solicitudes_combustible: prev.solicitudes_combustible.length ? prev.solicitudes_combustible : defaultArr,
+        solicitudes_compra: prev.solicitudes_compra.length ? prev.solicitudes_compra : defaultArr,
+        solicitudes_carnet: prev.solicitudes_carnet.length ? prev.solicitudes_carnet : defaultArr,
+        soporte: prev.soporte.length ? prev.soporte : defaultArr,
+      }));
+      setCreateScopes({
+        solicitudes_combustible: 'seccional',
+        solicitudes_compra: 'seccional',
+      });
+      setCreateSeccionales((prev) => ({
+        solicitudes_combustible: prev.solicitudes_combustible || defaultSec,
+        solicitudes_compra: prev.solicitudes_compra || defaultSec,
+      }));
+      return;
+    }
+
+    // Restablecer a Rol
+    setCustomOverrides({});
+    setSecConfig({ mode: 'default', seccionales: {} });
+    setModuleScopes({
+      formularios: baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario',
+      solicitudes_combustible: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
+      solicitudes_compra: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
+      solicitudes_carnet: baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional',
+      soporte: baseRolePermissions.view_soporte_historial
+        ? 'global'
+        : baseRolePermissions.view_soporte_seccional
+        ? 'seccional'
+        : 'usuario',
+    });
+    const fallbackArr = userDefaultSeccionalId ? [userDefaultSeccionalId] : [];
+    setModuleSeccionales({
+      formularios: fallbackArr,
+      solicitudes_combustible: fallbackArr,
+      solicitudes_compra: fallbackArr,
+      solicitudes_carnet: fallbackArr,
+      soporte: fallbackArr,
+    });
+    const defaultCreateScope: CreateSolicitudScope = baseRolePermissions.ver_todas_seccionales
+      ? 'global'
+      : 'seccional';
+    setCreateScopes({
+      solicitudes_combustible: defaultCreateScope,
+      solicitudes_compra: defaultCreateScope,
+    });
+    setCreateSeccionales({
+      solicitudes_combustible: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
+      solicitudes_compra: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
+    });
+  };
+
   const toggleSeccionalPerm = (secId: number, field: 'view' | 'add' | 'edit') => {
     setSecConfig((prev) => {
       const current = prev.seccionales[secId] || { view: false, add: false, edit: false };
@@ -594,11 +807,9 @@ export default function PermisosIndividualesModal({
         ...current,
         [field]: nextVal,
       };
-      // If granting add or edit, automatically ensure view is enabled
       if ((field === 'add' || field === 'edit') && nextVal) {
         updated.view = true;
       }
-      // If disabling view, also disable add & edit
       if (field === 'view' && !nextVal) {
         updated.add = false;
         updated.edit = false;
@@ -614,25 +825,18 @@ export default function PermisosIndividualesModal({
     });
   };
 
-  const handleBulkSeccionales = (field: 'view' | 'add' | 'edit' | 'all' | 'none') => {
+  const handleBulkSeccionales = (field: 'view' | 'all' | 'none') => {
     setSecConfig((prev) => {
       if (field === 'none') {
         return { mode: 'custom', seccionales: {} };
       }
       const nextMap: Record<number, { view: boolean; add: boolean; edit: boolean }> = {};
       seccionales.forEach((s) => {
-        const cur = prev.seccionales[s.id] || { view: false, add: false, edit: false };
         if (field === 'all') {
           nextMap[s.id] = { view: true, add: true, edit: true };
         } else {
-          const allCurrentlyOn = seccionales.every((sec) => prev.seccionales[sec.id]?.[field]);
-          const target = !allCurrentlyOn;
-          nextMap[s.id] = {
-            ...cur,
-            [field]: target,
-            ...(target && (field === 'add' || field === 'edit') ? { view: true } : {}),
-            ...(field === 'view' && !target ? { add: false, edit: false } : {}),
-          };
+          const cur = prev.seccionales[s.id] || { view: false, add: false, edit: false };
+          nextMap[s.id] = { ...cur, view: true };
         }
       });
       return { mode: 'custom', seccionales: nextMap };
@@ -646,35 +850,6 @@ export default function PermisosIndividualesModal({
       const next = exists ? current.filter((id) => id !== secId) : [...current, secId];
       return { ...prev, [modKey]: next };
     });
-  };
-
-  const handleResetAllToRole = () => {
-    if (confirm(`¿Restablecer todos los permisos de ${user.email} para que hereden exactamente su rol base "${user.role}"?`)) {
-      setCustomOverrides({});
-      setSecConfig({ mode: 'default', seccionales: {} });
-      setModuleScopes({
-        formularios: baseRolePermissions.ver_todos_formularios ? 'global' : 'usuario',
-        solicitudes_combustible: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
-        solicitudes_compra: baseRolePermissions.ver_todas_seccionales ? 'global' : 'usuario',
-        solicitudes_carnet: baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional',
-      });
-      const fallbackArr = userDefaultSeccionalId ? [userDefaultSeccionalId] : [];
-      setModuleSeccionales({
-        formularios: fallbackArr,
-        solicitudes_combustible: fallbackArr,
-        solicitudes_compra: fallbackArr,
-        solicitudes_carnet: fallbackArr,
-      });
-      const defaultCreateScope: CreateSolicitudScope = baseRolePermissions.ver_todas_seccionales ? 'global' : 'seccional';
-      setCreateScopes({
-        solicitudes_combustible: defaultCreateScope,
-        solicitudes_compra: defaultCreateScope,
-      });
-      setCreateSeccionales({
-        solicitudes_combustible: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
-        solicitudes_compra: userDefaultSeccionalId ?? seccionales[0]?.id ?? null,
-      });
-    }
   };
 
   const handleAllowAll = () => {
@@ -711,8 +886,6 @@ export default function PermisosIndividualesModal({
 
     if (activeFilter === 'permitidos') {
       keys = keys.filter((k) => getPermissionStatus(k).effectiveValue);
-    } else if (activeFilter === 'denegados') {
-      keys = keys.filter((k) => !getPermissionStatus(k).effectiveValue);
     } else if (activeFilter === 'personalizados') {
       keys = keys.filter((k) => getPermissionStatus(k).isOverridden);
     }
@@ -745,6 +918,11 @@ export default function PermisosIndividualesModal({
       totalCount: Object.keys(permissionLabels).length,
     };
   }, [permissionLabels, customOverrides, baseRolePermissions]);
+
+  const customSeccionalesSelectedCount = useMemo(
+    () => Object.values(secConfig.seccionales || {}).filter((v) => v.view || v.add || v.edit).length,
+    [secConfig.seccionales]
+  );
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -786,600 +964,971 @@ export default function PermisosIndividualesModal({
       : user.email || 'Usuario');
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/45 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150">
-        {/* HEADER */}
-        <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center space-x-3.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center border border-slate-200/60 shadow-2xs shrink-0">
-              <Sliders className="w-4 h-4 text-emerald-600" />
+    <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+      <div className="bg-[#F2F2F7] rounded-[28px] shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150">
+        {/* ENCABEZADO ESTILO iOS SHEET */}
+        <div className="px-5 py-4 bg-white border-b border-slate-200/70 flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2 className="text-base font-bold text-slate-900 tracking-tight truncate">
+                {nombreUsuario}
+              </h2>
+              <select
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value)}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200/80 cursor-pointer outline-none focus:border-slate-400"
+                title="Rol base asignado al usuario"
+              >
+                {Array.from(new Set([...(roles || []), selectedRole])).map((r) => (
+                  <option key={r} value={r}>
+                    Rol: {r}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm font-semibold text-gray-900 tracking-tight">
-                  Permisos Individuales y Alcance por Seccional
-                </h2>
-                <select
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value)}
-                  className="px-2 py-0.5 rounded-lg text-3xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 uppercase cursor-pointer outline-none focus:border-emerald-500"
-                  title="Rol base asignado al usuario"
-                >
-                  {Array.from(new Set([...(roles || []), selectedRole])).map((r) => (
-                    <option key={r} value={r}>
-                      Rol: {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-2xs text-gray-400 truncate">
-                {nombreUsuario} &bull; <span className="font-mono text-gray-500">{user.email}</span>
-              </p>
-            </div>
+            <p className="text-xs text-slate-500 truncate mt-0.5">
+              <span>{user.email}</span>
+              {userDefaultSeccionalName && (
+                <>
+                  <span className="mx-1.5" aria-hidden="true">·</span>
+                  <span>{userDefaultSeccionalName}</span>
+                </>
+              )}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {otherUsers.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowCopyBar((prev) => !prev)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  showCopyBar
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700'
+                }`}
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copiar de...</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* COPIAR CONFIGURACIÓN DE OTRO USUARIO */}
-        {otherUsers.length > 0 && (
-          <div className="px-6 py-2.5 bg-emerald-50/60 border-b border-emerald-200/60 shrink-0 space-y-1.5">
-            <div className="flex flex-col md:flex-row md:items-center gap-2 justify-between">
-              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-950 shrink-0">
-                <Copy className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Copiar configuración de otro usuario:</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 flex-1 md:justify-end">
-                <select
-                  value={copySourceUserId}
-                  onChange={(e) => setCopySourceUserId(e.target.value)}
-                  className="flex-1 min-w-[220px] max-w-md bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                >
-                  <option value="">-- Seleccionar usuario origen --</option>
-                  {otherUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {getOtherUserLabel(u)}
-                    </option>
-                  ))}
-                </select>
-                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={copyIncludeBaseRole}
-                    onChange={(e) => setCopyIncludeBaseRole(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
-                  />
-                  <span>Incluir su rol base</span>
-                </label>
-                <button
-                  type="button"
-                  disabled={!copySourceUserId}
-                  onClick={handleCopyFromUser}
-                  className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-lg disabled:opacity-40 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1.5"
-                >
-                  <Copy className="w-3 h-3" />
-                  Copiar aquí
-                </button>
-              </div>
+        {/* BARRA PLEGABLE: COPIAR DE OTRO USUARIO */}
+        {showCopyBar && otherUsers.length > 0 && (
+          <div className="px-5 py-3 bg-white border-b border-slate-200/70 shrink-0 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <select
+                value={copySourceUserId}
+                onChange={(e) => setCopySourceUserId(e.target.value)}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none focus:bg-white focus:border-slate-400"
+              >
+                <option value="">Seleccionar usuario para copiar sus accesos...</option>
+                {otherUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {getOtherUserLabel(u)} ({u.email})
+                  </option>
+                ))}
+              </select>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer px-2 py-1 whitespace-nowrap shrink-0">
+                <input
+                  type="checkbox"
+                  checked={copyIncludeBaseRole}
+                  onChange={(e) => setCopyIncludeBaseRole(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                />
+                <span>Incluir rol</span>
+              </label>
+              <button
+                type="button"
+                disabled={!copySourceUserId}
+                onClick={handleCopyFromUser}
+                className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl disabled:opacity-40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Aplicar copia
+              </button>
             </div>
             {copyNotice && (
-              <p className="text-[11px] font-medium text-emerald-800 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>{copyNotice}</span>
-              </p>
+              <p className="text-xs text-emerald-700 font-medium">{copyNotice}</p>
             )}
           </div>
         )}
 
-        {/* QUICK STATS + TOP NAVIGATION TABS */}
-        <div className="px-6 py-3 bg-slate-50/80 border-b border-slate-200/70 space-y-3 shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                <Check className="w-3 h-3 mr-1 text-emerald-600" />
-                {summary.allowedCount} Permitidos
-              </span>
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
-                <X className="w-3 h-3 mr-1 text-rose-600" />
-                {summary.deniedCount} Bloqueados
-              </span>
-              {summary.overrideCount > 0 && (
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
-                  <Sparkles className="w-3 h-3 mr-1 text-amber-600" />
-                  {summary.overrideCount} Excepciones
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleResetAllToRole}
-                className="px-2.5 py-1 text-3xs font-semibold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-              >
-                <RotateCcw className="w-3 h-3 mr-1 text-slate-400" />
-                Heredar de Rol
-              </button>
-              <button
-                type="button"
-                onClick={handleAllowAll}
-                className="px-2.5 py-1 text-3xs font-semibold text-emerald-700 bg-white hover:bg-emerald-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-              >
-                <Check className="w-3 h-3 mr-1 text-emerald-600" />
-                Permitir Todo
-              </button>
-              <button
-                type="button"
-                onClick={handleDenyAll}
-                className="px-2.5 py-1 text-3xs font-semibold text-rose-700 bg-white hover:bg-rose-50 rounded-lg border border-slate-200 transition-colors inline-flex items-center cursor-pointer shadow-2xs"
-              >
-                <X className="w-3 h-3 mr-1 text-rose-600" />
-                Denegar Todo
-              </button>
-            </div>
-          </div>
-
-          {/* 4 Main Configuration Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+        {/* CONTROL SEGMENTADO PRINCIPAL ESTILO iOS */}
+        <div className="px-5 pt-3 pb-2.5 bg-[#F2F2F7] border-b border-slate-200/60 shrink-0">
+          <div className="bg-slate-200/75 p-1 rounded-xl grid grid-cols-3 gap-1">
             <button
               type="button"
               onClick={() => setActiveTab('alcances')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'alcances'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Globe className="w-3.5 h-3.5" />
-              Formularios y Solicitudes (Alcance)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('seccionales')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-                activeTab === 'seccionales'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              <MapPin className="w-3.5 h-3.5" />
-              Seccionales (Socorristas)
+              Nivel y Alcance
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('modulos')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeTab === 'modulos'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              Módulos (Ver vs Editar)
+              Módulos
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('todos')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
                 activeTab === 'todos'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Sliders className="w-3.5 h-3.5" />
-              Todos los Permisos ({summary.totalCount})
+              Todos ({summary.totalCount})
             </button>
           </div>
         </div>
 
-        {/* TAB BODY */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50 space-y-4">
-          {/* TAB 1: FORMULARIOS Y SOLICITUDES CON ALCANCE */}
+        {/* CUERPO CON SCROLL INTERNO */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-4 space-y-5">
+          {/* TAB 1: NIVEL Y ALCANCE */}
           {activeTab === 'alcances' && (
-            <div className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900 flex items-start gap-2.5">
-                <Shield className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  Configura de forma individual qué módulos de <strong>Formularios</strong> y <strong>Solicitudes</strong>{' '}
-                  tiene activos el usuario, si puede <strong>Solo Ver</strong> o <strong>Editar</strong> (sin permisos de
-                  eliminación), y qué registros puede ver según su alcance: <strong>Global</strong>,{' '}
-                  <strong>Solo su Seccional</strong> o <strong>Solo de Usuario</strong>.
+            <>
+              {/* SECCIÓN 1: NIVEL OPERATIVO RÁPIDO (GLOBAL vs SECCIONAL) */}
+              <div className="space-y-1.5">
+                <p className="px-1 text-xs font-semibold text-slate-500">
+                  Nivel general del usuario
+                </p>
+                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 space-y-2.5">
+                  <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-3 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => applyQuickGeneralScope('global')}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                        generalScopePreset === 'global'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Nivel Global
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickGeneralScope('seccional')}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                        generalScopePreset === 'seccional'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Nivel Seccional
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickGeneralScope('rol')}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                        generalScopePreset === 'rol'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Según su Rol
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500 px-0.5">
+                    {generalScopePreset === 'global'
+                      ? 'Accede y gestiona información de todas las seccionales a nivel nacional.'
+                      : generalScopePreset === 'rol'
+                      ? `Hereda automáticamente los permisos estándar del rol ${selectedRole}.`
+                      : 'Acceso delimitado a las seccionales y módulos seleccionados abajo.'}
+                  </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {SCOPED_MODULES.map((mod) => {
-                  const IconComp = mod.icon;
-                  const accessLevel = getModuleAccessLevel(mod.viewKey, mod.editKeys);
-                  const currentScope = moduleScopes[mod.key];
-                  const selectedSecIds = moduleSeccionales[mod.key] || [];
-                  const canCreate = mod.createKey ? getPermissionStatus(mod.createKey).effectiveValue : null;
-                  const canHistorial = mod.historialKey ? getPermissionStatus(mod.historialKey).effectiveValue : null;
-                  const canPlantillas = mod.plantillasKey ? getPermissionStatus(mod.plantillasKey).effectiveValue : null;
-                  const canPreviewPdf = mod.pdfPreviewKey ? getPermissionStatus(mod.pdfPreviewKey).effectiveValue : null;
-                  const visibleSeccionalesForScope = scopeSecSearch.trim()
-                    ? seccionales.filter((s) => s.nombre.toLowerCase().includes(scopeSecSearch.trim().toLowerCase()))
-                    : seccionales;
+              {/* SECCIÓN 2: SOCORRISTAS Y CONOCE A TU SOCORRISTA */}
+              <div className="space-y-1.5">
+                <p className="px-1 text-xs font-semibold text-slate-500">
+                  Socorristas y Ficha «Conoce a tu Socorrista»
+                </p>
+                <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
+                  {/* Alcance en Socorristas */}
+                  <div className="p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          Alcance en Socorristas
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {secConfig.mode === 'all'
+                            ? 'Puede ver todas las seccionales del país'
+                            : secConfig.mode === 'custom'
+                            ? `${customSeccionalesSelectedCount} seccional(es) habilitada(s) manualmente`
+                            : 'Según el rol asignado al usuario'}
+                        </p>
+                      </div>
 
-                  return (
-                    <div
-                      key={mod.key}
-                      className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 space-y-3.5 flex flex-col justify-between"
-                    >
-                      <div className="space-y-3.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2.5">
-                            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center justify-center shrink-0">
-                              <IconComp className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-xs font-bold text-slate-900">{mod.label}</h3>
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                                  Eliminar: No
+                      <div className="bg-slate-100 p-1 rounded-xl inline-flex items-center gap-1 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'default' }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            secConfig.mode === 'default'
+                              ? 'bg-white text-slate-900 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Según Rol
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'all' }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            secConfig.mode === 'all'
+                              ? 'bg-white text-slate-900 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Global
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSecConfig((prev) => {
+                              const hasAny = Object.values(prev.seccionales || {}).some(
+                                (v) => v.view || v.add || v.edit
+                              );
+                              if (hasAny) return { ...prev, mode: 'custom' };
+                              const fallbackId = userDefaultSeccionalId || seccionales[0]?.id;
+                              return {
+                                mode: 'custom',
+                                seccionales: fallbackId
+                                  ? { [fallbackId]: { view: true, add: false, edit: false } }
+                                  : {},
+                              };
+                            });
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            secConfig.mode === 'custom'
+                              ? 'bg-white text-slate-900 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Por Seccional
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Selector limpio de Seccionales solo cuando elige "Por Seccional" */}
+                    {secConfig.mode === 'custom' && (
+                      <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="relative flex-1 min-w-[180px] max-w-xs">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2" />
+                            <input
+                              type="text"
+                              placeholder="Filtrar seccional..."
+                              value={secSearchTerm}
+                              onChange={(e) => setSecSearchTerm(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSeccionales('view')}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              Ver todas
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSeccionales('all')}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              Todo en todas
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSeccionales('none')}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 text-rose-600 font-medium cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              Limpiar
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="max-h-52 overflow-y-auto divide-y divide-slate-100 border border-slate-200/70 rounded-xl bg-slate-50/50">
+                          {filteredSeccionales.map((sec) => {
+                            const perm = secConfig.seccionales[sec.id] || {
+                              view: false,
+                              add: false,
+                              edit: false,
+                            };
+                            return (
+                              <div
+                                key={sec.id}
+                                className="px-3.5 py-2 flex items-center justify-between gap-3 bg-white hover:bg-slate-50/80"
+                              >
+                                <span className="text-xs font-medium text-slate-800 truncate">
+                                  {sec.nombre}
                                 </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSeccionalPerm(sec.id, 'view')}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                      perm.view
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-slate-100 text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    Ver
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSeccionalPerm(sec.id, 'add')}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                      perm.add
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-100 text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    Agregar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSeccionalPerm(sec.id, 'edit')}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                      perm.edit
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-100 text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    Editar
+                                  </button>
+                                </div>
                               </div>
-                              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{mod.desc}</p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ficha Conoce a tu Socorrista */}
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Descargar «Conoce a tu Socorrista»
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Muestra el botón para descargar o imprimir la hoja CVSSOCC/FORM001 en Ver Perfil
+                      </p>
+                    </div>
+                    <IosSwitch
+                      checked={getPermissionStatus('descargar_ficha_conoce_socorrista').effectiveValue}
+                      onChange={() => handleToggleBooleanPerm('descargar_ficha_conoce_socorrista')}
+                      ariaLabel="Descargar ficha Conoce a tu Socorrista"
+                    />
+                  </div>
+
+                  {/* Descargar Excel de Socorristas */}
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Descargar Excel de Socorristas
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Permite exportar el padrón en formato Excel desde Socorristas
+                      </p>
+                    </div>
+                    <IosSwitch
+                      checked={getPermissionStatus('descargar_excel_socorristas').effectiveValue}
+                      onChange={() => handleToggleBooleanPerm('descargar_excel_socorristas')}
+                      ariaLabel="Descargar Excel de Socorristas"
+                    />
+                  </div>
+
+                  {/* Expediente Digital */}
+                  <div className="px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        Expediente Digital del Socorrista
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Documentos adjuntos en el perfil (DUI, antecedentes, atestados)
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {[
+                        { key: 'ver_expediente_socorrista', label: 'Ver' },
+                        { key: 'subir_expediente_socorrista', label: 'Subir' },
+                        { key: 'descargar_expediente_socorrista', label: 'Descargar' },
+                      ].map((item) => {
+                        const active = getPermissionStatus(item.key).effectiveValue;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => handleToggleBooleanPerm(item.key)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                              active
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECCIÓN 3: SOLICITUDES Y FORMULARIOS */}
+              <div className="space-y-1.5">
+                <p className="px-1 text-xs font-semibold text-slate-500">
+                  Solicitudes y Formularios
+                </p>
+                <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
+                  {SCOPED_MODULES.map((mod) => {
+                    const accessLevel = getModuleAccessLevel(mod.viewKey, mod.editKeys);
+                    const currentScope = moduleScopes[mod.key];
+                    const selectedSecIds = moduleSeccionales[mod.key] || [];
+                    const isExpanded = expandedScopedModule === mod.key;
+                    const canCreate = mod.createKey
+                      ? getPermissionStatus(mod.createKey).effectiveValue
+                      : null;
+                    const canResolve = mod.resolveKey
+                      ? getPermissionStatus(mod.resolveKey).effectiveValue
+                      : null;
+                    const canHistorial = mod.historialKey
+                      ? getPermissionStatus(mod.historialKey).effectiveValue
+                      : null;
+                    const canPlantillas = mod.plantillasKey
+                      ? getPermissionStatus(mod.plantillasKey).effectiveValue
+                      : null;
+                    const canPreviewPdf = mod.pdfPreviewKey
+                      ? getPermissionStatus(mod.pdfPreviewKey).effectiveValue
+                      : null;
+
+                    const visibleSeccionalesForScope = scopeSecSearch.trim()
+                      ? seccionales.filter((s) =>
+                          s.nombre.toLowerCase().includes(scopeSecSearch.trim().toLowerCase())
+                        )
+                      : seccionales;
+
+                    const scopeText =
+                      accessLevel === 'blocked'
+                        ? 'Oculto'
+                        : currentScope === 'global'
+                        ? 'Nivel Global'
+                        : currentScope === 'seccional'
+                        ? `Seccional (${selectedSecIds.length || 1})`
+                        : 'Solo sus registros';
+
+                    return (
+                      <div key={mod.key} className="divide-y divide-slate-100">
+                        <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedScopedModule(isExpanded ? null : mod.key)
+                            }
+                            className="flex items-center justify-between sm:justify-start gap-2 text-left cursor-pointer group min-w-0"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {mod.label}
+                              </p>
+                              <p className="text-xs text-slate-500 truncate">
+                                {mod.subtitle} · <span className="text-slate-700 font-medium">{scopeText}</span>
+                              </p>
                             </div>
-                          </div>
-                        </div>
+                            <ChevronDown
+                              className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
+                                isExpanded ? 'rotate-180 text-slate-700' : ''
+                              }`}
+                            />
+                          </button>
 
-                        {/* Nivel de Acceso: Desactivado / Solo Ver / Editar */}
-                        <div className="space-y-1.5">
-                          <span className="text-[11px] font-semibold text-slate-600 block">
-                            Nivel de Acción:
-                          </span>
-                          <div className="grid grid-cols-3 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 gap-0.5">
+                          <div className="bg-slate-100 p-1 rounded-xl inline-flex items-center gap-1 self-start sm:self-auto shrink-0">
                             <button
                               type="button"
-                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                              onClick={() =>
+                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                                 accessLevel === 'blocked'
-                                  ? 'bg-rose-600 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
+                                  ? 'bg-white text-rose-600 shadow-2xs'
+                                  : 'text-slate-600 hover:text-slate-900'
                               }`}
                             >
-                              <Lock className="w-3 h-3" />
-                              Desactivado
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view')}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                                accessLevel === 'view'
-                                  ? 'bg-amber-500 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
-                              }`}
-                            >
-                              <Eye className="w-3 h-3" />
-                              Solo Ver
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit')}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                                accessLevel === 'edit'
-                                  ? 'bg-emerald-600 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
-                              }`}
-                            >
-                              <Edit3 className="w-3 h-3" />
-                              Editar
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Alcance de Visibilidad: Global / Seccional / Usuario */}
-                        <div className={`space-y-2 ${accessLevel === 'blocked' ? 'opacity-45 pointer-events-none' : ''}`}>
-                          <span className="text-[11px] font-semibold text-slate-600 block">
-                            Alcance de Registros Visibles:
-                          </span>
-                          <div className="grid grid-cols-3 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 gap-0.5">
-                            <button
-                              type="button"
-                              onClick={() => setModuleScopes((prev) => ({ ...prev, [mod.key]: 'global' }))}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                                currentScope === 'global'
-                                  ? 'bg-slate-900 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
-                              }`}
-                            >
-                              <Globe className="w-3 h-3" />
-                              Globales
+                              Oculto
                             </button>
                             <button
                               type="button"
                               onClick={() => {
-                                setModuleScopes((prev) => ({ ...prev, [mod.key]: 'seccional' }));
-                                if ((moduleSeccionales[mod.key] || []).length === 0 && userDefaultSeccionalId) {
-                                  setModuleSeccionales((prev) => ({ ...prev, [mod.key]: [userDefaultSeccionalId] }));
-                                }
+                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view');
+                                setExpandedScopedModule(mod.key);
                               }}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                                currentScope === 'seccional'
-                                  ? 'bg-slate-900 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                accessLevel === 'view'
+                                  ? 'bg-white text-slate-900 shadow-2xs'
+                                  : 'text-slate-600 hover:text-slate-900'
                               }`}
                             >
-                              <Building2 className="w-3 h-3" />
-                              Seccional
+                              Solo Ver
                             </button>
                             <button
                               type="button"
-                              onClick={() => setModuleScopes((prev) => ({ ...prev, [mod.key]: 'usuario' }))}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                                currentScope === 'usuario'
-                                  ? 'bg-slate-900 text-white shadow-2xs'
-                                  : 'text-slate-600 hover:bg-white/70'
+                              onClick={() => {
+                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit');
+                                setExpandedScopedModule(mod.key);
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                accessLevel === 'edit'
+                                  ? 'bg-white text-emerald-700 shadow-2xs'
+                                  : 'text-slate-600 hover:text-slate-900'
                               }`}
                             >
-                              <User className="w-3 h-3" />
-                              Usuario
+                              {mod.key === 'soporte' ? 'Solventar' : 'Gestionar'}
                             </button>
                           </div>
+                        </div>
 
-                          {/* Checklist de Seccional(es) cuando selecciona Alcance = Seccional */}
-                          {currentScope === 'seccional' && (
-                            <div className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                              <div className="flex items-center justify-between gap-2 flex-wrap">
-                                <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
-                                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                                  Seccionales habilitadas ({selectedSecIds.length})
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
+                        {/* Detalles limpios del módulo cuando está expandido y activo */}
+                        {isExpanded && accessLevel !== 'blocked' && (
+                          <div className="px-4 py-3.5 bg-slate-50/70 space-y-3">
+                            {/* Alcance de lectura */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="text-xs font-medium text-slate-700">
+                                {mod.key === 'soporte'
+                                  ? 'Solicitudes de soporte que puede ver'
+                                  : 'Registros que puede ver'}
+                              </span>
+                              <div className="bg-slate-200/70 p-0.5 rounded-xl inline-flex items-center gap-0.5 self-start sm:self-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModuleScopes((prev) => ({ ...prev, [mod.key]: 'global' }));
+                                    if (mod.key === 'soporte') {
+                                      setCustomOverrides((prev) => ({
+                                        ...prev,
+                                        view_soporte_historial: true,
+                                        view_soporte_seccional: false,
+                                      }));
+                                    }
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                    currentScope === 'global'
+                                      ? 'bg-white text-slate-900 shadow-2xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  Global
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModuleScopes((prev) => ({ ...prev, [mod.key]: 'seccional' }));
+                                    if (mod.key === 'soporte') {
+                                      setCustomOverrides((prev) => ({
+                                        ...prev,
+                                        view_soporte_seccional: true,
+                                        view_soporte_historial: false,
+                                      }));
+                                    }
+                                    if (
+                                      (moduleSeccionales[mod.key] || []).length === 0 &&
+                                      userDefaultSeccionalId
+                                    ) {
                                       setModuleSeccionales((prev) => ({
                                         ...prev,
-                                        [mod.key]: seccionales.map((s) => s.id),
-                                      }))
+                                        [mod.key]: [userDefaultSeccionalId],
+                                      }));
                                     }
-                                    className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-                                  >
-                                    Todas
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setModuleSeccionales((prev) => ({
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                    currentScope === 'seccional'
+                                      ? 'bg-white text-slate-900 shadow-2xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  Por Seccional
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModuleScopes((prev) => ({ ...prev, [mod.key]: 'usuario' }));
+                                    if (mod.key === 'soporte') {
+                                      setCustomOverrides((prev) => ({
                                         ...prev,
-                                        [mod.key]: [],
-                                      }))
+                                        view_soporte_historial: false,
+                                        view_soporte_seccional: false,
+                                      }));
                                     }
-                                    className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
-                                  >
-                                    Ninguna
-                                  </button>
-                                </div>
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                    currentScope === 'usuario'
+                                      ? 'bg-white text-slate-900 shadow-2xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  Solo propios
+                                </button>
                               </div>
+                            </div>
 
-                              {seccionales.length > 6 && (
-                                <div className="relative">
-                                  <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2" />
+                            {/* Selección de seccionales visibles si eligió "Por Seccional" */}
+                            {currentScope === 'seccional' && (
+                              <div className="space-y-2 pt-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs text-slate-500 tabular-nums">
+                                    Seccionales seleccionadas: {selectedSecIds.length}
+                                  </span>
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setModuleSeccionales((prev) => ({
+                                          ...prev,
+                                          [mod.key]: seccionales.map((s) => s.id),
+                                        }))
+                                      }
+                                      className="text-slate-700 hover:text-slate-950 font-medium cursor-pointer"
+                                    >
+                                      Todas
+                                    </button>
+                                    <span className="text-slate-300">·</span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setModuleSeccionales((prev) => ({
+                                          ...prev,
+                                          [mod.key]: [],
+                                        }))
+                                      }
+                                      className="text-rose-600 hover:text-rose-700 font-medium cursor-pointer"
+                                    >
+                                      Limpiar
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {seccionales.length > 8 && (
                                   <input
                                     type="text"
                                     value={scopeSecSearch}
                                     onChange={(e) => setScopeSecSearch(e.target.value)}
-                                    placeholder="Filtrar seccionales..."
-                                    className="w-full pl-7 pr-2.5 py-1 text-[11px] bg-white border border-slate-200 rounded-lg outline-none focus:border-emerald-500"
+                                    placeholder="Buscar seccional..."
+                                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl outline-none"
+                                  />
+                                )}
+
+                                <div className="max-h-32 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                  {visibleSeccionalesForScope.map((sec) => {
+                                    const checked = selectedSecIds.includes(sec.id);
+                                    return (
+                                      <button
+                                        key={sec.id}
+                                        type="button"
+                                        onClick={() => toggleModuleSeccional(mod.key, sec.id)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs text-left truncate transition-colors cursor-pointer border ${
+                                          checked
+                                            ? 'bg-slate-900 text-white border-slate-900 font-medium'
+                                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        {sec.nombre}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Creación y alcance al crear (Combustible / Compra / Soporte) */}
+                            {mod.createKey && (
+                              <div className="pt-2 border-t border-slate-200/70 space-y-2.5">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <span className="text-xs font-medium text-slate-700 block">
+                                      {mod.key === 'soporte'
+                                        ? 'Hacer solicitudes de soporte'
+                                        : 'Crear nuevas solicitudes'}
+                                    </span>
+                                    {mod.key === 'soporte' && (
+                                      <span className="text-[11px] text-slate-500 block">
+                                        Habilita enviar nuevos reportes de soporte y el botón rápido
+                                      </span>
+                                    )}
+                                  </div>
+                                  <IosSwitch
+                                    checked={Boolean(canCreate)}
+                                    onChange={() => setMultipleKeys([mod.createKey!], !canCreate)}
+                                    ariaLabel={`Crear en ${mod.label}`}
                                   />
                                 </div>
-                              )}
 
-                              <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
-                                {visibleSeccionalesForScope.map((sec) => {
-                                  const checked = selectedSecIds.includes(sec.id);
-                                  return (
-                                    <label
-                                      key={sec.id}
-                                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-colors ${
-                                        checked
-                                          ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold'
-                                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() => toggleModuleSeccional(mod.key, sec.id)}
-                                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 shrink-0"
-                                      />
-                                      <span className="truncate">{sec.nombre}</span>
-                                    </label>
-                                  );
-                                })}
+                                {(mod.key === 'solicitudes_combustible' ||
+                                  mod.key === 'solicitudes_compra') &&
+                                  canCreate && (
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                      <span className="text-xs font-medium text-slate-700">
+                                        Nivel al crear solicitud
+                                      </span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="bg-slate-200/70 p-0.5 rounded-xl inline-flex items-center gap-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setCreateScopes((prev) => ({
+                                                ...prev,
+                                                [mod.key]: 'global',
+                                              }))
+                                            }
+                                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                              createScopes[mod.key] === 'global'
+                                                ? 'bg-white text-slate-900 shadow-2xs'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                          >
+                                            Global
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const cKey = mod.key as CreateSolicitudModuleKey;
+                                              setCreateScopes((prev) => ({
+                                                ...prev,
+                                                [cKey]: 'seccional',
+                                              }));
+                                              setCreateSeccionales((prev) => {
+                                                if (prev[cKey]) return prev;
+                                                const fallbackSec =
+                                                  userDefaultSeccionalId ||
+                                                  (moduleSeccionales[cKey]?.length
+                                                    ? moduleSeccionales[cKey][0]
+                                                    : null) ||
+                                                  seccionales[0]?.id ||
+                                                  null;
+                                                return { ...prev, [cKey]: fallbackSec };
+                                              });
+                                            }}
+                                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                              createScopes[mod.key] === 'seccional'
+                                                ? 'bg-white text-slate-900 shadow-2xs'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                          >
+                                            Seccional fija
+                                          </button>
+                                        </div>
+
+                                        {createScopes[mod.key] === 'seccional' && (
+                                          <select
+                                            value={createSeccionales[mod.key] ?? ''}
+                                            onChange={(e) => {
+                                              const cKey = mod.key as CreateSolicitudModuleKey;
+                                              const val = e.target.value
+                                                ? Number(e.target.value)
+                                                : null;
+                                              setCreateSeccionales((prev) => ({
+                                                ...prev,
+                                                [cKey]: val,
+                                              }));
+                                            }}
+                                            className="px-2.5 py-1 text-xs font-medium text-slate-900 bg-white border border-slate-200 rounded-lg outline-none"
+                                          >
+                                            <option value="">Seleccionar seccional...</option>
+                                            {seccionales.map((sec) => (
+                                              <option key={sec.id} value={sec.id}>
+                                                {sec.nombre}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                               </div>
+                            )}
 
-                              {selectedSecIds.length === 0 && (
-                                <p className="text-[10px] text-amber-700 font-medium">
-                                  Si no marcas ninguna seccional, se usará la seccional asignada al usuario.
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                            {/* Permiso explícito para solventar solicitudes de soporte */}
+                            {mod.resolveKey && (
+                              <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between gap-3">
+                                <div>
+                                  <span className="text-xs font-medium text-slate-700 block">
+                                    Solventar solicitudes de soporte
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 block">
+                                    Permite cambiar estado (En revisión / Finalizado) y dar respuesta
+                                  </span>
+                                </div>
+                                <IosSwitch
+                                  checked={Boolean(canResolve)}
+                                  onChange={() => setMultipleKeys([mod.resolveKey!], !canResolve)}
+                                  ariaLabel="Solventar solicitudes de soporte"
+                                />
+                              </div>
+                            )}
 
-                      {/* Opciones adicionales de módulo (Crear, Botón Historial, Botón Plantillas, Previsualización PDF) */}
-                      {(mod.createKey || mod.historialKey || mod.plantillasKey || mod.pdfPreviewKey) && (
-                        <div className="pt-2.5 border-t border-slate-100 space-y-2">
-                          {mod.createKey && (
-                            <div className="space-y-2.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] text-slate-600 font-medium">
-                                  ¿Puede crear nuevas solicitudes?
+                            {/* Botones adicionales del módulo */}
+                            {(mod.historialKey || mod.plantillasKey || mod.pdfPreviewKey) && (
+                              <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-slate-700">
+                                  Funciones visibles
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setMultipleKeys([mod.createKey!], !canCreate)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                    canCreate
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-slate-50 text-slate-500 border-slate-200'
-                                  }`}
-                                >
-                                  {canCreate ? 'Sí, puede crear' : 'No puede crear'}
-                                </button>
-                              </div>
-
-                              {(mod.key === 'solicitudes_combustible' || mod.key === 'solicitudes_compra') && canCreate && (
-                                <div className={`p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5 ${accessLevel === 'blocked' ? 'opacity-45 pointer-events-none' : ''}`}>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[11px] font-bold text-slate-800">
-                                      Nivel al hacer solicitudes:
-                                    </span>
-                                    <span className="text-[10px] font-semibold text-slate-500">
-                                      {createScopes[mod.key] === 'global' ? 'Selector habilitado' : '1 seccional fija'}
-                                    </span>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 bg-white p-0.5 rounded-xl border border-slate-200/80 gap-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {mod.historialKey && (
                                     <button
                                       type="button"
                                       onClick={() =>
-                                        setCreateScopes((prev) => ({
-                                          ...prev,
-                                          [mod.key]: 'global',
-                                        }))
+                                        setMultipleKeys([mod.historialKey!], !canHistorial)
                                       }
-                                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                                        createScopes[mod.key] === 'global'
-                                          ? 'bg-slate-900 text-white shadow-2xs'
-                                          : 'text-slate-600 hover:bg-slate-100'
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                        canHistorial
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-white border border-slate-200 text-slate-600'
                                       }`}
                                     >
-                                      <Globe className="w-3 h-3" />
-                                      Nivel Global
+                                      Historial
                                     </button>
+                                  )}
+                                  {mod.plantillasKey && (
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        const cKey = mod.key as CreateSolicitudModuleKey;
-                                        setCreateScopes((prev) => ({
-                                          ...prev,
-                                          [cKey]: 'seccional',
-                                        }));
-                                        setCreateSeccionales((prev) => {
-                                          if (prev[cKey]) return prev;
-                                          const fallbackSec =
-                                            userDefaultSeccionalId ||
-                                            (moduleSeccionales[cKey]?.length ? moduleSeccionales[cKey][0] : null) ||
-                                            seccionales[0]?.id ||
-                                            null;
-                                          return { ...prev, [cKey]: fallbackSec };
-                                        });
-                                      }}
-                                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                                        createScopes[mod.key] === 'seccional'
-                                          ? 'bg-slate-900 text-white shadow-2xs'
-                                          : 'text-slate-600 hover:bg-slate-100'
+                                      onClick={() =>
+                                        setMultipleKeys([mod.plantillasKey!], !canPlantillas)
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                        canPlantillas
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-white border border-slate-200 text-slate-600'
                                       }`}
                                     >
-                                      <Building2 className="w-3 h-3" />
-                                      Nivel Seccional
+                                      Plantillas
                                     </button>
-                                  </div>
-
-                                  {createScopes[mod.key] === 'global' ? (
-                                    <p className="text-[10px] text-emerald-700 font-medium leading-snug">
-                                      El campo de Seccional estará habilitado en el formulario para que pueda seleccionar cualquier seccional.
-                                    </p>
-                                  ) : (
-                                    <div className="space-y-1.5">
-                                      <label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                        <Lock className="w-3 h-3 text-amber-600" />
-                                        Seccional única asignada (solo 1 seleccionable):
-                                      </label>
-                                      <select
-                                        value={createSeccionales[mod.key] ?? ''}
-                                        onChange={(e) => {
-                                          const cKey = mod.key as CreateSolicitudModuleKey;
-                                          const val = e.target.value ? Number(e.target.value) : null;
-                                          setCreateSeccionales((prev) => ({ ...prev, [cKey]: val }));
-                                        }}
-                                        className="w-full px-2.5 py-1.5 text-[11px] font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 outline-none"
-                                      >
-                                        <option value="">-- Seleccione una seccional --</option>
-                                        {seccionales.map((sec) => (
-                                          <option key={sec.id} value={sec.id}>
-                                            {sec.nombre}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      <p className="text-[10px] text-slate-500 leading-snug">
-                                        En el formulario esta seccional quedará seleccionada automáticamente y bloqueada sin posibilidad de cambio.
-                                      </p>
-                                    </div>
+                                  )}
+                                  {mod.pdfPreviewKey && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setMultipleKeys([mod.pdfPreviewKey!], !canPreviewPdf)
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                        canPreviewPdf
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-white border border-slate-200 text-slate-600'
+                                      }`}
+                                    >
+                                      Vista PDF
+                                    </button>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
 
-                          {mod.historialKey && (
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-slate-600 font-medium">
-                                Botón Ver &ldquo;Historial&rdquo;:
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setMultipleKeys([mod.historialKey!], !canHistorial)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  canHistorial
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-rose-50 text-rose-700 border-rose-200'
-                                }`}
-                              >
-                                {canHistorial ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
-                              </button>
-                            </div>
-                          )}
+          {/* TAB 2: MÓDULOS GENERALES */}
+          {activeTab === 'modulos' && (
+            <div className="space-y-1.5">
+              <p className="px-1 text-xs font-semibold text-slate-500">
+                Nivel de acceso por módulo
+              </p>
+              <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
+                {SIMPLE_VIEW_EDIT_MODULES.map((mod) => {
+                  const level = getModuleAccessLevel(mod.viewKey, mod.editKeys);
+                  const isCustom =
+                    customOverrides[mod.viewKey] !== undefined ||
+                    mod.editKeys.some((ek) => customOverrides[ek] !== undefined);
 
-                          {mod.plantillasKey && (
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-slate-600 font-medium">
-                                Botón &ldquo;Plantillas y Configuraciones&rdquo;:
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setMultipleKeys([mod.plantillasKey!], !canPlantillas)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  canPlantillas
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-rose-50 text-rose-700 border-rose-200'
-                                }`}
-                              >
-                                {canPlantillas ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
-                              </button>
-                            </div>
+                  return (
+                    <div
+                      key={mod.viewKey}
+                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {mod.label}
+                          {isCustom && (
+                            <span className="ml-2 text-xs font-normal text-amber-700">
+                              · Personalizado
+                            </span>
                           )}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">{mod.desc}</p>
+                      </div>
 
-                          {mod.pdfPreviewKey && (
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-slate-600 font-medium">
-                                Ver Previsualización / Impresión PDF:
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setMultipleKeys([mod.pdfPreviewKey!], !canPreviewPdf)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  canPreviewPdf
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-rose-50 text-rose-700 border-rose-200'
-                                }`}
-                              >
-                                {canPreviewPdf ? 'Activo (Visible)' : 'Inactivo (Oculto)'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <div className="bg-slate-100 p-1 rounded-xl inline-flex items-center gap-1 self-start sm:self-auto shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setMultipleKeys([mod.viewKey, ...mod.editKeys], 'role')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
+                            !isCustom
+                              ? 'bg-white text-slate-900 shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          Rol
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
+                            isCustom && level === 'blocked'
+                              ? 'bg-white text-rose-600 shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          Oculto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
+                            isCustom && level === 'view'
+                              ? 'bg-white text-slate-900 shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          Ver
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
+                            isCustom && level === 'edit'
+                              ? 'bg-white text-emerald-700 shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          Editar
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1387,358 +1936,12 @@ export default function PermisosIndividualesModal({
             </div>
           )}
 
-          {/* TAB 2: SECCIONALES INDIVIDUALES Y EXPEDIENTE DIGITAL DE SOCORRISTAS */}
-          {activeTab === 'seccionales' && (
-            <div className="space-y-4">
-              {/* Expediente y Documentación Digital del Socorrista */}
-              <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3 shadow-xs">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-900">
-                    Expediente y Documentación Digital del Socorrista
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Define de forma individual si el usuario puede subir documentos (CV, antecedentes, solvencia), previsualizarlos en línea o descargarlos.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                  {[
-                    {
-                      key: 'subir_expediente_socorrista',
-                      title: 'Subir Expediente Digital',
-                      desc: 'Cargar o actualizar nuevas versiones de documentos.',
-                    },
-                    {
-                      key: 'ver_expediente_socorrista',
-                      title: 'Previsualizar en Línea',
-                      desc: 'Abrir documentos PDF o imágenes dentro del sistema.',
-                    },
-                    {
-                      key: 'descargar_expediente_socorrista',
-                      title: 'Descargar Documentos',
-                      desc: 'Guardar archivos del expediente en su dispositivo.',
-                    },
-                  ].map((item) => {
-                    const st = getPermissionStatus(item.key);
-                    return (
-                      <div
-                        key={item.key}
-                        className="p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between gap-2.5"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-1.5">
-                            <span className="text-xs font-semibold text-slate-900">{item.title}</span>
-                            <span
-                              className={`text-[10px] font-bold ${
-                                st.effectiveValue ? 'text-emerald-700' : 'text-rose-600'
-                              }`}
-                            >
-                              {st.effectiveValue ? 'Permitido' : 'Bloqueado'}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{item.desc}</p>
-                        </div>
-
-                        <div className="grid grid-cols-3 bg-white p-0.5 rounded-lg border border-slate-200/80 gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handleSetOverride(item.key, 'role')}
-                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
-                              !st.isOverridden ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
-                            }`}
-                          >
-                            Heredar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSetOverride(item.key, 'allow')}
-                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
-                              st.isOverridden && st.overrideValue === true
-                                ? 'bg-emerald-600 text-white'
-                                : 'text-emerald-700 hover:bg-emerald-50'
-                            }`}
-                          >
-                            Permitir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSetOverride(item.key, 'deny')}
-                            className={`py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
-                              st.isOverridden && st.overrideValue === false
-                                ? 'bg-rose-600 text-white'
-                                : 'text-rose-700 hover:bg-rose-50'
-                            }`}
-                          >
-                            Denegar
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3 shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-900">Modo de Acceso a Socorristas por Seccional</h3>
-                    <p className="text-[11px] text-slate-500">
-                      Define si el usuario hereda su rol base, accede a todas las seccionales, o tiene permisos individuales por cada seccional.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'default' }))}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                      secConfig.mode === 'default'
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <p className="text-xs font-bold">Heredar del Rol</p>
-                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'default' ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Solo su seccional asignada (o todas si tiene acceso nacional).
-                    </p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'all' }))}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                      secConfig.mode === 'all'
-                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <p className="text-xs font-bold">Todas las Seccionales</p>
-                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'all' ? 'text-emerald-100' : 'text-slate-500'}`}>
-                      Acceso a ver socorristas de todas las seccionales del país.
-                    </p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSecConfig((prev) => ({ ...prev, mode: 'custom' }))}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                      secConfig.mode === 'custom'
-                        ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <p className="text-xs font-bold">Por Seccional Individual</p>
-                    <p className={`text-[11px] mt-0.5 ${secConfig.mode === 'custom' ? 'text-blue-100' : 'text-slate-500'}`}>
-                      Elige exactamente en qué seccionales puede Ver, Agregar o Editar.
-                    </p>
-                  </button>
-                </div>
-              </div>
-
-              {/* Per-seccional Matrix */}
-              <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="relative flex-1 max-w-xs">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      placeholder="Buscar seccional..."
-                      value={secSearchTerm}
-                      onChange={(e) => setSecSearchTerm(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleBulkSeccionales('view')}
-                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
-                    >
-                      Alternar Ver Todas
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBulkSeccionales('add')}
-                      className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[11px] font-semibold text-blue-700 cursor-pointer"
-                    >
-                      Alternar Agregar Todas
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBulkSeccionales('edit')}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-700 cursor-pointer"
-                    >
-                      Alternar Editar Todas
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBulkSeccionales('none')}
-                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-[11px] font-semibold text-rose-700 cursor-pointer"
-                    >
-                      Limpiar
-                    </button>
-                  </div>
-                </div>
-
-                {secConfig.mode !== 'custom' && (
-                  <div className="px-4 py-2 bg-amber-50 border-b border-amber-200/70 text-[11px] text-amber-900 font-medium">
-                    Nota: Al marcar cualquier casilla individual abajo, el modo cambiará automáticamente a{' '}
-                    <strong>Por Seccional Individual</strong>.
-                  </div>
-                )}
-
-                <div className="overflow-x-auto max-h-[340px] overflow-y-auto">
-                  <table className="min-w-full divide-y divide-slate-100">
-                    <thead className="bg-slate-50 sticky top-0 z-10">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase">Seccional</th>
-                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Ver Socorristas</th>
-                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Agregar Nuevos</th>
-                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-slate-500 uppercase">Modificar / Editar</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredSeccionales.map((sec) => {
-                        const perm = secConfig.seccionales[sec.id] || { view: false, add: false, edit: false };
-                        return (
-                          <tr key={sec.id} className="hover:bg-slate-50/70">
-                            <td className="px-4 py-2.5 text-xs font-semibold text-slate-800">{sec.nombre}</td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => toggleSeccionalPerm(sec.id, 'view')}
-                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  perm.view
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
-                                }`}
-                              >
-                                <Eye className="w-3 h-3" />
-                                {perm.view ? 'Sí' : 'No'}
-                              </button>
-                            </td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => toggleSeccionalPerm(sec.id, 'add')}
-                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  perm.add
-                                    ? 'bg-blue-50 text-blue-700 border-blue-300'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
-                                }`}
-                              >
-                                <Plus className="w-3 h-3" />
-                                {perm.add ? 'Sí' : 'No'}
-                              </button>
-                            </td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => toggleSeccionalPerm(sec.id, 'edit')}
-                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  perm.edit
-                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'
-                                }`}
-                              >
-                                <Edit3 className="w-3 h-3" />
-                                {perm.edit ? 'Sí' : 'No'}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: MODULOS GENERALES (SOLO VER vs EDITAR) */}
-          {activeTab === 'modulos' && (
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs divide-y divide-slate-100 overflow-hidden">
-              {SIMPLE_VIEW_EDIT_MODULES.map((mod) => {
-                const level = getModuleAccessLevel(mod.viewKey, mod.editKeys);
-                const isCustom =
-                  customOverrides[mod.viewKey] !== undefined ||
-                  mod.editKeys.some((ek) => customOverrides[ek] !== undefined);
-
-                return (
-                  <div
-                    key={mod.viewKey}
-                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-900">{mod.label}</span>
-                        {isCustom && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                            Personalizado
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{mod.desc}</p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60">
-                      <button
-                        type="button"
-                        onClick={() => setMultipleKeys([mod.viewKey, ...mod.editKeys], 'role')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
-                          !isCustom ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-                        }`}
-                      >
-                        Heredar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
-                          isCustom && level === 'blocked'
-                            ? 'bg-rose-600 text-white shadow-2xs'
-                            : 'text-rose-700 hover:bg-rose-50'
-                        }`}
-                      >
-                        Bloqueado
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
-                          isCustom && level === 'view'
-                            ? 'bg-amber-500 text-white shadow-2xs'
-                            : 'text-amber-700 hover:bg-amber-50'
-                        }`}
-                      >
-                        Solo Ver
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
-                          isCustom && level === 'edit'
-                            ? 'bg-emerald-600 text-white shadow-2xs'
-                            : 'text-emerald-700 hover:bg-emerald-50'
-                        }`}
-                      >
-                        Ver y Editar
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* TAB 4: TODOS LOS PERMISOS (DETALLADO) */}
+          {/* TAB 3: TODOS LOS PERMISOS (DETALLADO) */}
           {activeTab === 'todos' && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 space-y-2.5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div className="relative flex-1 max-w-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="relative flex-1">
                     <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
                     <input
                       type="text"
@@ -1749,145 +1952,145 @@ export default function PermisosIndividualesModal({
                     />
                   </div>
 
-                  <div className="bg-slate-100 p-0.5 rounded-lg flex items-center text-3xs font-semibold">
+                  <div className="bg-slate-100 p-1 rounded-xl inline-flex items-center gap-0.5 text-xs font-semibold shrink-0 tabular-nums">
                     <button
                       type="button"
                       onClick={() => setActiveFilter('todos')}
-                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'todos' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'}`}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer whitespace-nowrap shrink-0 ${
+                        activeFilter === 'todos'
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
                     >
                       Todos ({summary.totalCount})
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveFilter('permitidos')}
-                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'permitidos' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-slate-500'}`}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer whitespace-nowrap shrink-0 ${
+                        activeFilter === 'permitidos'
+                          ? 'bg-white text-emerald-700 shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
                     >
-                      Permitidos ({summary.allowedCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveFilter('denegados')}
-                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'denegados' ? 'bg-white text-rose-700 shadow-2xs' : 'text-slate-500'}`}
-                    >
-                      Bloqueados ({summary.deniedCount})
+                      Activos ({summary.allowedCount})
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveFilter('personalizados')}
-                      className={`px-2 py-1 rounded-md cursor-pointer ${activeFilter === 'personalizados' ? 'bg-white text-amber-800 shadow-2xs' : 'text-slate-500'}`}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer whitespace-nowrap shrink-0 ${
+                        activeFilter === 'personalizados'
+                          ? 'bg-white text-amber-800 shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
                     >
-                      Excepciones ({summary.overrideCount})
+                      Ajustados ({summary.overrideCount})
                     </button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 overflow-x-auto text-3xs font-semibold pb-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCategory('todas')}
-                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${
-                      selectedCategory === 'todas' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                    }`}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 outline-none cursor-pointer"
                   >
-                    Todas las Áreas
-                  </button>
-                  {Object.entries(PERMISSION_CATEGORIES).map(([catKey, cat]) => {
-                    const IconComponent = cat.icon;
-                    return (
-                      <button
-                        key={catKey}
-                        type="button"
-                        onClick={() => setSelectedCategory(catKey)}
-                        className={`px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                          selectedCategory === catKey ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        <IconComponent className="w-3 h-3" />
+                    <option value="todas">Todas las áreas</option>
+                    {Object.entries(PERMISSION_CATEGORIES).map(([catKey, cat]) => (
+                      <option key={catKey} value={catKey}>
                         {cat.label}
-                      </button>
-                    );
-                  })}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => applyQuickGeneralScope('rol')}
+                      className="text-slate-600 hover:text-slate-900 font-medium inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Restablecer a rol</span>
+                    </button>
+                    <span className="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      onClick={handleAllowAll}
+                      className="text-emerald-700 hover:text-emerald-800 font-medium cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      Activar todo
+                    </button>
+                    <span className="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      onClick={handleDenyAll}
+                      className="text-rose-600 hover:text-rose-700 font-medium cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      Bloquear todo
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {filteredKeys.length === 0 ? (
-                <div className="text-center py-12 text-slate-400">
-                  <HelpCircle className="h-8 w-8 mx-auto text-slate-300 mb-1.5" />
-                  <p className="font-semibold text-xs text-slate-700">Sin permisos encontrados</p>
+                <div className="bg-white rounded-2xl border border-slate-200/80 py-10 text-center text-xs text-slate-500">
+                  No se encontraron permisos con ese criterio.
                 </div>
               ) : (
-                <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs divide-y divide-slate-100 overflow-hidden">
+                <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
                   {filteredKeys.map((key) => {
-                    const label = permissionLabels[key] || key;
                     const status = getPermissionStatus(key);
+                    const label = permissionLabels[key] || key;
 
                     return (
                       <div
                         key={key}
-                        className="p-3.5 transition-colors hover:bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50/70"
                       >
-                        <div className="flex-1 min-w-0 pr-2">
-                          <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                            <span className="font-semibold text-xs text-slate-900">{label}</span>
-                            {status.effectiveValue ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                                <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600" />
-                                Permitido
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/60">
-                                <XCircle className="w-2.5 h-2.5 mr-0.5 text-rose-600" />
-                                Bloqueado
-                              </span>
-                            )}
-                            {status.isOverridden && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-3xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/60">
-                                <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600" />
-                                Excepción
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-3xs text-slate-400 font-mono">
-                            <span>{key}</span>
-                            <span>&bull;</span>
-                            <span>Base ({user.role}): {status.baseValue ? 'Habilitado' : 'Desactivado'}</span>
-                          </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-900">{label}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {status.effectiveValue ? 'Permitido' : 'No permitido'}
+                            {' · '}
+                            {status.isOverridden
+                              ? 'Ajuste individual'
+                              : `Heredado de ${selectedRole}`}
+                          </p>
                         </div>
 
-                        <div className="shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60 flex items-center">
+                        <div className="bg-slate-100 p-0.5 rounded-xl inline-flex items-center gap-0.5 shrink-0">
                           <button
                             type="button"
                             onClick={() => handleSetOverride(key, 'role')}
-                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
-                              !status.isOverridden ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
+                              !status.isOverridden
+                                ? 'bg-white text-slate-900 shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-900'
                             }`}
                           >
-                            <RotateCcw className="w-2.5 h-2.5 text-slate-400" />
-                            Heredar
+                            Rol
                           </button>
                           <button
                             type="button"
                             onClick={() => handleSetOverride(key, 'allow')}
-                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
                               status.isOverridden && status.overrideValue === true
                                 ? 'bg-emerald-600 text-white shadow-2xs'
-                                : 'text-emerald-700 hover:bg-emerald-50'
+                                : 'text-slate-500 hover:text-emerald-700'
                             }`}
                           >
-                            <Check className="w-2.5 h-2.5" />
-                            Permitir
+                            Sí
                           </button>
                           <button
                             type="button"
                             onClick={() => handleSetOverride(key, 'deny')}
-                            className={`px-2.5 py-1 rounded-lg text-3xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0 ${
                               status.isOverridden && status.overrideValue === false
                                 ? 'bg-rose-600 text-white shadow-2xs'
-                                : 'text-rose-700 hover:bg-rose-50'
+                                : 'text-slate-500 hover:text-rose-600'
                             }`}
                           >
-                            <X className="w-2.5 h-2.5" />
-                            Denegar
+                            No
                           </button>
                         </div>
                       </div>
@@ -1899,23 +2102,25 @@ export default function PermisosIndividualesModal({
           )}
         </div>
 
-        {/* FOOTER */}
-        <div className="px-6 py-3.5 bg-white border-t border-slate-200/80 flex items-center justify-between shrink-0">
-          <div className="text-3xs text-slate-500">
-            {summary.overrideCount > 0 || secConfig.mode !== 'default' ? (
-              <span className="font-medium text-amber-800">
-                Configuración personalizada activa para este usuario
-              </span>
-            ) : (
-              <span>Usa la configuración predeterminada de su rol</span>
+        {/* PIE FIJO ESTILO iOS */}
+        <div className="px-5 py-3.5 bg-white border-t border-slate-200/80 flex items-center justify-between gap-3 shrink-0">
+          <div className="text-xs text-slate-500 tabular-nums truncate">
+            <span>{summary.allowedCount} permisos activos</span>
+            {summary.overrideCount > 0 && (
+              <>
+                <span className="mx-1.5" aria-hidden="true">·</span>
+                <span className="text-slate-700 font-medium">
+                  {summary.overrideCount} personalizados
+                </span>
+              </>
             )}
           </div>
-          <div className="flex items-center space-x-2">
+
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              disabled={isSaving}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               Cancelar
             </button>
@@ -1923,9 +2128,10 @@ export default function PermisosIndividualesModal({
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="px-5 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-semibold shadow-xs transition-all inline-flex items-center cursor-pointer disabled:opacity-50"
+              className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
             >
-              {isSaving ? 'Guardando...' : 'Guardar Permisos'}
+              <Check className="w-3.5 h-3.5" />
+              <span>{isSaving ? 'Guardando...' : 'Guardar'}</span>
             </button>
           </div>
         </div>

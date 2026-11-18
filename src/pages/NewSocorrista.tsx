@@ -21,6 +21,14 @@ import {
   getCountryMask,
 } from '../utils/phoneMask';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
+import { FileCheck2, Clock } from 'lucide-react';
+import ConoceSocorristaFormFields from '../components/socorristas/ConoceSocorristaFormFields';
+import {
+  ConoceSocorristaExtraData,
+  EMPTY_CONOCE_SOCORRISTA_DATA,
+  saveSocorristaKycData,
+  validateOnlyExtraKycFields,
+} from '../utils/conoceSocorrista';
 
 export default function NewSocorrista() {
   const navigate = useNavigate();
@@ -47,6 +55,11 @@ export default function NewSocorrista() {
   const [checkingNames, setCheckingNames] = useState(false);
   const [confirmHomonym, setConfirmHomonym] = useState(false);
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
+  const [incluirFichaKycAhora, setIncluirFichaKycAhora] = useState(false);
+  const [extraKycData, setExtraKycData] = useState<ConoceSocorristaExtraData>({
+    ...EMPTY_CONOCE_SOCORRISTA_DATA,
+    fecha_inicio_relacion_laboral: new Date().toISOString().split('T')[0],
+  });
   const [formData, setFormData] = useState({
     primer_nombre: '',
     segundo_nombre: '',
@@ -599,6 +612,21 @@ export default function NewSocorrista() {
         }
       }
 
+      if (incluirFichaKycAhora) {
+        const extraValidation = validateOnlyExtraKycFields(extraKycData);
+        const missingAll = [...extraValidation.missingFields];
+        if (!formData.direccion.trim()) {
+          missingAll.unshift('Dirección principal');
+        }
+        if (missingAll.length > 0) {
+          setFormError(
+            `Elegiste completar la ficha «Conoce a tu Socorrista» en este momento. Faltan los siguientes campos requeridos: ${missingAll.join(', ')}. (Si prefieres guardarlos más adelante, selecciona "Hacerlo después").`
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
       // Todos los datos validados: abrir modal de verificación de seguridad antes de guardar
       setLoading(false);
       setShowSaveConfirmModal(true);
@@ -754,6 +782,22 @@ export default function NewSocorrista() {
       }
 
       if (insertedRecord) {
+        const hasAnyExtraKycInput =
+          incluirFichaKycAhora ||
+          Boolean(
+            extraKycData.nit.trim() ||
+              extraKycData.estado_civil.trim() ||
+              extraKycData.nombre_conyuge.trim() ||
+              extraKycData.nombre_dependientes.trim() ||
+              extraKycData.profesion_ocupacion.trim() ||
+              extraKycData.direccion_domicilio.trim() ||
+              extraKycData.cargo_publico_ultimos_5_anios !== null
+          );
+
+        if (hasAnyExtraKycInput) {
+          await saveSocorristaKycData(insertedRecord.id, extraKycData);
+        }
+
         try {
           const fullName = `${cleanPrimerNombre} ${cleanPrimerApellido}`.trim();
           if (formData.segundo_cargo_administrativo === 'Director de Seccional') {
@@ -1534,7 +1578,124 @@ export default function NewSocorrista() {
               <div className="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
                 <label className="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Fecha de Ingreso</label>
                 <div className="mt-1 sm:mt-0 sm:col-span-2">
-                  <DateInput name="fecha_ingreso" required value={formData.fecha_ingreso} onChange={(val) => setFormData(p => ({...p, fecha_ingreso: val}))} className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2" />
+                  <DateInput
+                    name="fecha_ingreso"
+                    required
+                    value={formData.fecha_ingreso}
+                    onChange={(val) => {
+                      setFormData((p) => ({ ...p, fecha_ingreso: val }));
+                      setExtraKycData((prev) =>
+                        !prev.fecha_inicio_relacion_laboral || prev.fecha_inicio_relacion_laboral === formData.fecha_ingreso
+                          ? { ...prev, fecha_inicio_relacion_laboral: val }
+                          : prev
+                      );
+                    }}
+                    className="max-w-lg block w-full shadow-sm focus:ring-primary focus:border-primary sm:max-w-xs sm:text-sm border-gray-300 rounded-md border p-2"
+                  />
+                </div>
+              </div>
+
+              {/* SECCIÓN OPCIONAL / DIFERIBLE: FICHA OFICIAL CONOCE A TU SOCORRISTA (CVSSOCC/FORM001) */}
+              <div className="border-t border-gray-200 pt-6">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        <FileCheck2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">
+                          Información Adicional — Formulario «Conoce a tu Socorrista» (CVSSOCC/FORM001)
+                        </h4>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          ¿Deseas agregar ahora los datos adicionales requeridos para imprimir la ficha oficial <strong>CVSSOCC/FORM001</strong> o prefieres completarlos después?
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIncluirFichaKycAhora(true);
+                        setFormError(null);
+                        setExtraKycData((prev) => ({
+                          ...prev,
+                          nacionalidad: prev.nacionalidad || 'Salvadoreña',
+                          fecha_inicio_relacion_laboral:
+                            prev.fecha_inicio_relacion_laboral || formData.fecha_ingreso || '',
+                          direccion_domicilio: prev.direccion_domicilio || formData.direccion || '',
+                        }));
+                      }}
+                      className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                        incluirFichaKycAhora
+                          ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/25 shadow-xs'
+                          : 'border-slate-200 bg-white/80 hover:bg-white'
+                      }`}
+                    >
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          incluirFichaKycAhora
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <FileCheck2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 block">
+                          Agregar información adicional en este momento
+                        </span>
+                        <span className="text-[11px] text-slate-500 mt-0.5 block">
+                          Muestra los campos de estado civil, cónyuge, dependientes, profesión, domicilio y declaración PEP para dejar lista su hoja imprimible.
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIncluirFichaKycAhora(false);
+                        setFormError(null);
+                      }}
+                      className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                        !incluirFichaKycAhora
+                          ? 'border-slate-800 bg-white ring-2 ring-slate-800/15 shadow-xs'
+                          : 'border-slate-200 bg-white/80 hover:bg-white'
+                      }`}
+                    >
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          !incluirFichaKycAhora
+                            ? 'bg-slate-800 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 block">
+                          Hacerlo después (Guardar solo registro principal)
+                        </span>
+                        <span className="text-[11px] text-slate-500 mt-0.5 block">
+                          Guarda el elemento inmediatamente. Cuando necesites imprimir su ficha «Conoce a tu Socorrista», podrás llenarla desde su perfil.
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {incluirFichaKycAhora && (
+                    <div className="pt-3 border-t border-emerald-200/80 bg-white rounded-xl p-4 border">
+                      <ConoceSocorristaFormFields
+                        value={extraKycData}
+                        onChange={setExtraKycData}
+                        dui={formData.dui}
+                        direccionBase={formData.direccion}
+                        fechaIngresoBase={formData.fecha_ingreso}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

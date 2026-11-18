@@ -55,5 +55,60 @@
       <div style="color: #374151; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;">Cargando Cruz Verde Salvadoreña...</div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        var host = window.location.hostname || '';
+        if (host === 'localhost' || host === '127.0.0.1' || host.indexOf('.run.app') !== -1) {
+          return;
+        }
+        var polling = null;
+        var checking = false;
+        function pollUntilReady() {
+          var root = document.getElementById('root');
+          if (root && root.childNodes.length > 0) {
+            if (polling) clearInterval(polling);
+            return;
+          }
+          if (checking) return;
+          checking = true;
+          var sep = window.location.search ? '&' : '?';
+          var url = window.location.pathname + window.location.search + sep + '__cv_ready=1&_t=' + Date.now();
+          fetch(url, { cache: 'no-store', headers: { 'X-CV-Ready-Check': '1' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              var rootNow = document.getElementById('root');
+              if (rootNow && rootNow.childNodes.length > 0) {
+                if (polling) clearInterval(polling);
+                return;
+              }
+              if (d && d.ready === true) {
+                if (polling) clearInterval(polling);
+                try {
+                  var last = Number(sessionStorage.getItem('cv_boot_reload_ts') || '0');
+                  if (Date.now() - last > 8000) {
+                    sessionStorage.setItem('cv_boot_reload_ts', String(Date.now()));
+                    window.location.reload();
+                    return;
+                  }
+                } catch (e) {
+                  window.location.reload();
+                  return;
+                }
+              }
+              checking = false;
+            })
+            .catch(function () {
+              checking = false;
+            });
+        }
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.childNodes.length === 0) {
+            polling = setInterval(pollUntilReady, 2500);
+            pollUntilReady();
+          }
+        }, 4500);
+      })();
+    </script>
   </body>
 </html>

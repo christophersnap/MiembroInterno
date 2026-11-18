@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Shield, Users, Settings, Save, Check, X, UserPlus, Trash2, Edit, Globe, 
-  MapPin, Building2, Fuel, FileText, Info, KeyRound, Key, Clock, CheckCircle2, 
-  XCircle, AlertTriangle, Eye, Send, Mail, UserCheck, UserX, Copy, RefreshCw, Megaphone,
-  Sliders, Sparkles, Database, Search, Filter, Pencil
+  Shield, Save, Check, X, UserPlus, Trash2, Globe, 
+  Building2, KeyRound, CheckCircle2, 
+  AlertTriangle, Eye, Mail, Copy,
+  Sliders, Database, Search, Pencil, ChevronDown
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -20,6 +20,8 @@ import {
 import { getOfficialLoginUrl } from '../utils/appUrl';
 import { getApiUrl, sendEmailNotification } from '../lib/api';
 import { SQL_MIGRATION_47_TEXT } from '../utils/imageOptimizer';
+import { SQL_MIGRATION_48_TEXT, SQL_MIGRATION_49_TEXT } from '../utils/conoceSocorrista';
+import { SQL_MIGRATION_50_TEXT } from '../lib/soporte';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -95,8 +97,25 @@ export default function Accesos() {
   const [sql45Copied, setSql45Copied] = useState(false);
   const [sql46Copied, setSql46Copied] = useState(false);
   const [sql47Copied, setSql47Copied] = useState(false);
+  const [sql48Copied, setSql48Copied] = useState(false);
+  const [sql49Copied, setSql49Copied] = useState(false);
+  const [sql50Copied, setSql50Copied] = useState(false);
   const [usingLegacyExposedView, setUsingLegacyExposedView] = useState(false);
   const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
+  const [showOlderMigrations, setShowOlderMigrations] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [linkingCarnetUserId, setLinkingCarnetUserId] = useState<string | null>(null);
+  const [linkingCarnetValue, setLinkingCarnetValue] = useState<string>('');
+  const [selectedRoleTab, setSelectedRoleTab] = useState<string>('director');
+  const [rolePermSearch, setRolePermSearch] = useState<string>('');
+  const [savingRolePerms, setSavingRolePerms] = useState<boolean>(false);
+
+  const notifyStatus = (text: string, type: 'success' | 'error' = 'success') => {
+    setStatusNotice({ type, text });
+    setTimeout(() => {
+      setStatusNotice((prev) => (prev?.text === text ? null : prev));
+    }, 4000);
+  };
 
   const hasAjustesChanges = watermarkEnabled !== originalAjustes.watermark || 
                             loginShowSolicitar !== originalAjustes.loginSolicitar || 
@@ -220,7 +239,11 @@ export default function Accesos() {
       
       if (!rolesError && rolesData) {
         setRolePermissions(rolesData || []);
-        setRoles(rolesData?.map(r => r.role) || ['admin', 'socorrista', 'instructor', 'director']);
+        const loadedRoles = rolesData?.map(r => r.role) || ['admin', 'socorrista', 'instructor', 'director'];
+        setRoles(loadedRoles);
+        if (loadedRoles.length > 0 && !loadedRoles.includes(selectedRoleTab)) {
+          setSelectedRoleTab(loadedRoles.find(r => r !== 'admin') || loadedRoles[0]);
+        }
       } else {
         setRoles(['admin', 'socorrista', 'instructor', 'director', 'administrativo']);
       }
@@ -456,10 +479,10 @@ export default function Accesos() {
         { usuario: targetUser.email, nuevo_estado: newActiveState ? 'activo' : 'inactivo' }
       );
 
-      alert(`Usuario ${newActiveState ? 'activado' : 'desactivado'} con éxito.`);
+      notifyStatus(`Usuario ${newActiveState ? 'activado' : 'desactivado'} con éxito.`);
     } catch (err: any) {
       console.error('Error al alternar estado activo del usuario:', err);
-      alert(`Error: ${err.message}`);
+      notifyStatus(`Error: ${err.message}`, 'error');
     }
   };
 
@@ -521,7 +544,7 @@ export default function Accesos() {
       });
     } catch (err) {
       console.error('Error actualizando nombre de usuario:', err);
-      alert('No se pudo guardar el nombre del usuario.');
+      notifyStatus('No se pudo guardar el nombre del usuario.', 'error');
     } finally {
       setEditingUserNameId(null);
       setEditingUserNameValue('');
@@ -834,11 +857,11 @@ export default function Accesos() {
       if (shouldOpenPermisos) {
         setSelectedUserForPermisos(createdPreviewUser);
       } else {
-        alert(
+        notifyStatus(
           confirmUrl && plainEmailSent
-            ? `Usuario creado. Se envió el enlace de confirmación en texto plano desde ${remitenteCorreo}.`
+            ? `Usuario creado. Se envió el enlace de confirmación desde ${remitenteCorreo}.`
             : plainEmailSent
-              ? `Usuario creado y notificación en texto plano enviada desde ${remitenteCorreo}.`
+              ? `Usuario creado y notificación enviada desde ${remitenteCorreo}.`
               : 'Usuario creado exitosamente.'
         );
       }
@@ -872,7 +895,7 @@ export default function Accesos() {
           );
         }
         await fetchData();
-        alert(`El correo de ${targetUser.email} fue confirmado directamente en la base de datos.`);
+        notifyStatus(`El correo de ${targetUser.email} fue confirmado en la base de datos.`);
         return;
       }
 
@@ -894,30 +917,28 @@ export default function Accesos() {
         tipo: 'confirmacion_correo',
       });
 
-      alert(`Enlace de confirmación en texto plano enviado a ${targetUser.email} desde ${remitenteCorreo}.`);
+      notifyStatus(`Enlace de confirmación enviado a ${targetUser.email}.`);
     } catch (err: any) {
       console.error('Error enviando enlace de confirmación:', err);
-      alert(err.message || 'No se pudo enviar el enlace de confirmación.');
+      notifyStatus(err.message || 'No se pudo enviar el enlace de confirmación.', 'error');
     } finally {
       setSendingConfirmUserId(null);
     }
   };
 
-  const handleLinkCarnet = async (userId: string, currentCarnet: string) => {
-    const newCarnet = prompt('Ingrese el número de carnet del socorrista para vincular a este usuario:', currentCarnet || '');
-    if (newCarnet === null || newCarnet === currentCarnet) return;
-
+  const handleSaveLinkedCarnet = async (userId: string) => {
+    const cleanCarnet = linkingCarnetValue.trim().toUpperCase();
     try {
       let socorristaId = null;
-      if (newCarnet.trim() !== '') {
+      if (cleanCarnet !== '') {
         const { data: socData, error: socError } = await supabase
           .from('socorristas')
           .select('id')
-          .eq('carnet', newCarnet.trim())
+          .eq('carnet', cleanCarnet)
           .single();
-          
+
         if (socError || !socData) {
-          throw new Error(`No se encontró ningún socorrista con el carnet: ${newCarnet}`);
+          throw new Error(`No se encontró ningún socorrista con el carnet ${cleanCarnet}`);
         }
         socorristaId = socData.id;
       }
@@ -928,13 +949,15 @@ export default function Accesos() {
         .eq('id', userId);
 
       if (error) throw error;
-      
-      await logActivity('Vinculó carnet a usuario', 'Usuario', userId, { carnet: newCarnet });
+
+      await logActivity('Vinculó carnet a usuario', 'Usuario', userId, { carnet: cleanCarnet });
+      setLinkingCarnetUserId(null);
+      setLinkingCarnetValue('');
       fetchData();
-      alert('Carnet vinculado exitosamente');
+      notifyStatus(cleanCarnet ? 'Carnet vinculado exitosamente.' : 'Vínculo de carnet removido.');
     } catch (error: any) {
       console.error('Error linking carnet:', error);
-      alert(`Error al vincular carnet: ${error.message}`);
+      notifyStatus(error.message || 'Error al vincular carnet.', 'error');
     }
   };
 
@@ -949,16 +972,16 @@ export default function Accesos() {
       if (error) {
         console.warn('RPC delete_user falló, desactivando usuario:', error);
         await supabase.from('user_roles').update({ role: 'inactivo', activo: false, estado: 'inactivo' }).eq('id', userId);
-        alert('El usuario ha sido desactivado permanentemente.');
+        notifyStatus('El usuario ha sido desactivado permanentemente.');
         fetchData();
       } else {
         await logActivity('Eliminó usuario', 'Usuario', userId, {});
         setUsuarios(usuarios.filter(u => u.id !== userId));
-        alert('Usuario eliminado correctamente');
+        notifyStatus('Usuario eliminado correctamente.');
       }
     } catch (error: any) {
       console.error('Error deleting user:', error);
-      alert('Error al intentar eliminar el usuario');
+      notifyStatus('Error al intentar eliminar el usuario.', 'error');
     }
   };
 
@@ -983,30 +1006,10 @@ export default function Accesos() {
       } : u));
       
       await logActivity('Cambió rol de usuario', 'Usuario', userId, { nuevo_rol: newRole });
-      
+      notifyStatus(`Rol actualizado a ${newRole}.`);
     } catch (error) {
       console.error('Error updating role:', error);
-      alert('Error al actualizar el rol');
-    }
-  };
-
-  const handleToggleCanUploadFiles = async (targetUser: any) => {
-    try {
-      const newValue = !targetUser.can_upload_files;
-      const { error } = await supabase
-        .from('user_roles')
-        .update({ can_upload_files: newValue })
-        .eq('id', targetUser.id);
-
-      if (error) {
-        console.warn('Error en supabase al actualizar can_upload_files:', error);
-      }
-
-      setUsuarios(usuarios.map(u => u.id === targetUser.id ? { ...u, can_upload_files: newValue } : u));
-      await logActivity('Actualizó permiso de subida de archivos', 'Usuario', targetUser.id, { can_upload_files: newValue });
-    } catch (err) {
-      console.error('Error toggling can_upload_files:', err);
-      alert('No se pudo actualizar el permiso de subida de archivos');
+      notifyStatus('Error al actualizar el rol.', 'error');
     }
   };
 
@@ -1027,7 +1030,6 @@ export default function Accesos() {
         updatePayload.estado = updatedRole === 'inactivo' ? 'inactivo' : (updatedRole === 'pendiente' ? 'pendiente' : 'activo');
       }
 
-      // 1. Intentar actualizar en Supabase con custom_permissions y can_upload_files (+ role si cambió)
       const { error } = await supabase
         .from('user_roles')
         .update(updatePayload)
@@ -1035,7 +1037,6 @@ export default function Accesos() {
 
       if (error) {
         console.warn('Advertencia en Supabase (la columna custom_permissions puede requerir migración 22):', error);
-        // Fallback: actualizar al menos can_upload_files (y role si cambió)
         const fallbackUpdate: Record<string, any> = { can_upload_files: updatedCanUploadFiles };
         if (updatedRole) {
           fallbackUpdate.role = updatedRole;
@@ -1046,7 +1047,6 @@ export default function Accesos() {
           .eq('id', targetUserId);
       }
 
-      // 2. Actualizar estado local inmediato en usuarios
       setUsuarios(prev => prev.map(u => {
         if (u.id === targetUserId) {
           return {
@@ -1071,14 +1071,15 @@ export default function Accesos() {
         ...(updatedRole ? { nuevo_rol: updatedRole } : {}),
       });
 
-      alert('Accesos individuales del usuario guardados exitosamente.');
+      notifyStatus('Accesos del usuario guardados exitosamente.');
     } catch (err) {
       console.error('Error al guardar accesos individuales:', err);
-      alert('Error al guardar los accesos individuales del usuario.');
+      notifyStatus('Error al guardar los accesos del usuario.', 'error');
     }
   };
 
   const handleSavePermissions = async (role: string) => {
+    setSavingRolePerms(true);
     try {
       const { error } = await supabase
         .from('role_permissions')
@@ -1090,24 +1091,23 @@ export default function Accesos() {
       setRolePermissions(rolePermissions.map(rp => rp.role === role ? { ...rp, permissions: editedPermissions } : rp));
       setEditingRole(null);
       await logActivity('Actualizó permisos de rol', 'Rol', role, { permisos: editedPermissions });
-      alert('Permisos actualizados correctamente');
-      
+      notifyStatus(`Permisos del rol ${role} guardados.`);
     } catch (error) {
       console.error('Error updating permissions:', error);
-      alert('Error al actualizar permisos');
+      notifyStatus('Error al actualizar permisos del rol.', 'error');
+    } finally {
+      setSavingRolePerms(false);
     }
   };
 
-  const startEditingRole = (roleItem: any) => {
+  const handleToggleRolePermDirect = (roleItem: any, key: string) => {
+    const basePerms = editingRole === roleItem.role ? editedPermissions : (roleItem.permissions || {});
+    const updated = {
+      ...basePerms,
+      [key]: !basePerms[key],
+    };
     setEditingRole(roleItem.role);
-    setEditedPermissions(roleItem.permissions);
-  };
-
-  const togglePermission = (key: string) => {
-    setEditedPermissions({
-      ...editedPermissions,
-      [key]: !editedPermissions[key]
-    });
+    setEditedPermissions(updated);
   };
 
   const updateConfiguracion = async (key: string, newValue: boolean | string) => {
@@ -1180,7 +1180,7 @@ export default function Accesos() {
       setTimeout(() => setEmailConfigSaved(false), 3500);
     } catch (err) {
       console.error('Error guardando configuración de correos:', err);
-      alert('Error al guardar configuración de correo.');
+      notifyStatus('Error al guardar configuración de correo.', 'error');
     } finally {
       setSavingEmailConfig(false);
     }
@@ -2079,6 +2079,24 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql47Copied(false), 3000);
   };
 
+  const handleCopySqlMigration48 = () => {
+    navigator.clipboard.writeText(SQL_MIGRATION_48_TEXT);
+    setSql48Copied(true);
+    setTimeout(() => setSql48Copied(false), 3000);
+  };
+
+  const handleCopySqlMigration49 = () => {
+    navigator.clipboard.writeText(SQL_MIGRATION_49_TEXT);
+    setSql49Copied(true);
+    setTimeout(() => setSql49Copied(false), 3000);
+  };
+
+  const handleCopySqlMigration50 = () => {
+    navigator.clipboard.writeText(SQL_MIGRATION_50_TEXT);
+    setSql50Copied(true);
+    setTimeout(() => setSql50Copied(false), 3000);
+  };
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
@@ -2097,1110 +2115,1374 @@ NOTIFY pgrst, 'reload schema';`;
   const pendingSolicitudesCount = solicitudes.filter(s => s.estado === 'pendiente').length;
 
   const permissionLabels: Record<string, string> = {
-    ver_todas_seccionales: 'Ver y Gestionar Todas las Seccionales (Nivel Nacional)',
-    view_dashboard: 'Ver Dashboard',
-    view_socorristas: 'Ver Lista de Socorristas',
-    add_socorristas: 'Agregar Nuevos Socorristas',
-    edit_socorristas: 'Editar / Modificar Socorristas',
-    subir_expediente_socorrista: 'Subir Expediente y Documentación Digital de Socorristas',
-    ver_expediente_socorrista: 'Previsualizar en Línea Expediente Digital de Socorristas',
-    descargar_expediente_socorrista: 'Descargar Expediente Digital de Socorristas',
-    cambiar_estado_socorrista: 'Activar/Desactivar Socorristas',
+    ver_todas_seccionales: 'Ver y gestionar todas las seccionales (Nivel Nacional)',
+    view_dashboard: 'Ver Panel Principal',
+    view_socorristas: 'Ver listado de Socorristas',
+    add_socorristas: 'Registrar nuevos Socorristas',
+    edit_socorristas: 'Editar perfiles de Socorristas',
+    descargar_ficha_conoce_socorrista: 'Descargar / Imprimir Ficha «Conoce a tu Socorrista»',
     descargar_excel_socorristas: 'Descargar Excel de Socorristas',
+    subir_expediente_socorrista: 'Subir documentos al Expediente Digital',
+    ver_expediente_socorrista: 'Previsualizar en línea Expediente Digital',
+    descargar_expediente_socorrista: 'Descargar documentos del Expediente Digital',
+    cambiar_estado_socorrista: 'Activar o desactivar Socorristas',
     view_carnet: 'Generar Carnets',
-    ver_imagenes_socorristas: 'Ver Imágenes de Socorristas (Fotos y Carnets)',
-    descargar_carnet: 'Descargar Carnet',
-    view_solicitar_carnet: 'Ver Solicitar Carnet en Menú',
-    view_verificar_carnet: 'Ver Verificar Carnet en Menú',
+    ver_imagenes_socorristas: 'Ver fotografías e imágenes de carnets',
+    descargar_carnet: 'Descargar Carnet Digital',
+    view_solicitar_carnet: 'Ver Solicitar Carnet en menú',
+    view_verificar_carnet: 'Ver Verificar Carnet en menú',
     view_cursos: 'Gestionar Cursos',
     view_seccionales: 'Ver Seccionales',
-    edit_seccionales: 'Crear/Editar Seccionales',
-    view_directorio: 'Ver Directorio Telefónico',
-    edit_directorio: 'Editar Directorio Telefónico',
+    edit_seccionales: 'Crear y editar Seccionales',
+    view_directorio: 'Ver Directorio Institucional',
+    edit_directorio: 'Editar Directorio Institucional',
     view_vehiculos: 'Ver Flota de Vehículos',
-    edit_vehiculos: 'Crear/Editar Vehículos y Mantenimiento',
+    edit_vehiculos: 'Crear y editar Vehículos y Mantenimiento',
     view_solicitudes_compra: 'Ver Solicitudes de Compra y Mantenimiento',
-    crear_solicitudes_compra: 'Crear Solicitudes de Compra y Mantenimiento',
-    edit_solicitudes_compra: 'Editar / Gestionar Solicitudes de Compra (Sin eliminar)',
-    aprobar_solicitudes_compra: 'Aprobar/Rechazar Solicitudes de Compra',
-    view_compra_historial: 'Ver Botón Historial en Compra y Mantenimiento',
-    view_compra_plantillas: 'Ver Botón Plantillas y Configuraciones en Compra',
+    crear_solicitudes_compra: 'Crear Solicitudes de Compra',
+    edit_solicitudes_compra: 'Gestionar Solicitudes de Compra',
+    aprobar_solicitudes_compra: 'Aprobar o rechazar Solicitudes de Compra',
+    view_compra_historial: 'Ver Historial en Solicitudes de Compra',
+    view_compra_plantillas: 'Ver Plantillas en Solicitudes de Compra',
     view_solicitudes_combustible: 'Ver Solicitudes de Combustible',
     crear_solicitudes_combustible: 'Crear Solicitudes de Combustible',
-    edit_solicitudes_combustible: 'Editar / Gestionar Solicitudes de Combustible (Sin eliminar)',
-    aprobar_solicitudes_combustible: 'Aprobar/Rechazar Solicitudes de Combustible',
-    view_combustible_historial: 'Ver Botón Historial en Solicitud de Combustible',
-    view_combustible_plantillas: 'Ver Botón Plantillas y Configuraciones en Combustible',
-    ver_previsualizacion_pdf: 'Ver Previsualización del PDF en Solicitudes',
+    edit_solicitudes_combustible: 'Gestionar Solicitudes de Combustible',
+    aprobar_solicitudes_combustible: 'Aprobar o rechazar Solicitudes de Combustible',
+    view_combustible_historial: 'Ver Historial en Solicitudes de Combustible',
+    view_combustible_plantillas: 'Ver Plantillas en Solicitudes de Combustible',
+    ver_previsualizacion_pdf: 'Previsualizar e imprimir PDF en Solicitudes',
     view_solicitudes_carnet: 'Ver Solicitudes de Carnet en Gestión Logística',
-    edit_solicitudes_carnet: 'Editar / Gestionar Solicitudes de Carnet (Sin eliminar)',
-    view_archivos: 'Ver y Descargar Archivos',
+    edit_solicitudes_carnet: 'Gestionar Solicitudes de Carnet',
+    view_archivos: 'Ver y descargar Archivos Institucionales',
     subir_archivos: 'Subir Archivos Institucionales',
-    edit_archivos: 'Subir y Editar Archivos Institucionales',
-    view_anuncios: 'Ver y Acceder a Anuncios Institucionales',
-    crear_anuncios: 'Crear y Publicar Anuncios',
-    edit_anuncios: 'Crear y Editar Anuncios Institucionales',
-    view_noticias_ajustes: 'Ver Pestaña de Noticias y Ajustes del Banner Slide',
-    edit_noticias_banner: 'Editar, Subir y Configurar Slides del Banner de Noticias',
-    view_formularios: 'Ver Pestaña de Formularios y Respuestas',
-    crear_formularios: 'Crear Formularios (Fluent Forms)',
-    edit_formularios: 'Editar Formularios y Respuestas (Sin eliminar)',
-    ver_todos_formularios: 'Ver Todos los Formularios (Alcance Global)',
-    view_meritos: 'Ver Méritos y Reconocimientos Institucionales',
-    edit_meritos: 'Crear y Editar Méritos y Reconocimientos',
-    personalizar_colores: 'Personalizar Colores del Sistema y Marca',
-    view_soporte: 'Ver Pestaña y Botón Flotante de Soporte',
-    view_soporte_historial: 'Ver Historial Global de Solicitudes de Soporte',
-    edit_soporte_estado: 'Cambiar Estado a Finalizado y Agregar Notas en Soporte',
-    view_config: 'Ajustes de Verificación',
+    edit_archivos: 'Administrar Archivos Institucionales',
+    view_anuncios: 'Ver Anuncios Institucionales',
+    crear_anuncios: 'Publicar Anuncios',
+    edit_anuncios: 'Editar Anuncios Institucionales',
+    view_noticias_ajustes: 'Ver Noticias y ajustes del Banner',
+    edit_noticias_banner: 'Configurar slides del Banner de Noticias',
+    view_formularios: 'Ver Formularios y respuestas',
+    crear_formularios: 'Crear nuevos Formularios',
+    edit_formularios: 'Editar Formularios y respuestas',
+    ver_todos_formularios: 'Ver todos los Formularios (Alcance Global)',
+    view_meritos: 'Ver Méritos y Reconocimientos',
+    edit_meritos: 'Registrar y editar Méritos',
+    personalizar_colores: 'Personalizar colores institucionales',
+    view_soporte: 'Ver módulo y pestaña de Soporte',
+    crear_soporte: 'Hacer / Enviar Solicitudes de Soporte',
+    view_soporte_seccional: 'Ver Solicitudes de Soporte a Nivel de Seccional',
+    view_soporte_historial: 'Ver Solicitudes de Soporte a Nivel Global',
+    edit_soporte_estado: 'Solventar Solicitudes de Soporte (Cambiar estado y dar solución)',
+    view_config: 'Configuración del Sistema',
     view_activity: 'Ver Registro de Actividad',
-    ver_personas_conectadas: 'Ver Lista de Personas Conectadas (Clic en En Línea)',
-    view_accesos: 'Gestión de Accesos (Admin)'
+    ver_personas_conectadas: 'Ver lista de usuarios en línea',
+    view_accesos: 'Administración de Accesos y Usuarios'
   };
+
+  const rolePermissionGroups: { title: string; keys: string[] }[] = [
+    {
+      title: 'Socorristas y Ficha «Conoce a tu Socorrista»',
+      keys: [
+        'ver_todas_seccionales',
+        'view_socorristas',
+        'add_socorristas',
+        'edit_socorristas',
+        'descargar_ficha_conoce_socorrista',
+        'descargar_excel_socorristas',
+        'ver_expediente_socorrista',
+        'subir_expediente_socorrista',
+        'descargar_expediente_socorrista',
+        'cambiar_estado_socorrista',
+        'ver_imagenes_socorristas',
+        'view_carnet',
+        'descargar_carnet',
+        'view_solicitar_carnet',
+        'view_verificar_carnet',
+        'view_meritos',
+        'edit_meritos',
+      ],
+    },
+    {
+      title: 'Solicitudes y Flota Vehicular',
+      keys: [
+        'view_vehiculos',
+        'edit_vehiculos',
+        'view_solicitudes_combustible',
+        'crear_solicitudes_combustible',
+        'edit_solicitudes_combustible',
+        'aprobar_solicitudes_combustible',
+        'view_combustible_historial',
+        'view_combustible_plantillas',
+        'view_solicitudes_compra',
+        'crear_solicitudes_compra',
+        'edit_solicitudes_compra',
+        'aprobar_solicitudes_compra',
+        'view_compra_historial',
+        'view_compra_plantillas',
+        'ver_previsualizacion_pdf',
+        'view_solicitudes_carnet',
+        'edit_solicitudes_carnet',
+      ],
+    },
+    {
+      title: 'Soporte Técnico e Incidencias',
+      keys: [
+        'view_soporte',
+        'crear_soporte',
+        'view_soporte_seccional',
+        'view_soporte_historial',
+        'edit_soporte_estado',
+      ],
+    },
+    {
+      title: 'Comunicación y Formularios',
+      keys: [
+        'view_noticias_ajustes',
+        'edit_noticias_banner',
+        'view_anuncios',
+        'crear_anuncios',
+        'edit_anuncios',
+        'view_formularios',
+        'crear_formularios',
+        'edit_formularios',
+        'ver_todos_formularios',
+      ],
+    },
+    {
+      title: 'Archivos, Sedes y Directorio',
+      keys: [
+        'view_dashboard',
+        'view_archivos',
+        'subir_archivos',
+        'edit_archivos',
+        'view_cursos',
+        'view_seccionales',
+        'edit_seccionales',
+        'view_directorio',
+        'edit_directorio',
+      ],
+    },
+    {
+      title: 'Seguridad y Administración',
+      keys: [
+        'personalizar_colores',
+        'ver_personas_conectadas',
+        'view_activity',
+        'view_config',
+        'view_accesos',
+      ],
+    },
+  ];
+
+  const getUserScopeSummary = (user: any) => {
+    if (user.role === 'admin') {
+      return {
+        isGlobal: true,
+        primary: 'Global · Nacional',
+        secondary: 'Acceso total · Solventa soporte',
+      };
+    }
+
+    const cp = user.custom_permissions || {};
+    const roleMap = rolePermissions.find((r) => r.role === user.role)?.permissions || {};
+    const boolOverrideCount = Object.keys(cp).filter((k) => typeof cp[k] === 'boolean').length;
+    const secCfg = cp._seccionales_socorristas;
+    const scopesObj = cp._module_scopes || {};
+
+    const canResolveSoporte =
+      typeof cp.edit_soporte_estado === 'boolean'
+        ? cp.edit_soporte_estado
+        : Boolean(roleMap.edit_soporte_estado);
+    const canCreateSoporte =
+      typeof cp.crear_soporte === 'boolean'
+        ? cp.crear_soporte
+        : roleMap.crear_soporte !== undefined
+        ? Boolean(roleMap.crear_soporte)
+        : true;
+    const soporteScope =
+      scopesObj.soporte ||
+      ((typeof cp.view_soporte_historial === 'boolean'
+        ? cp.view_soporte_historial
+        : Boolean(roleMap.view_soporte_historial))
+        ? 'global'
+        : (typeof cp.view_soporte_seccional === 'boolean'
+            ? cp.view_soporte_seccional
+            : Boolean(roleMap.view_soporte_seccional))
+        ? 'seccional'
+        : 'usuario');
+
+    const soporteTag = canResolveSoporte
+      ? 'Solventa soporte'
+      : soporteScope === 'global'
+      ? 'Soporte global'
+      : soporteScope === 'seccional'
+      ? 'Soporte seccional'
+      : !canCreateSoporte
+      ? 'Sin crear soporte'
+      : '';
+
+    const withSoporteTag = (base: string) => (soporteTag ? `${base} · ${soporteTag}` : base);
+
+    const effectiveGlobal =
+      secCfg?.mode === 'all' ||
+      (typeof cp.ver_todas_seccionales === 'boolean'
+        ? cp.ver_todas_seccionales
+        : Boolean(roleMap.ver_todas_seccionales));
+
+    if (effectiveGlobal) {
+      return {
+        isGlobal: true,
+        primary: 'Global · Nacional',
+        secondary: withSoporteTag(
+          boolOverrideCount > 0 ? `${boolOverrideCount} ajustes` : `Según rol ${user.role}`
+        ),
+      };
+    }
+
+    if (secCfg?.mode === 'custom' && secCfg?.seccionales) {
+      const activeIds = Object.entries(secCfg.seccionales)
+        .filter(([, val]: any) => val?.view || val?.add || val?.edit)
+        .map(([id]) => Number(id));
+
+      if (activeIds.length === 1) {
+        const secName = seccionales.find((s) => s.id === activeIds[0])?.nombre || '1 seccional';
+        return {
+          isGlobal: false,
+          primary: `Seccional · ${secName}`,
+          secondary: withSoporteTag(
+            boolOverrideCount > 0 ? `${boolOverrideCount} ajustes` : 'Alcance personalizado'
+          ),
+        };
+      }
+      if (activeIds.length > 1) {
+        return {
+          isGlobal: false,
+          primary: `${activeIds.length} seccionales`,
+          secondary: withSoporteTag(
+            boolOverrideCount > 0 ? `${boolOverrideCount} ajustes` : 'Alcance múltiple'
+          ),
+        };
+      }
+    }
+
+    const hasCustomModuleScopes = Object.keys(scopesObj).length > 0;
+    const assignedSecName = user.socorristas?.seccionales?.nombre || 'Seccional local';
+
+    return {
+      isGlobal: false,
+      primary: `Seccional · ${assignedSecName}`,
+      secondary: withSoporteTag(
+        boolOverrideCount > 0 || hasCustomModuleScopes
+          ? `${boolOverrideCount || 1} ajustes`
+          : `Según rol ${user.role}`
+      ),
+    };
+  };
+
+  const activeRoleObject =
+    rolePermissions.find((rp) => rp.role === selectedRoleTab) || rolePermissions[0] || null;
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        <p className="mt-4 text-gray-500 font-medium">Cargando datos de accesos y seguridad...</p>
+      <div className="max-w-6xl mx-auto p-6 lg:p-8 space-y-4">
+        <div className="h-7 w-48 bg-slate-200/70 rounded-lg animate-pulse" />
+        <div className="h-11 w-full max-w-xl bg-slate-200/70 rounded-2xl animate-pulse" />
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 space-y-3">
+          {[1, 2, 3, 4, 5].map((row) => (
+            <div key={row} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-      
-      {/* Encabezado Estilo Apple */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
+    <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 space-y-5">
+      {/* Encabezado limpio estilo iOS */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
             Accesos y Usuarios
           </h1>
-          <p className="mt-0.5 text-xs text-gray-500">
-            Gestión de cuentas, solicitudes, roles institucionales y seguridad
+          <p className="mt-0.5 text-xs text-slate-500">
+            Cuentas, niveles de alcance global o seccional, roles y ajustes de seguridad
           </p>
         </div>
+
+        {activeTab === 'usuarios' && (
+          <button
+            type="button"
+            onClick={() => setShowNewUserModal(true)}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
+          >
+            <UserPlus className="h-3.5 w-3.5" />
+            <span>Nuevo Usuario</span>
+          </button>
+        )}
       </div>
 
-      {/* Segmented Control Estilo Apple */}
-      <div className="bg-slate-200/60 p-1 rounded-2xl flex flex-wrap gap-1 border border-slate-200/80">
-        <button
-          onClick={() => setActiveTab('usuarios')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'usuarios'
-              ? 'bg-white text-gray-900 shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
+      {/* Aviso flotante limpio (reemplaza alert nativo) */}
+      {statusNotice && (
+        <div
+          className={`px-4 py-3 rounded-2xl border text-xs font-medium flex items-center justify-between gap-3 transition-opacity ${
+            statusNotice.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
           }`}
         >
-          <span className="w-5 h-5 rounded-md bg-blue-500 text-white flex items-center justify-center shrink-0">
-            <Users className="w-3 h-3" />
-          </span>
-          <span>Usuarios ({usuarios.length})</span>
+          <span>{statusNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setStatusNotice(null)}
+            className="text-current opacity-60 hover:opacity-100 cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Control Segmentado Estilo Apple iOS */}
+      <div className="bg-slate-200/70 p-1 rounded-2xl grid grid-cols-2 sm:grid-cols-4 gap-1 max-w-2xl">
+        <button
+          type="button"
+          onClick={() => setActiveTab('usuarios')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+            activeTab === 'usuarios'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          Usuarios ({usuarios.length})
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('solicitudes')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer relative ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
             activeTab === 'solicitudes'
-              ? 'bg-white text-gray-900 shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <span className="w-5 h-5 rounded-md bg-amber-500 text-white flex items-center justify-center shrink-0">
-            <UserCheck className="w-3 h-3" />
-          </span>
           <span>Solicitudes</span>
           {pendingSolicitudesCount > 0 && (
-            <span className="ml-1 px-1.5 py-0.2 text-3xs font-black bg-amber-500 text-white rounded-full">
+            <span className="px-1.5 py-0.5 text-[10px] font-bold bg-rose-600 text-white rounded-full leading-none">
               {pendingSolicitudesCount}
             </span>
           )}
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('roles')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'roles'
-              ? 'bg-white text-gray-900 shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <span className="w-5 h-5 rounded-md bg-purple-500 text-white flex items-center justify-center shrink-0">
-            <Shield className="w-3 h-3" />
-          </span>
-          <span>Permisos de Roles</span>
+          Roles
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('ajustes')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'ajustes'
-              ? 'bg-white text-gray-900 shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <span className="w-5 h-5 rounded-md bg-slate-600 text-white flex items-center justify-center shrink-0">
-            <Sliders className="w-3 h-3" />
-          </span>
-          <span>Ajustes del Sistema</span>
+          Ajustes
         </button>
       </div>
 
       {usingLegacyExposedView && (
-        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-bold text-rose-900">
-                Corrección de Seguridad Supabase Pendiente (Migración 46)
+                Corrección de seguridad pendiente (Migración 46)
               </p>
-              <p className="text-[11px] text-rose-800 mt-0.5">
-                La vista antigua <code className="bg-rose-100 px-1 py-0.5 rounded font-mono">public.usuarios_view</code> aún existe en Supabase y genera la alerta «Datos de usuario expuestos a través de una vista». Copia y ejecuta la <strong>Migración 46</strong> en el SQL Editor de Supabase para eliminarla y activar las funciones protegidas.
+              <p className="text-xs text-rose-800 mt-0.5">
+                La vista antigua <code className="font-mono">public.usuarios_view</code> sigue activa en Supabase. Ejecuta la Migración 46 en el SQL Editor para cerrarla.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleCopySqlMigration46}
-              className="inline-flex items-center px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs cursor-pointer transition-colors"
-            >
-              {sql46Copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 mr-1.5" />
-                  ¡SQL 46 Copiado!
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5 mr-1.5" />
-                  Copiar SQL Migración 46
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleCopySqlMigration46}
+            className="inline-flex items-center px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0"
+          >
+            {sql46Copied ? (
+              <>
+                <Check className="w-3.5 h-3.5 mr-1.5" />
+                <span>SQL 46 copiado</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 mr-1.5" />
+                <span>Copiar SQL 46</span>
+              </>
+            )}
+          </button>
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden p-5 sm:p-6">
-          
-          {/* TAB 1: USUARIOS */}
-          {activeTab === 'usuarios' && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-1">
-                <div>
-                  <h3 className="text-base font-bold tracking-tight text-gray-900">Usuarios del Sistema</h3>
-                  <p className="text-2xs text-gray-400">
-                    Control de acceso, activación/desactivación, nombres de usuario y contraseñas
-                  </p>
-                </div>
+      {/* TAB 1: USUARIOS */}
+      {activeTab === 'usuarios' && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
+          {/* Barra limpia de búsqueda y filtro */}
+          <div className="px-4 sm:px-5 py-3.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2 flex-1">
+              <div className="relative flex-1 min-w-[210px] max-w-sm">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Buscar por nombre, correo o carnet..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-100/80 border border-transparent focus:bg-white focus:border-slate-300 rounded-xl outline-none transition-colors"
+                />
+              </div>
+
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                aria-label="Filtrar por rol"
+                className="bg-slate-100/80 border border-transparent focus:bg-white focus:border-slate-300 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 outline-none cursor-pointer tabular-nums"
+              >
+                <option value="todos">Todos los roles ({usuarios.length})</option>
+                {availableFilterRoles.map((r) => {
+                  const count = usuarios.filter((u) => u.role === r).length;
+                  return (
+                    <option key={r} value={r}>
+                      {r} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+
+              {(roleFilter !== 'todos' || userSearch.trim() !== '') && (
                 <button
-                  onClick={() => setShowNewUserModal(true)}
-                  className="inline-flex items-center px-3.5 py-1.5 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    setRoleFilter('todos');
+                    setUserSearch('');
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <UserPlus className="mr-1.5 h-3.5 w-3.5 text-emerald-400" />
-                  Nuevo Usuario Manual
+                  Limpiar
                 </button>
-              </div>
+              )}
+            </div>
 
-              {/* Barra de filtro por rol y búsqueda */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50/90 border border-slate-200/80 rounded-xl p-2.5">
-                <div className="flex flex-wrap items-center gap-2 flex-1">
-                  <div className="relative flex-1 min-w-[200px] max-w-xs">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      placeholder="Buscar por nombre, correo o carnet..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                    />
-                  </div>
+            <span className="text-xs text-slate-400 tabular-nums whitespace-nowrap shrink-0">
+              {filteredUsuarios.length} de {usuarios.length}
+            </span>
+          </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <Filter className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <select
-                      value={roleFilter}
-                      onChange={(e) => setRoleFilter(e.target.value)}
-                      aria-label="Filtrar tabla por rol"
-                      className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none cursor-pointer tabular-nums"
-                    >
-                      <option value="todos">Todos los roles ({usuarios.length})</option>
-                      {availableFilterRoles.map((r) => {
-                        const count = usuarios.filter((u) => u.role === r).length;
-                        return (
-                          <option key={r} value={r}>
-                            {r} ({count})
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-100 text-left">
+              <thead className="bg-slate-50/70 text-[11px] font-semibold text-slate-500">
+                <tr>
+                  <th className="px-5 py-3">Usuario</th>
+                  <th className="px-4 py-3">Rol y Carnet</th>
+                  <th className="px-4 py-3">Nivel y Alcance</th>
+                  <th className="px-4 py-3">Estado</th>
+                  <th className="px-5 py-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-100 text-xs">
+                {filteredUsuarios.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-12 text-center text-slate-400">
+                      No se encontraron usuarios con ese criterio de búsqueda.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsuarios.map((user) => {
+                    const isInactive =
+                      user.role === 'inactivo' ||
+                      user.activo === false ||
+                      user.estado === 'inactivo' ||
+                      inactiveUserIds.includes(user.id);
+                    const isPending = user.role === 'pendiente' || user.estado === 'pendiente';
+                    const displayName = getUserDisplayName(user);
+                    const isEditingName = editingUserNameId === user.id;
+                    const isLinkingCarnet = linkingCarnetUserId === user.id;
+                    const scopeInfo = getUserScopeSummary(user);
+                    const initials = displayName
+                      .split(' ')
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((p: string) => p[0]?.toUpperCase())
+                      .join('') || 'U';
 
-                  {(roleFilter !== 'todos' || userSearch.trim() !== '') && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRoleFilter('todos');
-                        setUserSearch('');
-                      }}
-                      className="px-2.5 py-1.5 text-2xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg cursor-pointer"
-                    >
-                      Limpiar
-                    </button>
-                  )}
-                </div>
+                    return (
+                      <tr
+                        key={user.id}
+                        className={`transition-colors ${
+                          isInactive
+                            ? 'bg-slate-50/70 opacity-75'
+                            : 'hover:bg-slate-50/60'
+                        }`}
+                      >
+                        {/* 1. Usuario */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3 min-w-[220px]">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs flex items-center justify-center shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              {isEditingName ? (
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <input
+                                    type="text"
+                                    value={editingUserNameValue}
+                                    onChange={(e) => setEditingUserNameValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveUserName(user);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingUserNameId(null);
+                                      }
+                                    }}
+                                    autoFocus
+                                    placeholder="Nombre del usuario"
+                                    className="px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 outline-none w-44"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveUserName(user)}
+                                    className="p-1 bg-slate-900 text-white rounded-md hover:bg-black cursor-pointer"
+                                    title="Guardar"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingUserNameId(null)}
+                                    className="p-1 bg-slate-100 text-slate-600 rounded-md hover:bg-slate-200 cursor-pointer"
+                                    title="Cancelar"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`font-semibold truncate ${
+                                      displayName === 'Usuario sin perfil'
+                                        ? 'text-amber-700'
+                                        : 'text-slate-900'
+                                    }`}
+                                  >
+                                    {displayName}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingUserNameId(user.id);
+                                      setEditingUserNameValue(
+                                        displayName === 'Usuario sin perfil' ? '' : displayName
+                                      );
+                                    }}
+                                    className="p-0.5 text-slate-300 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
+                                    title="Editar nombre"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
 
-                <span className="text-2xs text-slate-500 font-medium tabular-nums px-1">
-                  Mostrando {filteredUsuarios.length} de {usuarios.length} usuarios
-                </span>
-              </div>
+                              <div className="text-slate-500 text-xs truncate">
+                                {user.email}
+                              </div>
 
-              <div className="overflow-x-auto border border-slate-200/80 rounded-xl">
-                <table className="min-w-full divide-y divide-slate-100 text-left">
-                  <thead className="bg-slate-50/80 text-3xs font-semibold uppercase tracking-wider text-slate-500">
-                    <tr>
-                      <th className="px-5 py-3.5">Usuario / Correo</th>
-                      <th className="px-5 py-3.5">Carnet Asociado</th>
-                      <th className="px-5 py-3.5">Rol en Sistema</th>
-                      <th className="px-5 py-3.5">Ámbito Seccional</th>
-                      <th className="px-5 py-3.5 text-center">Accesos Individuales</th>
-                      <th className="px-5 py-3.5 text-center">Subir Archivos</th>
-                      <th className="px-5 py-3.5">Estado de Cuenta</th>
-                      <th className="px-5 py-3.5 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200 text-xs">
-                    {filteredUsuarios.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="px-5 py-10 text-center text-gray-400">
-                          No se encontraron usuarios con el filtro de rol o búsqueda seleccionado.
+                              {!user.email_confirmed_at && !user.confirmed_at && (
+                                <div className="mt-0.5 text-[11px] text-amber-700 flex items-center gap-1.5">
+                                  <span>Sin confirmar</span>
+                                  <span aria-hidden="true">·</span>
+                                  <button
+                                    type="button"
+                                    disabled={sendingConfirmUserId === user.id}
+                                    onClick={() => handleSendConfirmationLink(user)}
+                                    className="font-semibold text-slate-700 hover:text-slate-950 underline cursor-pointer disabled:opacity-50"
+                                  >
+                                    {sendingConfirmUserId === user.id
+                                      ? 'Enviando...'
+                                      : 'Enviar enlace'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </td>
-                      </tr>
-                    ) : (
-                      filteredUsuarios.map((user) => {
-                      const isInactive = user.role === 'inactivo' || 
-                                         user.activo === false || 
-                                         user.estado === 'inactivo' || 
-                                         inactiveUserIds.includes(user.id);
-                      const isPending = user.role === 'pendiente' || user.estado === 'pendiente';
-                      const displayName = getUserDisplayName(user);
-                      const isEditingName = editingUserNameId === user.id;
 
-                      return (
-                        <tr key={user.id} className={isInactive ? 'bg-red-50/40 opacity-80' : (isPending ? 'bg-amber-50/40' : 'hover:bg-gray-50/80 transition-colors')}>
-                          
-                          {/* Identidad Usuario */}
-                          <td className="px-5 py-4 whitespace-nowrap">
-                            {isEditingName ? (
-                              <div className="flex items-center gap-1.5 mb-1">
+                        {/* 2. Rol y Carnet */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="space-y-1">
+                            <select
+                              value={user.role}
+                              onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                              className={`px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-slate-50/70 hover:bg-white focus:bg-white outline-none font-medium cursor-pointer ${
+                                user.role === 'inactivo' ? 'text-rose-700' : 'text-slate-800'
+                              }`}
+                            >
+                              {roles?.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                              {!roles?.includes('inactivo') && (
+                                <option value="inactivo">inactivo</option>
+                              )}
+                              {!roles?.includes('pendiente') && (
+                                <option value="pendiente">pendiente</option>
+                              )}
+                            </select>
+
+                            {isLinkingCarnet ? (
+                              <div className="flex items-center gap-1 pt-0.5">
                                 <input
                                   type="text"
-                                  value={editingUserNameValue}
-                                  onChange={(e) => setEditingUserNameValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleSaveUserName(user);
-                                    } else if (e.key === 'Escape') {
-                                      setEditingUserNameId(null);
-                                    }
-                                  }}
-                                  autoFocus
-                                  placeholder="Nombre del usuario"
-                                  className="px-2 py-1 text-xs border border-emerald-400 rounded-lg bg-white text-gray-900 outline-none w-44"
+                                  value={linkingCarnetValue}
+                                  onChange={(e) =>
+                                    setLinkingCarnetValue(e.target.value.toUpperCase())
+                                  }
+                                  placeholder="CVS-0000-AA"
+                                  className="w-28 px-2 py-0.5 text-[11px] font-mono border border-slate-300 rounded-md bg-white outline-none"
                                 />
                                 <button
                                   type="button"
-                                  onClick={() => handleSaveUserName(user)}
-                                  className="p-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 cursor-pointer"
-                                  title="Guardar nombre"
+                                  onClick={() => handleSaveLinkedCarnet(user.id)}
+                                  className="p-1 bg-slate-900 text-white rounded-md cursor-pointer"
+                                  title="Guardar carnet"
                                 >
                                   <Check className="w-3 h-3" />
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setEditingUserNameId(null)}
-                                  className="p-1 bg-slate-200 text-slate-600 rounded-md hover:bg-slate-300 cursor-pointer"
+                                  onClick={() => {
+                                    setLinkingCarnetUserId(null);
+                                    setLinkingCarnetValue('');
+                                  }}
+                                  className="p-1 bg-slate-100 text-slate-600 rounded-md cursor-pointer"
                                   title="Cancelar"
                                 >
                                   <X className="w-3 h-3" />
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex items-center gap-1.5">
-                                <span className={`font-bold ${displayName === 'Usuario sin perfil' ? 'text-amber-700' : 'text-gray-900'}`}>
-                                  {displayName}
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pl-0.5">
+                                <span className="font-mono tabular-nums">
+                                  {user.socorristas?.carnet || 'Sin carnet'}
                                 </span>
+                                <span aria-hidden="true">·</span>
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setEditingUserNameId(user.id);
-                                    setEditingUserNameValue(displayName === 'Usuario sin perfil' ? '' : displayName);
+                                    setLinkingCarnetUserId(user.id);
+                                    setLinkingCarnetValue(user.socorristas?.carnet || '');
                                   }}
-                                  className="p-0.5 text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
-                                  title="Editar nombre de usuario"
+                                  className="text-slate-600 hover:text-slate-900 font-medium hover:underline cursor-pointer"
                                 >
-                                  <Pencil className="w-3 h-3" />
+                                  {user.socorristas?.carnet ? 'Cambiar' : 'Vincular'}
                                 </button>
                               </div>
                             )}
-                            <div className="text-gray-500 font-mono text-2xs">{user.email}</div>
-                            <div className="text-3xs text-gray-400 font-mono">{user.id}</div>
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* Carnet */}
-                          <td className="px-5 py-4 whitespace-nowrap text-gray-600">
-                            <div className="flex items-center space-x-2">
-                              <span className="font-mono font-medium">{user.socorristas?.carnet || 'Sin Carnet'}</span>
-                              <button
-                                onClick={() => handleLinkCarnet(user.id, user.socorristas?.carnet || '')}
-                                className="text-primary hover:text-emerald-800 text-2xs font-bold underline"
-                              >
-                                {user.socorristas?.carnet ? 'Cambiar' : 'Vincular'}
-                              </button>
+                        {/* 3. Nivel y Alcance (Clic abre editor limpio de Global vs Seccional y permisos) */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {user.role === 'admin' ? (
+                            <div>
+                              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-900">
+                                <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Global · Nacional</span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Acceso administrativo total
+                              </p>
                             </div>
-                          </td>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedUserForPermisos(user)}
+                              className="text-left group cursor-pointer rounded-xl px-2.5 py-1.5 -mx-2.5 hover:bg-slate-100/90 transition-colors"
+                              title="Cambiar entre Nivel Global, Seccional y permisos individuales"
+                            >
+                              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-900 group-hover:text-emerald-700 transition-colors">
+                                {scopeInfo.isGlobal ? (
+                                  <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                )}
+                                <span>{scopeInfo.primary}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {scopeInfo.secondary} · <span className="underline">Configurar</span>
+                              </p>
+                            </button>
+                          )}
+                        </td>
 
-                          {/* Rol */}
-                          <td className="px-5 py-4 whitespace-nowrap">
-                            <select
-                              value={user.role}
-                              onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                              className={`block w-full pl-2.5 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-primary focus:border-primary font-medium ${
-                                user.role === 'inactivo' ? 'text-red-700 bg-red-50 font-bold' : ''
+                        {/* 4. Estado (Switch estilo iOS) */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!isInactive}
+                              onClick={() => handleToggleUserActive(user)}
+                              title={isInactive ? 'Activar cuenta' : 'Desactivar cuenta'}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
+                                isInactive
+                                  ? 'bg-slate-200'
+                                  : isPending
+                                  ? 'bg-amber-500'
+                                  : 'bg-emerald-500'
                               }`}
                             >
-                              {roles?.map(r => (
-                                <option key={r} value={r}>{r}</option>
-                              ))}
-                              {!roles?.includes('inactivo') && <option value="inactivo">inactivo</option>}
-                              {!roles?.includes('pendiente') && <option value="pendiente">pendiente</option>}
-                            </select>
-                          </td>
-
-                          {/* Ámbito Seccional */}
-                          <td className="px-5 py-4 whitespace-nowrap">
-                            {user.role === 'admin' ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800">
-                                <Globe className="w-3 h-3 mr-1 text-emerald-600" />
-                                Nivel Nacional (Todas)
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-bold bg-blue-100 text-blue-800">
-                                <Building2 className="w-3 h-3 mr-1 text-blue-600" />
-                                {user.socorristas?.seccionales?.nombre ? user.socorristas.seccionales.nombre : 'Seccional Local'}
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Accesos Individuales */}
-                          <td className="px-5 py-4 whitespace-nowrap text-center">
-                            {user.role === 'admin' ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                <Shield className="w-3 h-3 mr-1 text-purple-600" />
-                                Admin (Total)
-                              </span>
-                            ) : (
-                              <div className="flex flex-col items-center gap-1">
-                                <button
-                                  onClick={() => setSelectedUserForPermisos(user)}
-                                  className="inline-flex items-center px-2.5 py-1 rounded-lg text-2xs font-bold text-slate-800 bg-white hover:bg-emerald-50 border border-slate-300 hover:border-primary transition-all cursor-pointer shadow-2xs group"
-                                  title="Ver a qué tiene acceso y a qué no por individual"
-                                >
-                                  <Sliders className="w-3.5 h-3.5 mr-1 text-primary group-hover:scale-110 transition-transform" />
-                                  <span>Ver / Configurar</span>
-                                </button>
-
-                                {/* Excepciones badge */}
-                                {(() => {
-                                  const cp = user.custom_permissions || {};
-                                  const boolCount = Object.keys(cp).filter(k => typeof cp[k] === 'boolean').length;
-                                  const hasScopes = Object.keys(cp._module_scopes || {}).length > 0;
-                                  const hasSecConfig = cp._seccionales_socorristas?.mode && cp._seccionales_socorristas.mode !== 'default';
-                                  const customCount = boolCount + (hasScopes ? 1 : 0) + (hasSecConfig ? 1 : 0);
-                                  if (customCount > 0) {
-                                    return (
-                                      <span className="inline-flex items-center px-1.5 py-0.2 rounded text-3xs font-black bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
-                                        <Sparkles className="w-2.5 h-2.5 mr-0.5 text-amber-600" />
-                                        {customCount} {customCount === 1 ? 'excepción' : 'excepciones'}
-                                      </span>
-                                    );
-                                  }
-                                  return (
-                                    <span className="text-3xs text-gray-400 font-medium">
-                                      Hereda rol ({user.role})
-                                    </span>
-                                  );
-                                })()}
-                              </div>
-                            )}
-                          </td>
-
-                          {/* Permiso de Subir Archivos */}
-                          <td className="px-5 py-4 whitespace-nowrap text-center">
-                            {user.role === 'admin' ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                <Check className="w-3 h-3 mr-1 text-purple-600" />
-                                Admin (Total)
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleToggleCanUploadFiles(user)}
-                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold transition-all cursor-pointer border ${
-                                  user.can_upload_files 
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' 
-                                    : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
+                                  isInactive ? 'translate-x-0' : 'translate-x-4'
                                 }`}
-                                title={user.can_upload_files ? "Habilitado para subir archivos (Clic para revocar)" : "Desactivado (Clic para habilitar poder subir archivos)"}
-                              >
-                                {user.can_upload_files ? (
-                                  <>
-                                    <Check className="w-3 h-3 mr-1 text-emerald-600" />
-                                    Habilitado
-                                  </>
-                                ) : (
-                                  <>
-                                    <X className="w-3 h-3 mr-1 text-gray-400" />
-                                    Desactivado
-                                  </>
-                                )}
-                              </button>
-                            )}
-                          </td>
+                              />
+                            </button>
+                            <span
+                              className={`text-xs font-medium ${
+                                isInactive
+                                  ? 'text-slate-400'
+                                  : isPending
+                                  ? 'text-amber-700'
+                                  : 'text-slate-700'
+                              }`}
+                            >
+                              {isInactive ? 'Inactivo' : isPending ? 'Pendiente' : 'Activo'}
+                            </span>
+                          </div>
+                        </td>
 
-                          {/* Estado Activo/Inactivo */}
-                          <td className="px-5 py-4 whitespace-nowrap">
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center space-x-2">
-                                {isInactive ? (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-red-100 text-red-800 border border-red-200">
-                                    <XCircle className="w-3 h-3 mr-1 text-red-600" />
-                                    Inactivo (Bloqueado)
-                                  </span>
-                                ) : isPending ? (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                    <Clock className="w-3 h-3 mr-1 text-amber-600" />
-                                    Pendiente
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
-                                    Activo
-                                  </span>
-                                )}
-
-                                {/* Botón de Alternar Estado */}
-                                <button
-                                  onClick={() => handleToggleUserActive(user)}
-                                  className={`px-2 py-1 rounded text-2xs font-bold transition-colors cursor-pointer ${
-                                    isInactive 
-                                      ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200' 
-                                      : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
-                                  }`}
-                                  title={isInactive ? "Activar usuario" : "Desactivar usuario"}
-                                >
-                                  {isInactive ? 'Activar' : 'Desactivar'}
-                                </button>
-                              </div>
-                              {!user.email_confirmed_at && !user.confirmed_at && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-3xs text-amber-700 font-semibold">
-                                    Correo sin confirmar
-                                  </span>
-                                  <button
-                                    type="button"
-                                    disabled={sendingConfirmUserId === user.id}
-                                    onClick={() => handleSendConfirmationLink(user)}
-                                    className="text-3xs font-bold text-indigo-700 hover:text-indigo-900 underline cursor-pointer disabled:opacity-50"
-                                    title={`Enviar enlace de confirmación vía ${remitenteCorreo}`}
-                                  >
-                                    {sendingConfirmUserId === user.id ? 'Enviando...' : 'Enviar confirmación'}
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Acciones */}
-                          <td className="px-5 py-4 whitespace-nowrap text-right text-xs font-medium space-x-2.5">
-                            
-                            {/* Ver Accesos Individuales */}
+                        {/* 5. Acciones limpias en una sola fila */}
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5">
                             {user.role !== 'admin' && (
                               <button
+                                type="button"
                                 onClick={() => setSelectedUserForPermisos(user)}
-                                className="inline-flex items-center text-emerald-700 hover:text-emerald-950 font-semibold cursor-pointer"
-                                title="Ver a qué tiene acceso y a qué no por individual"
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                               >
-                                <Sliders className="h-4 w-4 mr-1 text-emerald-600" />
+                                <Sliders className="h-3.5 w-3.5 text-slate-600" />
                                 <span>Accesos</span>
                               </button>
                             )}
 
-                            {/* Restablecer Contraseña */}
                             <button
+                              type="button"
                               onClick={() => setSelectedUserForReset(user)}
-                              className="inline-flex items-center text-blue-600 hover:text-blue-900 font-semibold cursor-pointer"
-                              title="Restablecer o generar contraseña temporal"
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                              title="Restablecer contraseña"
                             >
-                              <KeyRound className="h-4 w-4 mr-1 text-blue-600" />
+                              <KeyRound className="h-3.5 w-3.5 text-slate-500" />
                               <span>Clave</span>
                             </button>
 
-                            {/* Eliminar */}
                             <button
+                              type="button"
                               onClick={() => handleDeleteUser(user.id)}
-                              className="text-red-500 hover:text-red-700 inline-flex items-center cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
                               title="Eliminar usuario"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
-                          </td>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-                        </tr>
-                      );
-                      })
-                    )}
-                  </tbody>
-                </table>
+      {/* TAB 2: SOLICITUDES DE REGISTRO */}
+      {activeTab === 'solicitudes' && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6">
+          <SolicitudesRegistroTab
+            solicitudes={solicitudes}
+            roles={roles}
+            seccionales={seccionales}
+            onRefresh={fetchData}
+            onSolicitudProcessed={handleSolicitudProcessed}
+            remitenteNombre={remitenteNombre}
+            remitenteCorreo={remitenteCorreo}
+          />
+        </div>
+      )}
+
+      {/* TAB 3: PERMISOS POR ROL (ESTILO iOS AGRUPADO CON SWITCHES) */}
+      {activeTab === 'roles' && (
+        <div className="space-y-5 max-w-4xl">
+          {/* Selector segmentado de Rol + Buscador + Guardar */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Permisos por Rol</h3>
+                <p className="text-xs text-slate-500">
+                  Selecciona un rol para activar o desactivar sus permisos base (incluyendo «Conoce a tu Socorrista»)
+                </p>
+              </div>
+
+              {activeRoleObject && editingRole === activeRoleObject.role && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRole(null);
+                      setEditedPermissions({});
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    Descartar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingRolePerms}
+                    onClick={() => handleSavePermissions(activeRoleObject.role)}
+                    className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{savingRolePerms ? 'Guardando...' : `Guardar rol ${activeRoleObject.role}`}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="bg-slate-100 p-1 rounded-xl flex flex-wrap gap-1">
+                {rolePermissions.map((rp) => {
+                  const isSelected = (activeRoleObject?.role || '') === rp.role;
+                  return (
+                    <button
+                      key={rp.role}
+                      type="button"
+                      onClick={() => {
+                        if (editingRole && editingRole !== rp.role) {
+                          setEditingRole(null);
+                          setEditedPermissions({});
+                        }
+                        setSelectedRoleTab(rp.role);
+                      }}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                        isSelected
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {rp.role}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="relative sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2" />
+                <input
+                  type="text"
+                  value={rolePermSearch}
+                  onChange={(e) => setRolePermSearch(e.target.value)}
+                  placeholder="Filtrar permiso..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white outline-none"
+                />
               </div>
             </div>
-          )}
+          </div>
 
-          {/* TAB 2: SOLICITUDES DE REGISTRO */}
-          {activeTab === 'solicitudes' && (
-            <SolicitudesRegistroTab
-              solicitudes={solicitudes}
-              roles={roles}
-              seccionales={seccionales}
-              onRefresh={fetchData}
-              onSolicitudProcessed={handleSolicitudProcessed}
-              remitenteNombre={remitenteNombre}
-              remitenteCorreo={remitenteCorreo}
-            />
-          )}
-
-          {/* TAB 3: ROLES Y PERMISOS */}
-          {activeTab === 'roles' && (
+          {/* Grupos estilo iOS Settings para el rol seleccionado */}
+          {activeRoleObject && (
             <div className="space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-1">
-                <div>
-                  <h3 className="text-base font-bold tracking-tight text-gray-900">Permisos por Rol</h3>
-                  <p className="text-2xs text-gray-400">
-                    Define las capacidades y accesos globales de cada categoría institucional
-                  </p>
-                </div>
-              </div>
+              {rolePermissionGroups.map((group) => {
+                const q = rolePermSearch.trim().toLowerCase();
+                const visibleKeys = group.keys.filter((k) => {
+                  if (!permissionLabels[k]) return false;
+                  if (!q) return true;
+                  return (
+                    permissionLabels[k].toLowerCase().includes(q) || k.toLowerCase().includes(q)
+                  );
+                });
 
-              {/* Matriz de Permisos */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {rolePermissions.map((rp) => (
-                  <div key={rp.role} className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
-                    <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-                      <div>
-                        <span className="text-xs font-bold uppercase tracking-wider text-gray-900 block">
-                          Rol: {rp.role}
-                        </span>
-                        <span className="text-3xs text-gray-400">
-                          {rp.role === 'admin' ? 'Acceso administrativo total' : 'Acceso operativo restringido'}
-                        </span>
-                      </div>
-                      {editingRole === rp.role ? (
-                        <button
-                          onClick={() => handleSavePermissions(rp.role)}
-                          className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center hover:bg-emerald-700"
-                        >
-                          <Save className="w-3.5 h-3.5 mr-1" />
-                          Guardar
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => startEditingRole(rp)}
-                          className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold flex items-center hover:bg-gray-200"
-                        >
-                          <Edit className="w-3.5 h-3.5 mr-1" />
-                          Editar
-                        </button>
-                      )}
-                    </div>
+                if (visibleKeys.length === 0) return null;
 
-                    <div className="mt-4 space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                      {Object.keys(permissionLabels).map((permKey) => {
-                        const isGranted = editingRole === rp.role 
-                          ? !!editedPermissions[permKey] 
-                          : !!rp.permissions?.[permKey];
+                return (
+                  <div key={group.title} className="space-y-1.5">
+                    <p className="px-1 text-xs font-semibold text-slate-500">{group.title}</p>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
+                      {visibleKeys.map((permKey) => {
+                        const isGranted =
+                          editingRole === activeRoleObject.role
+                            ? Boolean(editedPermissions[permKey])
+                            : Boolean(activeRoleObject.permissions?.[permKey]);
 
                         return (
-                          <label key={permKey} className="flex items-center justify-between text-xs py-1 hover:bg-gray-50 px-2 rounded">
-                            <span className="text-gray-700 font-medium">{permissionLabels[permKey]}</span>
-                            <input
-                              type="checkbox"
-                              disabled={editingRole !== rp.role}
-                              checked={isGranted}
-                              onChange={() => togglePermission(permKey)}
-                              className="rounded text-primary focus:ring-primary h-4 w-4 disabled:opacity-60"
-                            />
-                          </label>
+                          <div
+                            key={permKey}
+                            className="px-4 sm:px-5 py-3 flex items-center justify-between gap-4 hover:bg-slate-50/60"
+                          >
+                            <span className="text-xs font-medium text-slate-800">
+                              {permissionLabels[permKey]}
+                            </span>
+
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={isGranted}
+                              onClick={() => handleToggleRolePermDirect(activeRoleObject, permKey)}
+                              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
+                                isGranted ? 'bg-emerald-500' : 'bg-slate-200'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
+                                  isGranted ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           )}
-
-          {/* TAB 4: AJUSTES DE SEGURIDAD Y NOTIFICACIONES */}
-          {activeTab === 'ajustes' && (
-            <div className="space-y-6 max-w-3xl">
-              
-              {/* Card 1: Opciones Visuales y de Acceso en Login (iOS Switches) */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                      <Shield className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">
-                        Opciones de Acceso y Pantalla de Inicio
-                      </h4>
-                      <p className="text-xs text-gray-500">
-                        Botones públicos y visualización de marcas institucionales
-                      </p>
-                    </div>
-                  </div>
-
-                  {ajustesSavedMessage && (
-                    <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-lg text-2xs font-semibold flex items-center">
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                      Guardado
-                    </span>
-                  )}
-                </div>
-
-                <div className="divide-y divide-slate-100">
-                  {/* Marca de Agua */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between">
-                    <div className="pr-4">
-                      <span className="text-xs font-semibold text-gray-900 block">Marca de Agua Institucional</span>
-                      <span className="text-2xs text-gray-400 block mt-0.5">Muestra el sello oficial en el fondo de carnets y documentos</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={watermarkEnabled}
-                        onChange={handleToggleWatermark}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
-                    </label>
-                  </div>
-
-                  {/* Botón Solicitar Carnet en Login */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between">
-                    <div className="pr-4">
-                      <span className="text-xs font-semibold text-gray-900 block">Botón «Solicitar Carnet» en Login</span>
-                      <span className="text-2xs text-gray-400 block mt-0.5">Acceso público rápido para solicitudes externas</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={loginShowSolicitar}
-                        onChange={handleToggleLoginSolicitar}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
-                    </label>
-                  </div>
-
-                  {/* Botón Verificar Carnet en Login */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between">
-                    <div className="pr-4">
-                      <span className="text-xs font-semibold text-gray-900 block">Botón «Verificar Carnet» en Login</span>
-                      <span className="text-2xs text-gray-400 block mt-0.5">Acceso público para validación de códigos QR</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={loginShowVerificar}
-                        onChange={handleToggleLoginVerificar}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="px-5 py-3.5 bg-slate-50/80 border-t border-slate-100 flex justify-end">
-                  <button
-                    onClick={handleSaveAjustes}
-                    disabled={savingAjustes || !hasAjustesChanges}
-                    className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5 mr-1.5" />
-                    {savingAjustes ? 'Guardando...' : 'Guardar Ajustes'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Card 2: Remitente de Correo para Aprobaciones */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                      <Mail className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">
-                        Remitente de Correos de Aprobación
-                      </h4>
-                      <p className="text-xs text-gray-500">
-                        Identidad en correos de activación de cuenta y contraseñas
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowAjustesPreview(!showAjustesPreview)}
-                    className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-2xs font-semibold transition-all shadow-2xs"
-                  >
-                    <Eye className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                    {showAjustesPreview ? 'Ocultar' : 'Vista Previa'}
-                  </button>
-                </div>
-
-                {emailConfigSaved && (
-                  <div className="m-5 mb-0 p-3 bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-medium rounded-xl flex items-center">
-                    <CheckCircle2 className="w-4 h-4 mr-2 text-emerald-600 shrink-0" />
-                    Configuración de correos guardada exitosamente.
-                  </div>
-                )}
-
-                <div className="p-5 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                        Nombre del Remitente
-                      </label>
-                      <input
-                        type="text"
-                        value={remitenteNombre}
-                        onChange={(e) => setRemitenteNombre(e.target.value)}
-                        placeholder="Cruz Verde Salvadoreña"
-                        className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                        Correo Institucional
-                      </label>
-                      <input
-                        type="email"
-                        value={remitenteCorreo}
-                        onChange={(e) => setRemitenteCorreo(e.target.value)}
-                        placeholder="notificaciones@cruzverdesv.org"
-                        className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-2xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-                      Asunto de Notificación
-                    </label>
-                    <input
-                      type="text"
-                      value={asuntoAprobacion}
-                      onChange={(e) => setAsuntoAprobacion(e.target.value)}
-                      placeholder="¡Tu cuenta ha sido aprobada! - Cruz Verde Salvadoreña"
-                      className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="px-5 py-3.5 bg-slate-50/80 border-t border-slate-100 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleSaveEmailConfig}
-                    disabled={savingEmailConfig}
-                    className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5 mr-1.5" />
-                    {savingEmailConfig ? 'Guardando...' : 'Guardar Notificaciones'}
-                  </button>
-                </div>
-
-                {/* Vista previa desplegable (Texto Plano) */}
-                {showAjustesPreview && (
-                  <div className="p-5 border-t border-slate-100 bg-slate-50/60">
-                    <div className="bg-white p-4 rounded-xl shadow-xs border border-slate-200">
-                      <p className="text-3xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                        Formato de envío: Texto plano (sin diseño ni interfaz HTML)
-                      </p>
-                      <pre className="whitespace-pre-wrap font-mono text-xs text-slate-800 leading-relaxed">
-                        {generarTextoCorreoAprobacion({
-                          remitenteNombre,
-                          remitenteCorreo,
-                          destinatarioCorreo: 'ejemplo.usuario@cruzverdesv.org',
-                          destinatarioNombre: 'Juan Carlos Pérez',
-                          asunto: asuntoAprobacion,
-                          seccionalNombre: 'Seccional Santa Ana',
-                          rolAsignado: 'socorrista',
-                          loginUrl: getOfficialLoginUrl()
-                        })}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Card 3: Migraciones de Base de Datos (Estilo Apple Grouped Inset - Sin cajas negras ruidosas) */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-                      <Database className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">
-                        Migraciones de Base de Datos
-                      </h4>
-                      <p className="text-xs text-gray-500">
-                        Scripts SQL para actualización de esquemas en Supabase
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="divide-y divide-slate-100">
-                  {/* Migración 18 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        18
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">Solicitudes de Registro y Estado Activo</span>
-                        <span className="text-3xs text-gray-400">Tabla solicitudes_registro y políticas de aprobación</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration}
-                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sqlCopied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 21 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        21
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">Archivos Descargables y Anuncios</span>
-                        <span className="text-3xs text-gray-400">Tablas public.archivos, public.anuncios y permiso can_upload_files</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration21}
-                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql21Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 22 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        22
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">Permisos Individuales por Usuario</span>
-                        <span className="text-3xs text-gray-400">Columna custom_permissions JSONB en user_roles</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration22}
-                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql22Copied ? <><Check className="w-3 h-3 mr-1 text-indigo-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 31 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-teal-50 text-teal-700 text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        31
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">Permisos por Seccional, Alcances y Solicitudes de Carnet</span>
-                        <span className="text-3xs text-gray-400">Columnas de seccional, observaciones y estados en solicitudes_carnet + permisos granulares</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration31}
-                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql31Copied ? <><Check className="w-3 h-3 mr-1 text-teal-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 42 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-slate-900 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        42
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">Nombre de Usuario, Confirmación y Reseteo Seguro</span>
-                        <span className="text-3xs text-gray-400">Columna nombre_usuario y funciones administrativas de confirmación/clave</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration42}
-                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-2xs font-semibold text-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql42Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-slate-400" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 43 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-emerald-50/40">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-emerald-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        43
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">
-                          Creación de Usuarios y Confirmación Sin Límite (Soluciona &quot;email rate limit exceeded&quot;)
-                        </span>
-                        <span className="text-3xs text-gray-500">
-                          Crea usuarios vía SQL y envía el enlace de confirmación desde {remitenteCorreo} en texto plano
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration43}
-                      className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql43Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 44 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-emerald-50/60">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-emerald-800 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        44
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">
-                          Visibilidad de Fotografías en Solicitudes de Carnet y Storage Público
-                        </span>
-                        <span className="text-3xs text-gray-500">
-                          Habilita lectura pública en el bucket socorristas, políticas de solicitudes_carnet y recupera fotos de perfil faltantes
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration44}
-                      className="inline-flex items-center px-3 py-1.5 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-lg text-2xs font-semibold text-emerald-800 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql44Copied ? <><Check className="w-3 h-3 mr-1 text-emerald-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-emerald-600" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 45 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-sky-50/70">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-sky-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        45
-                      </span>
-                      <div>
-                        <span className="text-xs font-semibold text-gray-900 block">
-                          Control de Lectura Individual por Solicitud y Notificaciones No Leídas
-                        </span>
-                        <span className="text-3xs text-gray-500">
-                          Crea la tabla solicitudes_lecturas para recordar por usuario qué solicitudes de carnet, compra o combustible ya fueron vistas
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration45}
-                      className="inline-flex items-center px-3 py-1.5 border border-sky-200 bg-white hover:bg-sky-50 rounded-lg text-2xs font-semibold text-sky-800 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql45Copied ? <><Check className="w-3 h-3 mr-1 text-sky-600" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-sky-600" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 46 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-rose-50/75">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-rose-600 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        46
-                      </span>
-                      <div>
-                        <span className="text-xs font-bold text-rose-950 block">
-                          Seguridad Crítica Supabase: Eliminar Vista Expuesta de Usuarios (usuarios_autenticados_expuestos)
-                        </span>
-                        <span className="text-3xs text-rose-800">
-                          Elimina public.usuarios_view para cerrar el acceso público a auth.users y activa las funciones protegidas con validación de rol
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration46}
-                      className="inline-flex items-center px-3 py-1.5 border border-rose-300 bg-rose-600 hover:bg-rose-700 rounded-lg text-2xs font-bold text-white transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql46Copied ? <><Check className="w-3 h-3 mr-1 text-white" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-white" /> Copiar SQL</>}
-                    </button>
-                  </div>
-
-                  {/* Migración 47 */}
-                  <div className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-violet-50/70">
-                    <div className="flex items-center space-x-3">
-                      <span className="w-7 h-7 rounded-lg bg-violet-700 text-white text-2xs font-mono font-bold flex items-center justify-center shrink-0">
-                        47
-                      </span>
-                      <div>
-                        <span className="text-xs font-bold text-violet-950 block">
-                          Optimización Sin Pérdida (WebP) y Estadísticas Reales de Imágenes en Storage
-                        </span>
-                        <span className="text-3xs text-violet-800">
-                          Habilita WebP en todos los buckets, bitácora de megabytes ahorrados y conteo/espacio exacto de imágenes en Configuración
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopySqlMigration47}
-                      className="inline-flex items-center px-3 py-1.5 border border-violet-300 bg-white hover:bg-violet-50 rounded-lg text-2xs font-bold text-violet-800 transition-all cursor-pointer shadow-2xs shrink-0"
-                    >
-                      {sql47Copied ? <><Check className="w-3 h-3 mr-1 text-violet-700" /> ¡Copiado!</> : <><Copy className="w-3 h-3 mr-1 text-violet-600" /> Copiar SQL</>}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          )}
-
         </div>
+      )}
+
+      {/* TAB 4: AJUSTES DEL SISTEMA */}
+      {activeTab === 'ajustes' && (
+        <div className="space-y-6 max-w-3xl">
+          {/* Card 1: Opciones de Acceso y Pantalla de Inicio */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Pantalla de Inicio y Documentos
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Accesos rápidos en login y marca de agua institucional
+                  </p>
+                </div>
+              </div>
+
+              {ajustesSavedMessage && (
+                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Guardado</span>
+                </span>
+              )}
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              <div className="p-4 sm:px-5 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-xs font-semibold text-slate-900 block">
+                    Marca de Agua Institucional
+                  </span>
+                  <span className="text-xs text-slate-500 block mt-0.5">
+                    Muestra el sello oficial en el fondo de carnets y documentos
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={watermarkEnabled}
+                    onChange={handleToggleWatermark}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
+              <div className="p-4 sm:px-5 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-xs font-semibold text-slate-900 block">
+                    Botón «Solicitar Carnet» en Login
+                  </span>
+                  <span className="text-xs text-slate-500 block mt-0.5">
+                    Acceso público rápido desde la pantalla de inicio de sesión
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={loginShowSolicitar}
+                    onChange={handleToggleLoginSolicitar}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
+              <div className="p-4 sm:px-5 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-xs font-semibold text-slate-900 block">
+                    Botón «Verificar Carnet» en Login
+                  </span>
+                  <span className="text-xs text-slate-500 block mt-0.5">
+                    Validación pública de carnets mediante código QR
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={loginShowVerificar}
+                    onChange={handleToggleLoginVerificar}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50/70 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveAjustes}
+                disabled={savingAjustes || !hasAjustesChanges}
+                className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Save className="w-3.5 h-3.5 mr-1.5" />
+                <span>{savingAjustes ? 'Guardando...' : 'Guardar ajustes'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Card 2: Remitente de Correos */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Remitente de Correos Institucionales
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Datos de envío para aprobaciones, altas y enlaces de acceso
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAjustesPreview(!showAjustesPreview)}
+                className="inline-flex items-center px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Eye className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+                <span>{showAjustesPreview ? 'Ocultar vista previa' : 'Vista previa'}</span>
+              </button>
+            </div>
+
+            {emailConfigSaved && (
+              <div className="mx-5 mt-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium rounded-xl flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Configuración de correos guardada.</span>
+              </div>
+            )}
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Nombre del remitente
+                  </label>
+                  <input
+                    type="text"
+                    value={remitenteNombre}
+                    onChange={(e) => setRemitenteNombre(e.target.value)}
+                    placeholder="Cruz Verde Salvadoreña"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-slate-400 outline-none transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Correo institucional
+                  </label>
+                  <input
+                    type="email"
+                    value={remitenteCorreo}
+                    onChange={(e) => setRemitenteCorreo(e.target.value)}
+                    placeholder="notificaciones@cruzverdesv.org"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-slate-400 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Asunto de aprobación
+                </label>
+                <input
+                  type="text"
+                  value={asuntoAprobacion}
+                  onChange={(e) => setAsuntoAprobacion(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-slate-400 outline-none transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50/70 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveEmailConfig}
+                disabled={savingEmailConfig}
+                className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Save className="w-3.5 h-3.5 mr-1.5" />
+                <span>{savingEmailConfig ? 'Guardando...' : 'Guardar remitente'}</span>
+              </button>
+            </div>
+
+            {showAjustesPreview && (
+              <div className="p-5 border-t border-slate-100 bg-slate-50/60">
+                <pre className="bg-white p-4 rounded-xl border border-slate-200 whitespace-pre-wrap font-mono text-xs text-slate-700 leading-relaxed">
+                  {generarTextoCorreoAprobacion({
+                    remitenteNombre,
+                    remitenteCorreo,
+                    destinatarioCorreo: 'ejemplo.usuario@cruzverdesv.org',
+                    destinatarioNombre: 'Juan Carlos Pérez',
+                    asunto: asuntoAprobacion,
+                    seccionalNombre: 'Seccional Santa Ana',
+                    rolAsignado: 'socorrista',
+                    loginUrl: getOfficialLoginUrl(),
+                  })}
+                </pre>
+              </div>
+            )}
+          </div>
+
+          {/* Card 3: Migraciones SQL limpias y ordenadas */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Migraciones SQL de Supabase
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Scripts de actualización de base de datos listos para copiar
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {[
+                {
+                  num: '50',
+                  title: 'Soporte: Notificaciones de Lectura, Alcance por Seccional y Permisos',
+                  desc: 'Habilita lectura por solicitud en Soporte y políticas RLS de alcance seccional, creación y solución',
+                  copied: sql50Copied,
+                  onCopy: handleCopySqlMigration50,
+                },
+                {
+                  num: '49',
+                  title: 'Dependientes con Parentesco (CVSSOCC/FORM001) y Schema Cache',
+                  desc: 'Columna dependientes_detalle JSONB y permisos de esquema en PostgREST',
+                  copied: sql49Copied,
+                  onCopy: handleCopySqlMigration49,
+                },
+                {
+                  num: '48',
+                  title: 'Ficha «Conoce a tu Socorrista» (CVSSOCC/FORM001)',
+                  desc: 'Campos adicionales de estado civil, NIT opcional, cónyuge, profesión y PEP',
+                  copied: sql48Copied,
+                  onCopy: handleCopySqlMigration48,
+                },
+                {
+                  num: '47',
+                  title: 'Optimización de Imágenes WebP y Estadísticas de Storage',
+                  desc: 'Soporte WebP en buckets y conteo de almacenamiento de imágenes',
+                  copied: sql47Copied,
+                  onCopy: handleCopySqlMigration47,
+                },
+                {
+                  num: '46',
+                  title: 'Seguridad Supabase: Cerrar Vista Expuesta de Usuarios',
+                  desc: 'Elimina public.usuarios_view y habilita consulta protegida por rol',
+                  copied: sql46Copied,
+                  onCopy: handleCopySqlMigration46,
+                },
+              ].map((m) => (
+                <div
+                  key={m.num}
+                  className="p-4 sm:px-5 flex items-center justify-between gap-3 hover:bg-slate-50/60"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums">
+                      {m.num}
+                    </span>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-slate-900 block truncate">
+                        {m.title}
+                      </span>
+                      <span className="text-xs text-slate-500 block truncate">{m.desc}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={m.onCopy}
+                    className="inline-flex items-center px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    {m.copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                        <span>Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                        <span>Copiar SQL</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ))}
+
+              {/* Botón para expandir migraciones anteriores sin saturar la vista */}
+              <div className="px-5 py-3 bg-slate-50/60">
+                <button
+                  type="button"
+                  onClick={() => setShowOlderMigrations((prev) => !prev)}
+                  className="text-xs font-semibold text-slate-600 hover:text-slate-900 inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>
+                    {showOlderMigrations
+                      ? 'Ocultar migraciones anteriores (18–45)'
+                      : 'Ver migraciones anteriores (18–45)'}
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform duration-150 ${
+                      showOlderMigrations ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {showOlderMigrations &&
+                [
+                  {
+                    num: '45',
+                    title: 'Control de Lectura Individual por Solicitud',
+                    desc: 'Tabla solicitudes_lecturas para conteo de no leídas por usuario',
+                    copied: sql45Copied,
+                    onCopy: handleCopySqlMigration45,
+                  },
+                  {
+                    num: '44',
+                    title: 'Visibilidad de Fotografías y Storage Público',
+                    desc: 'Políticas públicas de lectura en buckets y fotos de solicitudes_carnet',
+                    copied: sql44Copied,
+                    onCopy: handleCopySqlMigration44,
+                  },
+                  {
+                    num: '43',
+                    title: 'Creación de Usuarios y Confirmación Sin Límite',
+                    desc: 'Alta directa vía SQL sin límite de correos de Supabase',
+                    copied: sql43Copied,
+                    onCopy: handleCopySqlMigration43,
+                  },
+                  {
+                    num: '42',
+                    title: 'Nombre de Usuario y Reseteo Administrativo',
+                    desc: 'Columna nombre_usuario y funciones de confirmación y clave',
+                    copied: sql42Copied,
+                    onCopy: handleCopySqlMigration42,
+                  },
+                  {
+                    num: '31',
+                    title: 'Permisos por Seccional y Solicitudes de Carnet',
+                    desc: 'Columnas de seccional y estados extendidos en solicitudes_carnet',
+                    copied: sql31Copied,
+                    onCopy: handleCopySqlMigration31,
+                  },
+                  {
+                    num: '22',
+                    title: 'Permisos Individuales por Usuario',
+                    desc: 'Columna custom_permissions JSONB en user_roles',
+                    copied: sql22Copied,
+                    onCopy: handleCopySqlMigration22,
+                  },
+                  {
+                    num: '21',
+                    title: 'Archivos Descargables y Anuncios',
+                    desc: 'Tablas public.archivos y public.anuncios',
+                    copied: sql21Copied,
+                    onCopy: handleCopySqlMigration21,
+                  },
+                  {
+                    num: '18',
+                    title: 'Solicitudes de Registro y Estado Activo',
+                    desc: 'Tabla solicitudes_registro y estado activo en user_roles',
+                    copied: sqlCopied,
+                    onCopy: handleCopySqlMigration,
+                  },
+                ].map((m) => (
+                  <div
+                    key={m.num}
+                    className="p-4 sm:px-5 flex items-center justify-between gap-3 bg-white hover:bg-slate-50/60"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 text-xs font-mono font-semibold flex items-center justify-center shrink-0 tabular-nums">
+                        {m.num}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-slate-800 block truncate">
+                          {m.title}
+                        </span>
+                        <span className="text-xs text-slate-500 block truncate">{m.desc}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={m.onCopy}
+                      className="inline-flex items-center px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      {m.copied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                          <span>Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                          <span>Copiar SQL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL RESET PASSWORD */}
       {selectedUserForReset && (
@@ -3215,155 +3497,166 @@ NOTIFY pgrst, 'reload schema';`;
         />
       )}
 
-      {/* MODAL NUEVO USUARIO MANUAL (ESTILO APPLE) */}
+      {/* MODAL NUEVO USUARIO (ESTILO iOS SHEET CON SCROLL INTERNO) */}
       {showNewUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden my-8 border border-slate-200/80 animate-in zoom-in-95 duration-150">
-            
-            {/* Header Apple macOS Style */}
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-              <div className="flex items-center space-x-3.5">
-                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center border border-slate-200/60 shadow-2xs">
-                  <UserPlus className="w-4 h-4 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 tracking-tight">
-                    Crear Nuevo Usuario
-                  </h3>
-                  <p className="text-2xs text-gray-400">Alta de cuenta institucional o externa</p>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-5">
+          <form
+            onSubmit={handleCreateUser}
+            className="bg-[#F2F2F7] rounded-[28px] shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-slate-200/80 animate-in zoom-in-95 duration-150"
+          >
+            {/* Header fijo */}
+            <div className="px-5 py-4 border-b border-slate-200/70 flex justify-between items-center bg-white shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                  Nuevo Usuario
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Alta de miembro institucional o cuenta externa
+                </p>
               </div>
-              <button 
-                type="button" 
-                onClick={resetNewUserModal} 
-                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              <button
+                type="button"
+                onClick={resetNewUserModal}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
-            <form onSubmit={handleCreateUser}>
-              <div className="p-6 space-y-4">
-                {formError && (
-                  <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs">
-                    {formError}
-                  </div>
-                )}
 
-                <div className="space-y-4 text-xs">
-                  
-                  {/* Selector Segmentado de Tipo de Usuario (Apple Style) */}
-                  <div>
-                    <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Tipo de Cuenta</label>
-                    <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setNewUserType('cruz_verde')}
-                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                          newUserType === 'cruz_verde'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Miembro Cruz Verde
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewUserType('externo');
-                          setSocorristaData(null);
-                        }}
-                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                          newUserType === 'externo'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Persona Externa
-                      </button>
-                    </div>
-                  </div>
+            {/* Cuerpo con scroll interno */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 text-xs">
+              {formError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs">
+                  {formError}
+                </div>
+              )}
 
-                  {newUserType === 'cruz_verde' && !socorristaData && (
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2">
-                      <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider">Número de Carnet</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={newUserCarnet}
-                          onChange={handleCarnetChange}
-                          maxLength={11}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 uppercase font-mono text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                          placeholder="CVS-0000-AA"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSearchCarnet}
-                          disabled={searchLoading || !newUserCarnet}
-                          className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl disabled:opacity-40 transition-all cursor-pointer shrink-0 shadow-xs"
-                        >
-                          {searchLoading ? 'Buscando...' : 'Buscar'}
-                        </button>
+              {/* Selector de tipo */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 space-y-2">
+                <label className="block text-xs font-semibold text-slate-600">
+                  Tipo de cuenta
+                </label>
+                <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewUserType('cruz_verde')}
+                    className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      newUserType === 'cruz_verde'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Miembro Cruz Verde
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUserType('externo');
+                      setSocorristaData(null);
+                    }}
+                    className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      newUserType === 'externo'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Persona Externa
+                  </button>
+                </div>
+              </div>
+
+              {newUserType === 'cruz_verde' && !socorristaData && (
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-4 space-y-2">
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Buscar por número de carnet
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newUserCarnet}
+                      onChange={handleCarnetChange}
+                      maxLength={11}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 uppercase font-mono text-xs text-slate-900 focus:bg-white outline-none"
+                      placeholder="CVS-0000-AA"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSearchCarnet}
+                      disabled={searchLoading || !newUserCarnet}
+                      className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl disabled:opacity-40 transition-colors cursor-pointer shrink-0"
+                    >
+                      {searchLoading ? 'Buscando...' : 'Buscar'}
+                    </button>
+                  </div>
+                  {searchError && <p className="text-xs text-rose-600">{searchError}</p>}
+                </div>
+              )}
+
+              {(newUserType === 'externo' || socorristaData) && (
+                <>
+                  {socorristaData && (
+                    <div className="bg-white border border-slate-200/80 p-3.5 rounded-2xl flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-900">
+                          {socorristaData.primer_nombre} {socorristaData.primer_apellido}
+                        </p>
+                        <p className="text-xs text-slate-500 font-mono">
+                          Carnet {socorristaData.carnet}
+                        </p>
                       </div>
-                      {searchError && <p className="text-2xs text-rose-600">{searchError}</p>}
+                      <button
+                        type="button"
+                        onClick={() => setSocorristaData(null)}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-900 underline cursor-pointer"
+                      >
+                        Cambiar
+                      </button>
                     </div>
                   )}
 
-                  {(newUserType === 'externo' || socorristaData) && (
-                    <>
-                      {socorristaData && (
-                        <div className="bg-emerald-50/80 border border-emerald-200/80 p-3.5 rounded-2xl flex items-center justify-between">
-                          <div>
-                            <span className="text-3xs font-medium text-emerald-800 uppercase tracking-wider block">Socorrista Vinculado</span>
-                            <p className="text-xs font-semibold text-emerald-950">{socorristaData.primer_nombre} {socorristaData.primer_apellido}</p>
-                            <p className="text-2xs text-emerald-700 font-mono">Carnet: {socorristaData.carnet}</p>
-                          </div>
-                          <span className="px-2 py-0.5 rounded-full text-3xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            Validado
-                          </span>
-                        </div>
-                      )}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
+                    <div className="p-3.5 space-y-1">
+                      <label className="block text-xs font-medium text-slate-600">
+                        Nombre completo
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newUserNombre}
+                        onChange={(e) => setNewUserNombre(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:bg-white outline-none"
+                        placeholder="Ej. Juan Pérez"
+                      />
+                    </div>
 
-                      <div>
-                        <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                          Nombre de Usuario / Identificador <span className="text-rose-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={newUserNombre}
-                          onChange={(e) => setNewUserNombre(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                          placeholder={newUserType === 'externo' ? 'Ej. Juan Pérez (Externo / Proveedor)' : 'Ej. Juan Pérez'}
-                        />
-                      </div>
+                    <div className="p-3.5 space-y-1">
+                      <label className="block text-xs font-medium text-slate-600">
+                        Correo electrónico
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:bg-white outline-none"
+                        placeholder="usuario@cruzverdesv.org"
+                      />
+                    </div>
 
-                      <div>
-                        <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Correo Electrónico</label>
-                        <input
-                          type="email"
-                          required
-                          value={newUserEmail}
-                          onChange={(e) => setNewUserEmail(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                          placeholder="usuario@cruzverdesv.org"
-                        />
-                      </div>
-
-                      {/* Método de Contraseña Segmentado Apple */}
-                      <div>
-                        <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Contraseña de Acceso</label>
-                        <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 mb-2">
+                    <div className="p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-slate-600">Contraseña</label>
+                        <div className="bg-slate-100 p-0.5 rounded-lg inline-flex gap-0.5">
                           <button
                             type="button"
                             onClick={() => {
                               setPasswordOption('generated');
                               generatePassword();
                             }}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer ${
                               passwordOption === 'generated'
-                                ? 'bg-white text-slate-900 shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
+                                ? 'bg-white text-slate-900 shadow-2xs'
+                                : 'text-slate-600'
                             }`}
                           >
                             Automática
@@ -3371,155 +3664,154 @@ NOTIFY pgrst, 'reload schema';`;
                           <button
                             type="button"
                             onClick={() => setPasswordOption('manual')}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer ${
                               passwordOption === 'manual'
-                                ? 'bg-white text-slate-900 shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
+                                ? 'bg-white text-slate-900 shadow-2xs'
+                                : 'text-slate-600'
                             }`}
                           >
                             Manual
                           </button>
                         </div>
-                        
-                        {passwordOption === 'manual' ? (
+                      </div>
+
+                      {passwordOption === 'manual' ? (
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          placeholder="Mínimo 6 caracteres"
+                          value={newUserPassword}
+                          onChange={(e) => setNewUserPassword(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:bg-white outline-none"
+                        />
+                      ) : (
+                        <div className="flex gap-2">
                           <input
-                            type="password"
-                            required
-                            minLength={6}
-                            placeholder="Mínimo 6 caracteres"
+                            type="text"
+                            readOnly
                             value={newUserPassword}
-                            onChange={(e) => setNewUserPassword(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-gray-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-900 outline-none"
                           />
-                        ) : (
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              readOnly
-                              value={newUserPassword}
-                              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={generatePassword}
-                              className="px-3.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-2xs"
-                            >
-                              Regenerar
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Rol en el Sistema</label>
-                          <select
-                            value={newUserRole}
-                            onChange={(e) => setNewUserRole(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all cursor-pointer"
+                          <button
+                            type="button"
+                            onClick={generatePassword}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer shrink-0"
                           >
-                            {roles?.map(r => (
-                              <option key={r} value={r}>{r}</option>
-                            ))}
-                          </select>
+                            Otra
+                          </button>
                         </div>
+                      )}
+                    </div>
 
-                        <div>
-                          <label className="block text-3xs font-medium text-gray-500 uppercase tracking-wider mb-1">Copiar Accesos De (Opcional)</label>
-                          <select
-                            value={copyFromUserId}
-                            onChange={(e) => handleCopyUserTemplateChange(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all cursor-pointer"
-                          >
-                            <option value="">-- Ninguno (según rol) --</option>
-                            {usuarios.map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {getUserDisplayName(u)} ({u.role})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                    <div className="p-3.5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="block text-xs font-medium text-slate-600">Rol</label>
+                        <select
+                          value={newUserRole}
+                          onChange={(e) => setNewUserRole(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none cursor-pointer"
+                        >
+                          {roles?.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
-                      {/* Opciones de Seguridad y Correo Plano */}
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
-                        <label className="flex items-center space-x-2.5 cursor-pointer">
-                          <input
-                            id="require-password-reset"
-                            type="checkbox"
-                            checked={newUserRequiresPasswordReset}
-                            onChange={(e) => setNewUserRequiresPasswordReset(e.target.checked)}
-                            className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
-                          />
-                          <span className="text-2xs text-gray-700 font-medium leading-tight">
-                            Obligar a cambiar la contraseña en su primer inicio de sesión
-                          </span>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-medium text-slate-600">
+                          Copiar accesos de (opcional)
                         </label>
-
-                        <label className="flex items-center space-x-2.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={newUserSendPlainEmail}
-                            onChange={(e) => setNewUserSendPlainEmail(e.target.checked)}
-                            className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
-                          />
-                          <span className="text-2xs text-gray-700 font-medium leading-tight">
-                            Enviar credenciales en texto plano vía {remitenteCorreo}
-                          </span>
-                        </label>
-
-                        <label className="flex items-center space-x-2.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={newUserAutoConfirmEmail}
-                            onChange={(e) => setNewUserAutoConfirmEmail(e.target.checked)}
-                            className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
-                          />
-                          <span className="text-2xs text-gray-700 font-medium leading-tight">
-                            {newUserAutoConfirmEmail
-                              ? 'Confirmar correo automáticamente al crear (acceso inmediato sin enlace)'
-                              : `Solicitar confirmación enviando enlace propio en texto plano desde ${remitenteCorreo}`}
-                          </span>
-                        </label>
-
-                        {copyFromUserId && (
-                          <label className="flex items-center space-x-2.5 cursor-pointer pt-1 border-t border-slate-200/70">
-                            <input
-                              type="checkbox"
-                              checked={openPermisosAfterCreate}
-                              onChange={(e) => setOpenPermisosAfterCreate(e.target.checked)}
-                              className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 rounded"
-                            />
-                            <span className="text-2xs text-emerald-800 font-semibold leading-tight">
-                              Abrir editor de permisos individuales después de crear para ajustar lo copiado
-                            </span>
-                          </label>
-                        )}
+                        <select
+                          value={copyFromUserId}
+                          onChange={(e) => handleCopyUserTemplateChange(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none cursor-pointer"
+                        >
+                          <option value="">Según rol</option>
+                          {usuarios.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {getUserDisplayName(u)} ({u.role})
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </>
-                  )}
-                </div>
-              </div>
+                    </div>
+                  </div>
 
-              {/* Footer Apple Modal */}
-              <div className="bg-white px-6 py-3.5 border-t border-slate-100 flex items-center justify-end space-x-2">
-                <button
-                  type="button"
-                  onClick={resetNewUserModal}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={creatingUser || (newUserType === 'cruz_verde' && !socorristaData)}
-                  className="px-5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl shadow-xs transition-all disabled:opacity-40 cursor-pointer"
-                >
-                  {creatingUser ? 'Creando...' : 'Crear Usuario'}
-                </button>
-              </div>
-            </form>
-          </div>
+                  {/* Opciones de cuenta estilo iOS */}
+                  <div className="bg-white border border-slate-200/80 rounded-2xl divide-y divide-slate-100 overflow-hidden">
+                    <label className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-xs text-slate-700">
+                        Pedir cambio de contraseña al iniciar sesión
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={newUserRequiresPasswordReset}
+                        onChange={(e) => setNewUserRequiresPasswordReset(e.target.checked)}
+                        className="h-4 w-4 text-emerald-600 rounded shrink-0"
+                      />
+                    </label>
+
+                    <label className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-xs text-slate-700">
+                        Enviar credenciales por correo ({remitenteCorreo})
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={newUserSendPlainEmail}
+                        onChange={(e) => setNewUserSendPlainEmail(e.target.checked)}
+                        className="h-4 w-4 text-emerald-600 rounded shrink-0"
+                      />
+                    </label>
+
+                    <label className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-xs text-slate-700">
+                        Confirmar correo automáticamente al crear
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={newUserAutoConfirmEmail}
+                        onChange={(e) => setNewUserAutoConfirmEmail(e.target.checked)}
+                        className="h-4 w-4 text-emerald-600 rounded shrink-0"
+                      />
+                    </label>
+
+                    <label className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-xs font-medium text-slate-800">
+                        Abrir configuración de Nivel Global / Seccional al terminar
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={openPermisosAfterCreate}
+                        onChange={(e) => setOpenPermisosAfterCreate(e.target.checked)}
+                        className="h-4 w-4 text-emerald-600 rounded shrink-0"
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer fijo */}
+            <div className="bg-white px-5 py-3.5 border-t border-slate-200/80 flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={resetNewUserModal}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={creatingUser || !newUserType || (newUserType === 'cruz_verde' && !socorristaData)}
+                className="px-5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-semibold rounded-xl shadow-xs transition-colors disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {creatingUser ? 'Creando...' : 'Crear Usuario'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -3536,7 +3828,6 @@ NOTIFY pgrst, 'reload schema';`;
           onSave={handleSaveCustomPermissions}
         />
       )}
-
     </div>
   );
 }

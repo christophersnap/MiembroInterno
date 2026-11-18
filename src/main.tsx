@@ -19,6 +19,16 @@ window.onunhandledrejection = (event) => {
   console.error('Unhandled Rejection:', reasonMsg);
 };
 
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  const reloadKey = 'cv_chunk_reload_ts';
+  const lastReload = Number(sessionStorage.getItem(reloadKey) || '0');
+  if (Date.now() - lastReload > 10000) {
+    sessionStorage.setItem(reloadKey, String(Date.now()));
+    window.location.reload();
+  }
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

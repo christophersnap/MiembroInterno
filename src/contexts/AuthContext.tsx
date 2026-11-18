@@ -7,7 +7,8 @@ export type ScopedModuleKey =
   | 'formularios'
   | 'solicitudes_combustible'
   | 'solicitudes_compra'
-  | 'solicitudes_carnet';
+  | 'solicitudes_carnet'
+  | 'soporte';
 
 export type CreateSolicitudModuleKey = 'solicitudes_combustible' | 'solicitudes_compra';
 export type CreateSolicitudScope = 'global' | 'seccional';
@@ -28,6 +29,7 @@ const DEFAULT_MODULE_SCOPES: Record<ScopedModuleKey, ModuleScope> = {
   solicitudes_combustible: 'usuario',
   solicitudes_compra: 'usuario',
   solicitudes_carnet: 'seccional',
+  soporte: 'usuario',
 };
 
 const DEFAULT_MODULE_SECCIONALES: Record<ScopedModuleKey, number[]> = {
@@ -35,6 +37,7 @@ const DEFAULT_MODULE_SECCIONALES: Record<ScopedModuleKey, number[]> = {
   solicitudes_combustible: [],
   solicitudes_compra: [],
   solicitudes_carnet: [],
+  soporte: [],
 };
 
 const DEFAULT_CREATE_SCOPES: Record<CreateSolicitudModuleKey, CreateSolicitudScope> = {
@@ -375,6 +378,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           descargar_carnet: permData.permissions.descargar_carnet ?? (currentRole === 'admin'),
           cambiar_estado_socorrista: permData.permissions.cambiar_estado_socorrista ?? (currentRole === 'admin'),
           descargar_excel_socorristas: permData.permissions.descargar_excel_socorristas ?? (currentRole === 'admin'),
+          descargar_ficha_conoce_socorrista: permData.permissions.descargar_ficha_conoce_socorrista ?? (currentRole === 'admin'),
           view_solicitar_carnet: permData.permissions.view_solicitar_carnet ?? true,
           view_verificar_carnet: permData.permissions.view_verificar_carnet ?? true,
           view_vehiculos: permData.permissions.view_vehiculos ?? true,
@@ -413,6 +417,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           view_meritos: permData.permissions.view_meritos ?? true,
           edit_meritos: permData.permissions.edit_meritos ?? (currentRole === 'admin' || currentRole === 'director'),
           view_soporte: permData.permissions.view_soporte ?? true,
+          crear_soporte: permData.permissions.crear_soporte ?? true,
+          view_soporte_seccional: permData.permissions.view_soporte_seccional ?? (currentRole === 'admin'),
           view_soporte_historial: permData.permissions.view_soporte_historial ?? (currentRole === 'admin'),
           edit_soporte_estado: permData.permissions.edit_soporte_estado ?? (currentRole === 'admin'),
           personalizar_colores: canPersonalizarColores
@@ -425,7 +431,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             subir_expediente_socorrista: true, ver_expediente_socorrista: true, descargar_expediente_socorrista: true,
             view_carnet: true, view_cursos: true, view_seccionales: true, edit_seccionales: true,
             view_config: true, view_activity: true, view_accesos: true, ver_personas_conectadas: true,
-            view_directorio: true, edit_directorio: true, ver_imagenes_socorristas: true, descargar_carnet: true, cambiar_estado_socorrista: true, descargar_excel_socorristas: true,
+            view_directorio: true, edit_directorio: true, ver_imagenes_socorristas: true, descargar_carnet: true, cambiar_estado_socorrista: true, descargar_excel_socorristas: true, descargar_ficha_conoce_socorrista: true,
             view_solicitar_carnet: true, view_verificar_carnet: true,
             view_vehiculos: true, edit_vehiculos: true,
             view_solicitudes_compra: true, crear_solicitudes_compra: true, aprobar_solicitudes_compra: true, edit_solicitudes_compra: true,
@@ -439,7 +445,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: true, edit_noticias_banner: true,
             view_formularios: true, crear_formularios: true, edit_formularios: true, ver_todos_formularios: true,
             view_meritos: true, edit_meritos: true,
-            view_soporte: true, view_soporte_historial: true, edit_soporte_estado: true,
+            view_soporte: true, crear_soporte: true, view_soporte_seccional: true, view_soporte_historial: true, edit_soporte_estado: true,
             personalizar_colores: true
           };
         } else if (currentRole === 'instructor') {
@@ -449,7 +455,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             subir_expediente_socorrista: false, ver_expediente_socorrista: false, descargar_expediente_socorrista: false,
             view_carnet: false, view_cursos: true, view_seccionales: false, edit_seccionales: false,
             view_config: false, view_activity: false, view_accesos: false, ver_personas_conectadas: false,
-            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: false, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false,
+            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: false, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false, descargar_ficha_conoce_socorrista: false,
             view_solicitar_carnet: true, view_verificar_carnet: true,
             view_vehiculos: true, edit_vehiculos: canEditVehiculosDefault,
             view_solicitudes_compra: true, crear_solicitudes_compra: true, aprobar_solicitudes_compra: false, edit_solicitudes_compra: false,
@@ -463,7 +469,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
-            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
+            view_soporte: true, crear_soporte: true, view_soporte_seccional: false, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         } else if (currentRole === 'director') {
@@ -473,7 +479,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             subir_expediente_socorrista: true, ver_expediente_socorrista: true, descargar_expediente_socorrista: true,
             view_carnet: false, view_cursos: false, view_seccionales: false, edit_seccionales: false,
             view_config: false, view_activity: false, view_accesos: false, ver_personas_conectadas: false,
-            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: true, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false,
+            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: true, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false, descargar_ficha_conoce_socorrista: false,
             view_solicitar_carnet: true, view_verificar_carnet: true,
             view_vehiculos: true, edit_vehiculos: canEditVehiculosDefault,
             view_solicitudes_compra: true, crear_solicitudes_compra: true, aprobar_solicitudes_compra: false, edit_solicitudes_compra: false,
@@ -487,7 +493,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: true,
-            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
+            view_soporte: true, crear_soporte: true, view_soporte_seccional: false, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         } else {
@@ -497,7 +503,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             subir_expediente_socorrista: false, ver_expediente_socorrista: false, descargar_expediente_socorrista: false,
             view_carnet: false, view_cursos: false, view_seccionales: false, edit_seccionales: false,
             view_config: false, view_activity: false, view_accesos: false, ver_personas_conectadas: false,
-            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: false, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false,
+            view_directorio: true, edit_directorio: false, ver_imagenes_socorristas: false, descargar_carnet: false, cambiar_estado_socorrista: false, descargar_excel_socorristas: false, descargar_ficha_conoce_socorrista: false,
             view_vehiculos: true, edit_vehiculos: canEditVehiculosDefault,
             view_solicitudes_compra: true, crear_solicitudes_compra: true, aprobar_solicitudes_compra: false, edit_solicitudes_compra: false,
             view_compra_historial: true, view_compra_plantillas: false,
@@ -510,7 +516,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             view_noticias_ajustes: false, edit_noticias_banner: false,
             view_formularios: true, crear_formularios: false, edit_formularios: false,
             view_meritos: true, edit_meritos: false,
-            view_soporte: true, view_soporte_historial: false, edit_soporte_estado: false,
+            view_soporte: true, crear_soporte: true, view_soporte_seccional: false, view_soporte_historial: false, edit_soporte_estado: false,
             personalizar_colores: false
           };
         }
@@ -557,9 +563,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         finalMergedPerms.edit_noticias_banner = false;
       }
 
-      if (typeof userCustomPerms.edit_soporte_estado === 'boolean' && userCustomPerms.edit_soporte_estado && typeof userCustomPerms.view_soporte_historial !== 'boolean') {
+      if (typeof userCustomPerms.edit_soporte_estado === 'boolean' && userCustomPerms.edit_soporte_estado && typeof userCustomPerms.view_soporte_historial !== 'boolean' && userCustomPerms._module_scopes?.soporte !== 'seccional') {
         finalMergedPerms.view_soporte_historial = true;
-      } else if (typeof userCustomPerms.view_soporte_historial === 'boolean' && !userCustomPerms.view_soporte_historial && typeof userCustomPerms.edit_soporte_estado !== 'boolean') {
+      } else if (typeof userCustomPerms.view_soporte_historial === 'boolean' && !userCustomPerms.view_soporte_historial && typeof userCustomPerms.edit_soporte_estado !== 'boolean' && userCustomPerms._module_scopes?.soporte !== 'seccional') {
         finalMergedPerms.edit_soporte_estado = false;
       }
 
@@ -592,6 +598,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Resolve module scopes
       const rawScopes = userCustomPerms._module_scopes || {};
       const isAdmin = currentRole === 'admin';
+      const defaultSoporteScope: ModuleScope = finalMergedPerms.view_soporte_historial
+        ? 'global'
+        : finalMergedPerms.view_soporte_seccional
+        ? 'seccional'
+        : finalMergedPerms.edit_soporte_estado
+        ? 'global'
+        : 'usuario';
+
       const resolvedScopes: Record<ScopedModuleKey, ModuleScope> = {
         formularios: isAdmin
           ? 'global'
@@ -605,10 +619,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         solicitudes_carnet: isAdmin
           ? 'global'
           : (rawScopes.solicitudes_carnet || (finalMergedPerms.ver_todas_seccionales ? 'global' : 'seccional')),
+        soporte: isAdmin
+          ? 'global'
+          : (rawScopes.soporte === 'global' || rawScopes.soporte === 'seccional' || rawScopes.soporte === 'usuario'
+              ? rawScopes.soporte
+              : defaultSoporteScope),
       };
 
       if (resolvedScopes.formularios === 'global') {
         finalMergedPerms.ver_todos_formularios = true;
+      }
+      if (resolvedScopes.soporte === 'global') {
+        finalMergedPerms.view_soporte_historial = true;
+      } else if (resolvedScopes.soporte === 'seccional') {
+        finalMergedPerms.view_soporte_seccional = true;
       }
 
       // Resolve per-module selected seccionales
@@ -625,6 +649,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         solicitudes_combustible: parseModSecArr(rawModSeccs.solicitudes_combustible),
         solicitudes_compra: parseModSecArr(rawModSeccs.solicitudes_compra),
         solicitudes_carnet: parseModSecArr(rawModSeccs.solicitudes_carnet),
+        soporte: parseModSecArr(rawModSeccs.soporte),
       };
 
       // Resolve per-module creation scopes (global vs single locked seccional) for combustible & compra

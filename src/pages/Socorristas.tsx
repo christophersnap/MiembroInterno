@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Plus, Download, Edit, Eye, Filter, MoreVertical, Shield, Briefcase, ArrowUpDown, ChevronLeft, ChevronRight, X, Columns, Car, Bike, Check, IdCard } from 'lucide-react';
+import { Search, Plus, Download, Edit, Eye, Filter, MoreVertical, Shield, Briefcase, ArrowUpDown, ChevronLeft, ChevronRight, X, Columns, Car, Bike, Check, IdCard, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import WatermarkImage from '../components/WatermarkImage';
 import { useAuth } from '../contexts/AuthContext';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
+import SocorristasExcelModal, { ExcelExportPreset } from '../components/socorristas/SocorristasExcelModal';
+import {
+  ConoceSocorristaExtraData,
+  extractKycFromSocorrista,
+  validateConoceSocorrista,
+} from '../utils/conoceSocorrista';
 
 const SteeringWheelIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-label="Licencia de Vehículo">
@@ -67,6 +73,7 @@ export default function Socorristas() {
   }, [visibleColumns]);
   
   const [exporting, setExporting] = useState(false);
+  const [showExcelModal, setShowExcelModal] = useState(false);
   const [previewCarnet, setPreviewCarnet] = useState<{ url: string, name: string } | null>(null);
   
   // Pagination and Sorting state
@@ -92,92 +99,230 @@ export default function Socorristas() {
     fetchSocorristas();
   }, []);
 
-  const fetchSocorristas = async () => {
+  const fetchSocorristas = async (manualRetry = false) => {
+    if (manualRetry) setLoading(true);
     try {
       setErrorMsg(null);
-      let query = supabase
-        .from('socorristas')
-        .select(`
-          *,
-          seccionales (
-            nombre
-          )
-        `);
-        
       const allowedSeccionalIds = getAllowedSocorristaSeccionalIds();
-      if (allowedSeccionalIds !== 'all') {
-        if (allowedSeccionalIds.length === 0) {
-          setSocorristas([]);
-          setLoading(false);
-          return;
-        }
-        query = query.in('seccional_id', allowedSeccionalIds);
+      if (allowedSeccionalIds !== 'all' && allowedSeccionalIds.length === 0) {
+        setSocorristas([]);
+        setLoading(false);
+        return;
       }
-      
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      
+
+      const buildSocorristasQuery = (includeRelation: boolean) => {
+        let q = supabase
+          .from('socorristas')
+          .select(includeRelation ? '*, seccionales ( nombre )' : '*');
+        if (allowedSeccionalIds !== 'all') {
+          q = q.in('seccional_id', allowedSeccionalIds);
+        }
+        return q;
+      };
+
+      let rows: any[] | null = null;
+      let lastError: any = null;
+
+      // Reintentos automáticos ante recarga temporal del schema cache de PostgREST (PGRST002)
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await buildSocorristasQuery(true);
+        if (!error && data) {
+          rows = data;
+          lastError = null;
+          break;
+        }
+        lastError = error;
+        const errMsg = String(error?.message || '').toLowerCase();
+        if (error?.code === 'PGRST002' || errMsg.includes('schema cache')) {
+          await new Promise((r) => setTimeout(r, 900 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
+
+      // Fallback sin relación embebida si el caché de relaciones de PostgREST aún está sincronizando
+      let seccionalesMap: Record<number, string> = {};
+      if (!rows) {
+        const [plainSoc, plainSec] = await Promise.all([
+          buildSocorristasQuery(false),
+          supabase.from('seccionales').select('id, nombre'),
+        ]);
+        if (!plainSoc.error && plainSoc.data) {
+          rows = plainSoc.data;
+          lastError = null;
+          (plainSec.data || []).forEach((sec: any) => {
+            seccionalesMap[Number(sec.id)] = sec.nombre;
+          });
+        }
+      }
+
+      if (!rows) {
+        throw lastError || new Error('No se pudieron cargar los registros de personal.');
+      }
+
+      // Una sola consulta combinada a configuracion para respaldos de cargos y ficha KYC
       const cargosBackupMap: Record<number, string[]> = {};
+      const kycBackupMap: Record<number, Partial<ConoceSocorristaExtraData>> = {};
       try {
-        const { data: cargosBackupRows } = await supabase
+        const { data: backupRows } = await supabase
           .from('configuracion')
           .select('clave, valor')
-          .like('clave', 'socorrista_cargos_%');
-        if (cargosBackupRows) {
-          cargosBackupRows.forEach(row => {
-            const idStr = row.clave.replace('socorrista_cargos_', '');
-            const idNum = Number(idStr);
-            if (!Number.isNaN(idNum) && row.valor) {
-              cargosBackupMap[idNum] = parseCargosSecundarios(row.valor);
+          .or('clave.like.socorrista_cargos_%,clave.like.socorrista_kyc_%');
+
+        if (backupRows) {
+          backupRows.forEach((row) => {
+            if (!row.valor) return;
+            if (row.clave.startsWith('socorrista_cargos_')) {
+              const idNum = Number(row.clave.replace('socorrista_cargos_', ''));
+              if (!Number.isNaN(idNum)) {
+                cargosBackupMap[idNum] = parseCargosSecundarios(row.valor);
+              }
+            } else if (row.clave.startsWith('socorrista_kyc_')) {
+              const idNum = Number(row.clave.replace('socorrista_kyc_', ''));
+              if (!Number.isNaN(idNum)) {
+                try {
+                  kycBackupMap[idNum] = JSON.parse(row.valor);
+                } catch {}
+              }
             }
           });
         }
-      } catch (e) {}
+      } catch {}
 
-      const formattedData = data.map(s => {
+      const formattedData = rows.map((s) => {
         const directSecundarios = parseCargosSecundarios(s.cargos_secundarios);
+        const mergedKyc = extractKycFromSocorrista(s, kycBackupMap[s.id]);
+        const relNombre = Array.isArray(s.seccionales)
+          ? s.seccionales[0]?.nombre
+          : s.seccionales?.nombre;
         return {
           ...s,
-          seccional_nombre: s.seccionales?.nombre || 'N/A',
-          cargos_secundarios: directSecundarios.length > 0 ? directSecundarios : (cargosBackupMap[s.id] || [])
+          ...mergedKyc,
+          seccional_nombre: relNombre || seccionalesMap[Number(s.seccional_id)] || 'N/A',
+          cargos_secundarios:
+            directSecundarios.length > 0 ? directSecundarios : cargosBackupMap[s.id] || [],
         };
       });
-      
+
       setSocorristas(formattedData);
     } catch (err: any) {
-      console.error("Error fetching socorristas:", err);
-      setErrorMsg(err.message || JSON.stringify(err));
+      console.error('Error fetching socorristas:', err);
+      const rawMessage = String(err?.message || '');
+      if (rawMessage.toLowerCase().includes('schema cache')) {
+        setErrorMsg(
+          'La base de datos está terminando de actualizar su estructura. Presiona Reintentar en unos segundos.'
+        );
+      } else {
+        setErrorMsg(rawMessage || 'Error al consultar la base de datos.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleExport = async () => {
+  const getDatasetByPreset = (preset: ExcelExportPreset, allAllowed: any[], currentFiltered: any[]): any[] => {
+    switch (preset) {
+      case 'filtro_actual':
+        return currentFiltered;
+      case 'activos':
+        return allAllowed.filter(s => s.estado === 'Activo');
+      case 'inactivos':
+        return allAllowed.filter(s => s.estado === 'Inactivo');
+      case 'con_carnet':
+        return allAllowed.filter(s => Boolean(s.carnet_generado_url));
+      case 'sin_carnet':
+        return allAllowed.filter(s => !s.carnet_generado_url);
+      case 'con_foto':
+        return allAllowed.filter(s => Boolean(s.foto_url));
+      case 'sin_foto':
+        return allAllowed.filter(s => !s.foto_url);
+      case 'motoristas':
+        return allAllowed.filter(s => Boolean(s.motorista_autorizado));
+      case 'ficha_completa':
+        return allAllowed.filter(s => validateConoceSocorrista(s).isComplete);
+      case 'ficha_pendiente':
+        return allAllowed.filter(s => !validateConoceSocorrista(s).isComplete);
+      case 'todos':
+      default:
+        return allAllowed;
+    }
+  };
+
+  const handleConfirmExport = async (preset: ExcelExportPreset, includeExtendedFields: boolean) => {
     setExporting(true);
     try {
       const XLSX = await import('xlsx');
-      const dataToExport = filteredData.map(s => ({
-        Carnet: s.carnet,
-        'Primer Nombre': s.primer_nombre,
-        'Segundo Nombre': s.segundo_nombre,
-        'Primer Apellido': s.primer_apellido,
-        'Segundo Apellido': s.segundo_apellido,
-        Seccional: s.seccional_nombre,
-        Estado: s.estado,
-        'Cargo Institucional': s.cargo_institucional || 'N/A',
-        'Cargos Secundarios': parseCargosSecundarios(s.cargos_secundarios).join(' | ') || 'N/A',
-        'Cargo Administrativo': s.cargo_administrativo || 'N/A',
-        'Segundo Cargo Administrativo': s.segundo_cargo_administrativo || 'N/A',
-        Teléfono: s.telefono,
-        'Fecha Ingreso': s.fecha_ingreso
-      }));
+      const allowedBase = socorristas.filter(
+        s => allowedSeccionalIds === 'all' || allowedSeccionalIds.includes(Number(s.seccional_id))
+      );
+      const targetRows = getDatasetByPreset(preset, allowedBase, filteredData);
+
+      const dataToExport = targetRows.map(s => {
+        const baseRow: Record<string, any> = {
+          Carnet: s.carnet || '',
+          'Primer Nombre': s.primer_nombre || '',
+          'Segundo Nombre': s.segundo_nombre || '',
+          'Primer Apellido': s.primer_apellido || '',
+          'Segundo Apellido': s.segundo_apellido || '',
+          Seccional: s.seccional_nombre || 'N/A',
+          Estado: s.estado || '',
+          'Cargo Institucional': s.cargo_institucional || 'N/A',
+          'Cargos Secundarios': parseCargosSecundarios(s.cargos_secundarios).join(' | ') || 'N/A',
+          'Cargo Administrativo': s.cargo_administrativo || 'N/A',
+          'Segundo Cargo Administrativo': s.segundo_cargo_administrativo || 'N/A',
+          Teléfono: s.telefono || '',
+          'Fecha Ingreso': s.fecha_ingreso || '',
+          'Carnet Digital': s.carnet_generado_url ? 'Generado' : 'Pendiente',
+          Fotografía: s.foto_url ? 'Con foto' : 'Sin foto',
+        };
+
+        if (!includeExtendedFields) return baseRow;
+
+        const kycStatus = validateConoceSocorrista(s);
+        return {
+          ...baseRow,
+          DUI: s.dui || '',
+          'NIT (Opcional)': s.nit || '',
+          'Estado Civil': s.estado_civil || '',
+          'Fecha Nacimiento': s.fecha_nacimiento || '',
+          Sexo: s.sexo || '',
+          'Tipo de Sangre': s.tipo_sangre || 'N/A',
+          'Correo Electrónico': s.email || '',
+          Dirección: s.direccion || '',
+          'Dirección de Domicilio': s.direccion_domicilio || '',
+          Nacionalidad: s.nacionalidad || '',
+          'Profesión u Ocupación': s.profesion_ocupacion || '',
+          'Inicio Relación Laboral': s.fecha_inicio_relacion_laboral || '',
+          'Nombre de Cónyuge': s.nombre_conyuge || '',
+          'Nombre de Dependientes': s.nombre_dependientes || '',
+          'Cargo Público (Últimos 5 años)':
+            s.cargo_publico_ultimos_5_anios === true
+              ? 'Sí'
+              : s.cargo_publico_ultimos_5_anios === false
+              ? 'No'
+              : 'Sin declarar',
+          'Motorista Autorizado': s.motorista_autorizado ? 'Sí' : 'No',
+          'Contacto Emergencia 1': s.contacto_emergencia_nombre || '',
+          'Teléfono Emergencia 1': s.contacto_emergencia_telefono || '',
+          'Ficha Conoce a tu Socorrista': kycStatus.isComplete ? 'Completa' : 'Pendiente',
+        };
+      });
+
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Socorristas");
-      XLSX.writeFile(wb, "socorristas.xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, 'Socorristas');
+      const todayStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `socorristas_${preset}_${todayStr}.xlsx`);
+
+      await logActivity('Exportó Excel de Socorristas', 'Socorrista', undefined, {
+        tipo_reporte: preset,
+        cantidad: dataToExport.length,
+        extendido: includeExtendedFields,
+      });
+
+      setShowExcelModal(false);
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
+      console.error('Error exporting to Excel:', error);
     } finally {
       setExporting(false);
     }
@@ -291,6 +436,35 @@ export default function Socorristas() {
     return matchesSearch && matchesEstado && matchesSeccional && matchesCargoInst && matchesCargoAdmin && matchesCarnetGenerado;
   });
 
+  const allowedVisibleSocorristas = socorristas.filter(
+    s => allowedSeccionalIds === 'all' || allowedSeccionalIds.includes(Number(s.seccional_id))
+  );
+
+  const excelCounts: Record<ExcelExportPreset, number> = {
+    filtro_actual: filteredData.length,
+    todos: allowedVisibleSocorristas.length,
+    activos: allowedVisibleSocorristas.filter(s => s.estado === 'Activo').length,
+    inactivos: allowedVisibleSocorristas.filter(s => s.estado === 'Inactivo').length,
+    con_carnet: allowedVisibleSocorristas.filter(s => Boolean(s.carnet_generado_url)).length,
+    sin_carnet: allowedVisibleSocorristas.filter(s => !s.carnet_generado_url).length,
+    con_foto: allowedVisibleSocorristas.filter(s => Boolean(s.foto_url)).length,
+    sin_foto: allowedVisibleSocorristas.filter(s => !s.foto_url).length,
+    motoristas: allowedVisibleSocorristas.filter(s => Boolean(s.motorista_autorizado)).length,
+    ficha_completa: allowedVisibleSocorristas.filter(s => validateConoceSocorrista(s).isComplete).length,
+    ficha_pendiente: allowedVisibleSocorristas.filter(s => !validateConoceSocorrista(s).isComplete).length,
+  };
+
+  const activeFilterSummary = (() => {
+    const parts: string[] = [];
+    if (searchTerm.trim()) parts.push(`"${searchTerm.trim()}"`);
+    if (filterEstado !== 'Todos') parts.push(filterEstado);
+    if (filterSeccional !== 'Todas') parts.push(filterSeccional);
+    if (filterCargoInst !== 'Todos') parts.push(filterCargoInst);
+    if (filterCargoAdmin !== 'Todos') parts.push(filterCargoAdmin);
+    if (filterCarnetGenerado !== 'Todos') parts.push(`Carnet: ${filterCarnetGenerado}`);
+    return parts.join(' · ');
+  })();
+
   // Sorting logic
   const sortedData = [...filteredData].sort((a, b) => {
     const aValue = (a[sortConfig.key] || '').toString().toLowerCase();
@@ -372,12 +546,12 @@ export default function Socorristas() {
         <div className="mt-4 flex sm:mt-0 sm:ml-4 space-x-3">
           {(permissions.descargar_excel_socorristas || role === 'admin') && (
             <button
-              onClick={handleExport}
+              onClick={() => setShowExcelModal(true)}
               disabled={exporting}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50"
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 cursor-pointer"
             >
               <Download className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
-              {exporting ? 'Exportando...' : 'Exportar Excel'}
+              {exporting ? 'Exportando...' : 'Descargar Excel'}
             </button>
           )}
           {canAddAnySocorrista && (
@@ -392,15 +566,28 @@ export default function Socorristas() {
         </div>
       </div>
 
+      <SocorristasExcelModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        counts={excelCounts}
+        activeFilterSummary={activeFilterSummary}
+        exporting={exporting}
+        onConfirmExport={handleConfirmExport}
+      />
+
       {errorMsg && (
-        <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
-          <div className="flex">
-            <div className="ml-3">
-              <p className="text-sm text-red-700">
-                <strong>Error al cargar datos:</strong> {errorMsg}
-              </p>
-            </div>
-          </div>
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-rose-900">
+            <strong className="font-semibold">Error al cargar datos:</strong> {errorMsg}
+          </p>
+          <button
+            type="button"
+            onClick={() => fetchSocorristas(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-rose-100/70 border border-rose-200 text-xs font-semibold text-rose-900 transition-colors cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Reintentar
+          </button>
         </div>
       )}
 

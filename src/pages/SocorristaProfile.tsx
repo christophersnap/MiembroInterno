@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle, AlertTriangle, Lock } from 'lucide-react';
+import { ArrowLeft, Edit, CheckCircle, XCircle, Plus, Save, X, Crop, Camera, Shield, Award, PhoneCall, Sparkles, Phone, AlertCircle, AlertTriangle, Lock, Printer, FileCheck2, ChevronDown } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import { getCroppedImgResult } from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
@@ -26,6 +26,18 @@ import {
   toTelHref,
 } from '../utils/phoneMask';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
+import ConoceSocorristaFormFields from '../components/socorristas/ConoceSocorristaFormFields';
+import ConoceSocorristaPrintModal from '../components/socorristas/ConoceSocorristaPrintModal';
+import {
+  ConoceSocorristaExtraData,
+  EMPTY_CONOCE_SOCORRISTA_DATA,
+  extractKycFromSocorrista,
+  fetchSingleSocorristaKycBackup,
+  isNoDependentsText,
+  parseDependientesFromRow,
+  saveSocorristaKycData,
+  validateConoceSocorrista,
+} from '../utils/conoceSocorrista';
 
 export default function SocorristaProfile() {
   const { id } = useParams();
@@ -37,6 +49,10 @@ export default function SocorristaProfile() {
   const [loadingMeritos, setLoadingMeritos] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
+  const [showConoceModal, setShowConoceModal] = useState(false);
+  const [conoceModalMode, setConoceModalMode] = useState<'auto' | 'edit'>('auto');
+  const [showExtraKycDetails, setShowExtraKycDetails] = useState(false);
+  const [editKycForm, setEditKycForm] = useState<ConoceSocorristaExtraData>(EMPTY_CONOCE_SOCORRISTA_DATA);
 
   const downloadImageWithWatermark = async (format: 'png' | 'jpeg') => {
     if (!carnetGeneradoUrl) return;
@@ -290,8 +306,12 @@ export default function SocorristaProfile() {
         } catch {}
       }
 
+      const kycBackup = id ? await fetchSingleSocorristaKycBackup(id) : null;
+      const mergedKyc = extractKycFromSocorrista(socData, kycBackup);
+
       const formattedSocorrista = {
         ...socData,
+        ...mergedKyc,
         cargos_secundarios: cargosSecundariosArr,
         contacto_emergencia_nombre: contactoNombre,
         contacto_emergencia_telefono: contactoTelefono,
@@ -312,6 +332,7 @@ export default function SocorristaProfile() {
       setEmergenciaCountryCode2(parsedEm2.countryCode);
 
       setSocorrista(formattedSocorrista);
+      setEditKycForm(mergedKyc);
       setEditForm({
         ...formattedSocorrista,
         contacto_emergencia_telefono: parsedEm1.localNumber,
@@ -684,6 +705,7 @@ export default function SocorristaProfile() {
 
       if (id) {
         await saveSocorristaCargosSecundariosFallback(id, cleanCargosSecundarios);
+        await saveSocorristaKycData(id, editKycForm);
       }
 
       // Guardar también siempre en configuracion como respaldo garantizado
@@ -905,6 +927,8 @@ export default function SocorristaProfile() {
 
   const canViewThisSocorrista = canAccessSeccionalSocorristas(socorrista?.seccional_id, 'view');
   const canEditThisSocorrista = canAccessSeccionalSocorristas(socorrista?.seccional_id, 'edit');
+  const canDownloadConoceSocorrista =
+    role === 'admin' || Boolean(permissions.descargar_ficha_conoce_socorrista);
 
   if (!canViewThisSocorrista) {
     return (
@@ -937,17 +961,32 @@ export default function SocorristaProfile() {
           </button>
           <h1 className="text-2xl font-semibold text-gray-900">Perfil del Elemento</h1>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {!isEditing ? (
-            canEditThisSocorrista && (
-              <button 
-                onClick={() => setIsEditing(true)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-              >
-                <Edit className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
-                Editar
-              </button>
-            )
+            <>
+              {canDownloadConoceSocorrista && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConoceModalMode('auto');
+                    setShowConoceModal(true);
+                  }}
+                  className="inline-flex items-center px-4 py-2 border border-emerald-600 rounded-xl shadow-xs text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 cursor-pointer whitespace-nowrap"
+                >
+                  <Printer className="-ml-0.5 mr-2 h-4 w-4" />
+                  Conoce a tu Socorrista
+                </button>
+              )}
+              {canEditThisSocorrista && (
+                <button 
+                  onClick={() => setIsEditing(true)}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-xl shadow-xs text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer whitespace-nowrap"
+                >
+                  <Edit className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+                  Editar
+                </button>
+              )}
+            </>
           ) : (
             <>
               <button 
@@ -957,6 +996,7 @@ export default function SocorristaProfile() {
                   setEmergenciaCountryCode1(p1.countryCode);
                   setEmergenciaCountryCode2(p2.countryCode);
                   setIsEditing(false);
+                  setEditKycForm(extractKycFromSocorrista(socorrista));
                   setEditForm({
                     ...socorrista,
                     contacto_emergencia_telefono: p1.localNumber,
@@ -1494,6 +1534,25 @@ export default function SocorristaProfile() {
 
                 </div>
               </div>
+
+              <div className="pt-8">
+                <div className="mb-4">
+                  <h3 className="text-lg leading-6 font-medium text-gray-900">
+                    Información Adicional — Ficha «Conoce a tu Socorrista» (CVSSOCC/FORM001)
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Datos requeridos para generar e imprimir el formulario oficial CVSSOCC/FORM001. El NIT es opcional.
+                  </p>
+                </div>
+                <ConoceSocorristaFormFields
+                  value={editKycForm}
+                  onChange={setEditKycForm}
+                  dui={editForm.dui || ''}
+                  direccionBase={editForm.direccion || ''}
+                  fechaIngresoBase={editForm.fecha_ingreso || ''}
+                  disabled={!canEditThisSocorrista}
+                />
+              </div>
             </div>
           </form>
 
@@ -1763,6 +1822,234 @@ export default function SocorristaProfile() {
         </div>
       )}
 
+      {/* Sección desplegable: Información Adicional — Ficha «Conoce a tu Socorrista» (CVSSOCC/FORM001) */}
+      {!isEditing && (() => {
+        const kycValidation = validateConoceSocorrista(socorrista);
+        const extractedKyc = extractKycFromSocorrista(socorrista);
+        const parsedDeps = parseDependientesFromRow(
+          extractedKyc.dependientes_detalle,
+          extractedKyc.nombre_dependientes
+        );
+        const explicitNoDeps = isNoDependentsText(extractedKyc.nombre_dependientes);
+
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+            {/* Cabecera limpia con botón de Expandir */}
+            <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3.5">
+              <button
+                type="button"
+                onClick={() => setShowExtraKycDetails((prev) => !prev)}
+                className="flex items-start gap-3.5 text-left group cursor-pointer flex-1 min-w-0"
+              >
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                    kycValidation.isComplete
+                      ? 'bg-emerald-500/12 text-emerald-600'
+                      : 'bg-amber-500/15 text-amber-600'
+                  }`}
+                >
+                  <FileCheck2 className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
+                      Información Adicional · Conoce a tu Socorrista
+                    </h3>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span
+                      className={`text-xs font-semibold tabular-nums ${
+                        kycValidation.isComplete ? 'text-emerald-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {kycValidation.isComplete
+                        ? 'Completa'
+                        : `${kycValidation.missingFields.length} ${
+                            kycValidation.missingFields.length === 1 ? 'dato pendiente' : 'datos pendientes'
+                          }`}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {kycValidation.isComplete
+                      ? 'Estado civil, dependientes, profesión, domicilio y declaración PEP registrados.'
+                      : `Falta completar: ${kycValidation.missingFields.join(' · ')}.`}
+                  </p>
+                </div>
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowExtraKycDetails((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-800 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <span>{showExtraKycDetails ? 'Ocultar información' : 'Expandir información'}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${
+                      showExtraKycDetails ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+
+                {canEditThisSocorrista && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConoceModalMode('edit');
+                      setShowConoceModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Edit className="w-3.5 h-3.5 text-slate-500" />
+                    <span>{kycValidation.isComplete ? 'Editar datos' : 'Completar datos'}</span>
+                  </button>
+                )}
+
+                {canDownloadConoceSocorrista && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConoceModalMode(kycValidation.isComplete ? 'auto' : 'edit');
+                      setShowConoceModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Descargar / Imprimir</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Panel expandido estilo iOS con toda la información adicional */}
+            {showExtraKycDetails && (
+              <div className="border-t border-slate-100 bg-[#F2F2F7]/70 p-4 sm:p-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Grupo 1: Identificación y Datos Civiles */}
+                  <div className="bg-white rounded-2xl border border-slate-200/70 divide-y divide-slate-100 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50/70">
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        Identificación y datos personales
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">NIT</span>
+                      <span className="font-mono font-medium text-slate-900 tabular-nums text-right">
+                        {extractedKyc.nit || socorrista.dui || 'Opcional (No registrado)'}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">Estado civil</span>
+                      <span className="font-medium text-slate-900 text-right">
+                        {extractedKyc.estado_civil || <span className="text-slate-400">Pendiente</span>}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">Cónyuge / Compañero(a)</span>
+                      <span className="font-medium text-slate-900 text-right">
+                        {extractedKyc.nombre_conyuge || <span className="text-slate-400">Pendiente</span>}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">Nacionalidad</span>
+                      <span className="font-medium text-slate-900 text-right">
+                        {extractedKyc.nacionalidad || <span className="text-slate-400">Pendiente</span>}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Grupo 2: Actividad Laboral y Domicilio */}
+                  <div className="bg-white rounded-2xl border border-slate-200/70 divide-y divide-slate-100 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50/70">
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        Ocupación, domicilio y cargo público
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">Profesión u oficio</span>
+                      <span className="font-medium text-slate-900 text-right">
+                        {extractedKyc.profesion_ocupacion || <span className="text-slate-400">Pendiente</span>}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-500">Inicio relación laboral</span>
+                      <span className="font-mono font-medium text-slate-900 tabular-nums text-right">
+                        {extractedKyc.fecha_inicio_relacion_laboral ||
+                          socorrista.fecha_ingreso || <span className="text-slate-400 font-sans">Pendiente</span>}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-start justify-between gap-4 text-xs">
+                      <span className="text-slate-500 shrink-0">Domicilio en ficha</span>
+                      <span className="font-medium text-slate-900 text-right">
+                        {extractedKyc.direccion_domicilio ||
+                          socorrista.direccion || <span className="text-slate-400">Pendiente</span>}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-start justify-between gap-4 text-xs">
+                      <span className="text-slate-500 shrink-0">Cargo público (últimos 5 años)</span>
+                      <div className="text-right">
+                        {extractedKyc.cargo_publico_ultimos_5_anios === null ? (
+                          <span className="text-slate-400 font-medium">Pendiente</span>
+                        ) : extractedKyc.cargo_publico_ultimos_5_anios ? (
+                          <div className="space-y-0.5">
+                            <span className="font-semibold text-amber-800">Sí desempeñó cargo público</span>
+                            <p className="text-[11px] text-slate-600">
+                              {extractedKyc.cargo_publico_posicion || 'Cargo no especificado'}
+                              {extractedKyc.cargo_publico_periodo
+                                ? ` · ${extractedKyc.cargo_publico_periodo}`
+                                : ''}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="font-medium text-slate-900">No</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Grupo 3: Dependientes con Parentesco */}
+                <div className="bg-white rounded-2xl border border-slate-200/70 overflow-hidden">
+                  <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      Dependientes registrados
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-400 tabular-nums">
+                      {explicitNoDeps
+                        ? 'Sin dependientes'
+                        : parsedDeps.length > 0
+                        ? `${parsedDeps.length} ${parsedDeps.length === 1 ? 'dependiente' : 'dependientes'}`
+                        : 'Pendiente'}
+                    </span>
+                  </div>
+
+                  {explicitNoDeps ? (
+                    <div className="px-4 py-3 text-xs text-slate-600">
+                      Sin dependientes declarados (No aplica).
+                    </div>
+                  ) : parsedDeps.length > 0 ? (
+                    <div className="divide-y divide-slate-100">
+                      {parsedDeps.map((dep, idx) => (
+                        <div
+                          key={`${dep.nombre}-${idx}`}
+                          className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <span className="font-medium text-slate-900">{dep.nombre}</span>
+                          <span className="text-slate-500 shrink-0">{dep.parentesco}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 text-xs text-slate-400">
+                      Aún no se han registrado dependientes para este elemento.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Cursos Section */}
       <div className="bg-white shadow sm:rounded-lg">
         <div className="px-4 py-5 sm:px-6 flex justify-between items-center border-b border-gray-200">
@@ -1972,6 +2259,34 @@ export default function SocorristaProfile() {
         cargoInstitucional={editForm.cargo_institucional || ''}
         onClose={() => setShowSaveConfirmModal(false)}
         onConfirm={executeEditSave}
+      />
+
+      <ConoceSocorristaPrintModal
+        isOpen={showConoceModal}
+        onClose={() => setShowConoceModal(false)}
+        socorrista={socorrista}
+        canEdit={canEditThisSocorrista}
+        canPrint={canDownloadConoceSocorrista}
+        initialMode={conoceModalMode}
+        onSavedKyc={(updatedExtra, baseUpdates) => {
+          setEditKycForm(updatedExtra);
+          setSocorrista((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  ...updatedExtra,
+                  ...(baseUpdates?.direccion !== undefined ? { direccion: baseUpdates.direccion } : {}),
+                  ...(baseUpdates?.email !== undefined ? { email: baseUpdates.email } : {}),
+                }
+              : prev
+          );
+          setEditForm((prev: any) => ({
+            ...prev,
+            ...updatedExtra,
+            ...(baseUpdates?.direccion !== undefined ? { direccion: baseUpdates.direccion } : {}),
+            ...(baseUpdates?.email !== undefined ? { email: baseUpdates.email } : {}),
+          }));
+        }}
       />
 
     </div>

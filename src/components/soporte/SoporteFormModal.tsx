@@ -51,7 +51,8 @@ export default function SoporteFormModal({
 }: SoporteFormModalProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, userName, userSeccionalId, userSeccionalNombre, directorSeccionalId } = useAuth();
+  const { user, userName, role, permissions, userSeccionalId, userSeccionalNombre, directorSeccionalId } = useAuth();
+  const canCreateSoporte = role === 'admin' || Boolean(permissions.crear_soporte ?? true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [motivo, setMotivo] = useState('');
@@ -121,6 +122,10 @@ export default function SoporteFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateSoporte) {
+      setErrorMsg('Tu cuenta no tiene habilitado el permiso para crear nuevas solicitudes de soporte.');
+      return;
+    }
     if (!motivo.trim()) {
       setErrorMsg('Ingresa el motivo de soporte.');
       return;
@@ -158,7 +163,7 @@ export default function SoporteFormModal({
       setCreatedTicket(result.ticket);
       if (result.warning) {
         setSubmitWarning(
-          `El ticket se registró localmente, pero Supabase devolvió un aviso (${result.warning}). Si aún no se ejecuta la migración SQL #39, aplícala en Supabase.`
+          `El ticket se registró localmente, pero Supabase devolvió un aviso (${result.warning}). Verifica haber aplicado la Migración SQL #50 en Supabase.`
         );
       }
       onCreated?.(result.ticket);

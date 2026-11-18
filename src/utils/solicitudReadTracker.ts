@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
-export type SolicitudModulo = 'carnet' | 'combustible' | 'compra';
+export type SolicitudModulo = 'carnet' | 'combustible' | 'compra' | 'soporte';
 
 const READ_STORAGE_PREFIX = 'cv_solicitudes_read_v1_';
 const INIT_STORAGE_PREFIX = 'cv_solicitudes_read_init_v1_';
@@ -12,11 +12,13 @@ const MODULE_COUNT_EVENT = 'solicitudes_module_count_updated';
 const memoryReadCache = new Map<string, Set<string>>();
 const lastRemoteSyncAt = new Map<string, number>();
 let tableMissingDetected = false;
+let soporteCheckConstraintPending = false;
 
 const moduleUnreadCounts: Record<SolicitudModulo, number> = {
   carnet: 0,
   combustible: 0,
   compra: 0,
+  soporte: 0,
 };
 
 export function publishModuleUnreadCount(modulo: SolicitudModulo, count: number): void {
@@ -150,6 +152,7 @@ export async function syncReadReceiptsFromSupabase(
 
 const ACTIVE_CARNET_STATES = new Set(['Pendiente', 'En revisión', 'Observada']);
 const ACTIVE_LOGISTICA_STATES = new Set(['Pendiente', 'En Proceso', 'En Proceso de Compra']);
+const ACTIVE_SOPORTE_STATES = new Set(['Pendiente', 'En revisión']);
 
 /**
  * Determina si una solicitud individual debe mostrarse con tonalidad "sin leer"
@@ -176,6 +179,8 @@ export function isSolicitudUnread(params: {
   const normalizedEstado = String(estado || '').trim();
   if (modulo === 'carnet') {
     if (ACTIVE_CARNET_STATES.has(normalizedEstado)) return true;
+  } else if (modulo === 'soporte') {
+    if (ACTIVE_SOPORTE_STATES.has(normalizedEstado)) return true;
   } else {
     if (ACTIVE_LOGISTICA_STATES.has(normalizedEstado)) return true;
   }
@@ -211,7 +216,7 @@ export async function markSolicitudAsRead(
     window.dispatchEvent(new Event(SOLICITUDES_READ_EVENT));
   }
 
-  if (tableMissingDetected) return;
+  if (tableMissingDetected || (modulo === 'soporte' && soporteCheckConstraintPending)) return;
 
   try {
     const { error } = await supabase.from('solicitudes_lecturas').upsert(
@@ -228,6 +233,8 @@ export async function markSolicitudAsRead(
       const msg = (error.message || '').toLowerCase();
       if (error.code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
         tableMissingDetected = true;
+      } else if (modulo === 'soporte' && (error.code === '23514' || msg.includes('check'))) {
+        soporteCheckConstraintPending = true;
       }
     }
   } catch {
@@ -253,12 +260,14 @@ export async function markMultipleSolicitudesAsRead(
     if (!currentSet.has(composite)) {
       currentSet.add(composite);
       changed = true;
-      toUpsert.push({
-        user_id: userId,
-        modulo,
-        solicitud_key: keyStr,
-        leido_at: nowIso,
-      });
+      if (!(modulo === 'soporte' && soporteCheckConstraintPending)) {
+        toUpsert.push({
+          user_id: userId,
+          modulo,
+          solicitud_key: keyStr,
+          leido_at: nowIso,
+        });
+      }
     }
   });
 
@@ -278,6 +287,8 @@ export async function markMultipleSolicitudesAsRead(
       const msg = (error.message || '').toLowerCase();
       if (error.code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
         tableMissingDetected = true;
+      } else if (error.code === '23514' || msg.includes('check')) {
+        soporteCheckConstraintPending = true;
       }
     }
   } catch {}

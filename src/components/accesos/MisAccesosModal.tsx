@@ -65,6 +65,11 @@ const PERMISSION_DESCRIPTIONS: Record<string, PermissionMeta> = {
     desc: 'Descargar listados y reportes del personal en hoja de cálculo.',
     category: 'Socorristas y Méritos',
   },
+  descargar_ficha_conoce_socorrista: {
+    label: 'Descargar Ficha «Conoce a tu Socorrista»',
+    desc: 'Imprimir o descargar en PDF/PNG el formulario oficial CVSSOCC/FORM001.',
+    category: 'Socorristas y Méritos',
+  },
   view_carnet: {
     label: 'Generador de Carnet Digital',
     desc: 'Emitir credenciales institucionales digitales.',
@@ -299,18 +304,28 @@ const PERMISSION_DESCRIPTIONS: Record<string, PermissionMeta> = {
     category: 'Administración',
   },
   view_soporte: {
-    label: 'Centro de Soporte y Reporte de Anomalías',
-    desc: 'Enviar reportes de soporte con capturas y dar seguimiento a tus propias solicitudes.',
+    label: 'Módulo de Soporte Técnico',
+    desc: 'Acceder a la pestaña de Soporte y consultar el estado de solicitudes.',
+    category: 'Administración',
+  },
+  crear_soporte: {
+    label: 'Hacer Solicitudes de Soporte',
+    desc: 'Enviar nuevos reportes de anomalías o requerimientos con capturas de pantalla.',
+    category: 'Administración',
+  },
+  view_soporte_seccional: {
+    label: 'Solicitudes de Soporte por Seccional',
+    desc: 'Visualizar las solicitudes de soporte registradas en tus seccionales asignadas.',
     category: 'Administración',
   },
   view_soporte_historial: {
     label: 'Historial Global de Soporte',
-    desc: 'Consultar todas las solicitudes de soporte enviadas por los usuarios del sistema.',
+    desc: 'Consultar todas las solicitudes de soporte enviadas a nivel nacional.',
     category: 'Administración',
   },
   edit_soporte_estado: {
-    label: 'Finalizar y Resolver Solicitudes de Soporte',
-    desc: 'Cambiar el estado de los casos de soporte a Finalizado y agregar notas de resolución.',
+    label: 'Solventar Solicitudes de Soporte',
+    desc: 'Cambiar el estado de solicitudes (En revisión / Finalizado) y registrar notas de solución.',
     category: 'Administración',
   },
   view_config: {

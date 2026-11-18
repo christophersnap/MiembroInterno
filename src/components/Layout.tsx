@@ -20,6 +20,7 @@ import {
 import MisAccesosModal from './accesos/MisAccesosModal';
 import PresenceModal from './PresenceModal';
 import SoporteFormModal from './soporte/SoporteFormModal';
+import { fetchSoporteTickets } from '../lib/soporte';
 
 interface NavItem {
   name: string;
@@ -59,8 +60,8 @@ export default function Layout() {
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const canViewOnlineUsers = isAdmin || Boolean(permissions.ver_personas_conectadas);
-  const canViewSoporte = Boolean(permissions.view_soporte ?? true);
-  const canViewSoporteHistorial = isAdmin || Boolean(permissions.view_soporte_historial || permissions.edit_soporte_estado);
+  const canViewSoporte = isAdmin || Boolean(permissions.view_soporte ?? true);
+  const canCreateSoporte = isAdmin || Boolean(permissions.crear_soporte ?? true);
 
   const canViewCompra = isAdmin || Boolean(permissions.view_solicitudes_compra);
   const canViewCompraHistorial = isAdmin || Boolean(permissions.view_compra_historial);
@@ -71,10 +72,12 @@ export default function Layout() {
   const compraScope = getModuleScope('solicitudes_compra');
   const combustibleScope = getModuleScope('solicitudes_combustible');
   const carnetScope = getModuleScope('solicitudes_carnet');
+  const soporteScope = getModuleScope('soporte');
   const compraSeccionalIds = getModuleSeccionalIds('solicitudes_compra');
   const combustibleSeccionalIds = getModuleSeccionalIds('solicitudes_combustible');
   const carnetSeccionalIds = getModuleSeccionalIds('solicitudes_carnet');
-  const scopesDepsKey = `${compraScope}:${compraSeccionalIds.join(',')}|${combustibleScope}:${combustibleSeccionalIds.join(',')}|${carnetScope}:${carnetSeccionalIds.join(',')}`;
+  const soporteSeccionalIds = getModuleSeccionalIds('soporte');
+  const scopesDepsKey = `${compraScope}:${compraSeccionalIds.join(',')}|${combustibleScope}:${combustibleSeccionalIds.join(',')}|${carnetScope}:${carnetSeccionalIds.join(',')}|${soporteScope}:${soporteSeccionalIds.join(',')}`;
 
   // Estados para notificaciones de solicitudes no leídas por solicitud individual (según alcance del usuario)
   const [unreadCombustible, setUnreadCombustible] = useState(0);
@@ -397,18 +400,33 @@ export default function Layout() {
         );
       }
 
-      // 5. Tickets de soporte pendientes (únicamente si puede ver el historial de soporte)
-      let soportePending = 0;
-      if (canViewSoporte && canViewSoporteHistorial && location.pathname !== '/soporte') {
+      // 5. Solicitudes de soporte no leídas según el alcance del usuario (global, seccional o propias)
+      let soporteUnreadCount = 0;
+      if (canViewSoporte) {
         try {
-          const { count } = await supabase
-            .from('soporte_tickets')
-            .select('id', { count: 'exact', head: true })
-            .neq('estado', 'Finalizado');
-          if (typeof count === 'number') soportePending = count;
+          const { tickets: scopedSoporte } = await fetchSoporteTickets({
+            usuarioId: user.id,
+            usuarioEmail: user.email || null,
+            scope: soporteScope,
+            allowedSeccionalIds: soporteSeccionalIds,
+            userSeccionalId: effectiveSeccionalId,
+            userSeccionalNombre: userSeccionalNombre || null,
+          });
+
+          soporteUnreadCount = scopedSoporte.filter((t) =>
+            isSolicitudUnread({
+              userId: user.id,
+              readSet,
+              modulo: 'soporte',
+              solicitudKey: t.id,
+              estado: t.estado,
+              createdAt: t.created_at,
+            })
+          ).length;
         } catch {}
       }
-      setUnreadSoporte(location.pathname === '/soporte' ? 0 : soportePending);
+      setUnreadSoporte(soporteUnreadCount);
+      publishModuleUnreadCount('soporte', soporteUnreadCount);
     } catch {
       // Ignorar errores silenciosos
     }
@@ -428,10 +446,6 @@ export default function Layout() {
       return;
     }
 
-    if (location.pathname === '/soporte') {
-      setUnreadSoporte(0);
-    }
-
     checkUnreadRef.current();
   }, [
     authLoading,
@@ -448,7 +462,6 @@ export default function Layout() {
     canViewCombustibleHistorial,
     canViewCarnet,
     canViewSoporte,
-    canViewSoporteHistorial,
     scopesDepsKey,
     location.pathname,
     location.search,
@@ -698,24 +711,27 @@ export default function Layout() {
       {/* ========================================================================= */}
       <aside 
         style={{ backgroundColor: colors.sidebarBg || '#0a2014' }}
-        className={`hidden md:flex md:flex-col md:fixed md:inset-y-0 z-30 text-white transition-all duration-300 ease-in-out border-r border-black/20 shadow-xl overflow-hidden ${
+        className={`hidden md:flex md:flex-col md:fixed md:inset-y-0 z-40 text-white transition-all duration-300 ease-in-out border-r border-black/20 shadow-xl overflow-visible ${
           isSidebarCollapsed ? 'md:w-20' : 'md:w-64'
         }`}
       >
-        {/* Toggle para Colapsar/Expandir (Pill estilo Apple) */}
+        {/* Toggle para Colapsar/Expandir (Sobrepuesto completo sin recortes) */}
         <button 
+          type="button"
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           style={{ backgroundColor: colors.sidebarBg || '#0a2014' }}
-          className="absolute -right-3 top-7 w-6 h-6 text-emerald-300 hover:text-white rounded-full border border-white/20 shadow-md flex items-center justify-center transition-transform hover:scale-110 z-40 cursor-pointer"
+          className="absolute -right-3.5 top-7 w-7 h-7 text-emerald-300 hover:text-white rounded-full border border-white/25 shadow-lg ring-2 ring-black/20 flex items-center justify-center transition-all hover:scale-110 z-50 cursor-pointer"
           title={isSidebarCollapsed ? "Expandir menú" : "Colapsar menú"}
+          aria-label={isSidebarCollapsed ? "Expandir menú" : "Colapsar menú"}
         >
-          {isSidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+          {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
 
-        {/* Cabecera / Logo Institucional (Estilo Apple Glass) */}
-        <div className={`h-20 flex-shrink-0 px-4 border-b border-white/5 flex items-center transition-all ${
-          isSidebarCollapsed ? 'justify-center' : 'justify-between'
-        }`}>
+        <div className="flex flex-col flex-1 min-h-0 w-full overflow-hidden">
+          {/* Cabecera / Logo Institucional (Estilo Apple Glass) */}
+          <div className={`h-20 flex-shrink-0 px-4 border-b border-white/5 flex items-center transition-all ${
+            isSidebarCollapsed ? 'justify-center' : 'justify-between'
+          }`}>
           <div className="flex items-center space-x-3 truncate">
             <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 p-1.5 flex items-center justify-center flex-shrink-0 shadow-xs">
               <img 
@@ -908,6 +924,7 @@ export default function Layout() {
             </button>
           </div>
         </div>
+        </div>
       </aside>
 
       {/* ========================================================================= */}
@@ -972,8 +989,8 @@ export default function Layout() {
         />
       )}
 
-      {/* Botón pequeño flotante de Soporte (reporte rápido de anomalías desde cualquier módulo) */}
-      {canViewSoporte && (
+      {/* Botón pequeño flotante de Soporte (reporte rápido de anomalías si tiene permiso de crear solicitudes de soporte) */}
+      {canViewSoporte && canCreateSoporte && (
         <>
           <button
             type="button"
@@ -983,8 +1000,8 @@ export default function Layout() {
           >
             <LifeBuoy className="w-4 h-4 text-emerald-400" />
             <span>Soporte</span>
-            {canViewSoporteHistorial && unreadSoporte > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-500 text-white leading-tight">
+            {unreadSoporte > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white leading-none tabular-nums">
                 {unreadSoporte > 99 ? '99+' : unreadSoporte}
               </span>
             )}
