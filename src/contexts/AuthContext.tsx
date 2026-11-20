@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { logActivity } from '../lib/logger';
+import { getClientDeviceSummary } from '../utils/activityFormatter';
 
 export type ModuleScope = 'usuario' | 'seccional' | 'global';
 export type ScopedModuleKey =
@@ -139,15 +141,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [allowSeccionalEditVehiculos, setAllowSeccionalEditVehiculos] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
+  const lastPermFetchRef = React.useRef<{ userId: string; at: number } | null>(null);
+
   useEffect(() => {
     const safetyTimer = setTimeout(() => {
       setLoading(false);
     }, 4500);
 
+    const triggerRoleFetch = (uid: string, force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        lastPermFetchRef.current &&
+        lastPermFetchRef.current.userId === uid &&
+        now - lastPermFetchRef.current.at < 5000
+      ) {
+        return;
+      }
+      lastPermFetchRef.current = { userId: uid, at: now };
+      fetchUserRoleAndPermissions(uid);
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchUserRoleAndPermissions(session.user.id);
+        triggerRoleFetch(session.user.id);
       } else {
         clearTimeout(safetyTimer);
         setLoading(false);
@@ -158,11 +176,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchUserRoleAndPermissions(session.user.id);
+        if (event !== 'TOKEN_REFRESHED') {
+          triggerRoleFetch(session.user.id);
+        }
+        if (event === 'SIGNED_IN') {
+          try {
+            const alreadyLoggedUid = sessionStorage.getItem('cvs_last_login_logged_uid');
+            if (alreadyLoggedUid !== session.user.id) {
+              sessionStorage.setItem('cvs_last_login_logged_uid', session.user.id);
+              const { navegador, dispositivo } = getClientDeviceSummary();
+              void logActivity('Inició sesión', 'Sesión', session.user.id, {
+                metodo: 'Sesión autenticada',
+                navegador,
+                dispositivo,
+              });
+            }
+          } catch {}
+        }
       } else {
+        lastPermFetchRef.current = null;
+        try {
+          sessionStorage.removeItem('cvs_last_login_logged_uid');
+        } catch {}
         setUserName(null);
         setRole(null);
         setSocorristaId(null);
@@ -797,6 +835,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
+      if (user?.id) {
+        await logActivity('Cerró sesión', 'Sesión', user.id, {
+          rol: role || 'usuario',
+        });
+      }
+      try {
+        sessionStorage.removeItem('cvs_last_login_logged_uid');
+      } catch {}
       await supabase.auth.signOut();
     } catch (error) {
       console.error('Error signing out:', error);

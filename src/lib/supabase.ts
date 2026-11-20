@@ -23,37 +23,53 @@ if (!rawUrl || !rawKey) {
   );
 }
 
-const RETRY_DELAYS_MS = [650, 1400, 2600, 4200];
+const RETRY_DELAYS_MS = [800, 2200];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Cortocircuito breve para evitar tormentas de reintentos si PostgREST está saturado o reiniciando
+let postgrestCooldownUntil = 0;
+let consecutiveServerFailures = 0;
+
 /**
- * Wrapper de fetch resiliente para Supabase/PostgREST:
- * Reintenta automáticamente cuando PostgREST devuelve temporalmente HTTP 502/503/504
- * o PGRST002 ("Could not query the database for the schema cache. Retrying.") mientras
- * recarga su caché de esquema tras una migración o al despertar conexiones inactivas.
+ * Wrapper de fetch resiliente y ligero para Supabase/PostgREST:
+ * Reintenta de forma controlada (máx. 2 intentos, solo lecturas GET/HEAD/OPTIONS)
+ * ante errores transitorios 502/503/504 o PGRST002 (schema cache), con enfriamiento
+ * breve para evitar saturar la base de datos.
  */
 const resilientSupabaseFetch: typeof fetch = async (input, init) => {
   const method = (init?.method || 'GET').toUpperCase();
   const isSafeRetryMethod = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  const maxRetries = isSafeRetryMethod && Date.now() >= postgrestCooldownUntil ? RETRY_DELAYS_MS.length : 0;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(input, init);
 
-      // Si es 502/503/504 (típico de PGRST002 schema cache reload), verificar y reintentar
-      if (
-        (response.status === 503 || response.status === 502 || response.status === 504) &&
-        attempt < RETRY_DELAYS_MS.length
-      ) {
-        await sleep(RETRY_DELAYS_MS[attempt]);
-        continue;
+      if (response.ok) {
+        consecutiveServerFailures = 0;
+        return response;
       }
 
-      // Algunas pasarelas devuelven 400/500 con PGRST002 en cuerpo JSON durante recarga de esquema
+      const isTransientGateway =
+        response.status === 503 || response.status === 502 || response.status === 504;
+
+      if (isTransientGateway) {
+        consecutiveServerFailures += 1;
+        if (consecutiveServerFailures >= 4) {
+          postgrestCooldownUntil = Date.now() + 10000;
+        }
+        if (attempt < maxRetries) {
+          await sleep(RETRY_DELAYS_MS[attempt]);
+          continue;
+        }
+        return response;
+      }
+
+      // Verificar PGRST002 (recarga temporal de caché de esquema) en respuestas 500 JSON
       if (
         response.status >= 500 &&
-        attempt < RETRY_DELAYS_MS.length &&
+        attempt < maxRetries &&
         response.headers.get('content-type')?.includes('application/json')
       ) {
         const cloned = response.clone();
@@ -69,7 +85,7 @@ const resilientSupabaseFetch: typeof fetch = async (input, init) => {
 
       return response;
     } catch (networkErr) {
-      if (isSafeRetryMethod && attempt < 2) {
+      if (attempt < maxRetries && attempt < 1) {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;
       }

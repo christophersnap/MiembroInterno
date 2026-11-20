@@ -94,6 +94,8 @@ function saveLocalReadSet(userId: string, set: Set<string>): void {
   } catch {}
 }
 
+const inFlightReadSync = new Map<string, Promise<Set<string>>>();
+
 export async function syncReadReceiptsFromSupabase(
   userId?: string | null,
   force = false
@@ -108,46 +110,58 @@ export async function syncReadReceiptsFromSupabase(
 
   const now = Date.now();
   const lastSync = lastRemoteSyncAt.get(userId) || 0;
-  if (!force && now - lastSync < 8000 && localSet.size > 0) {
+  if (!force && now - lastSync < 45000) {
     return localSet;
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('solicitudes_lecturas')
-      .select('modulo, solicitud_key')
-      .eq('user_id', userId)
-      .limit(2000);
-
-    if (error) {
-      const msg = (error.message || '').toLowerCase();
-      if (error.code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
-        tableMissingDetected = true;
-      }
-      return localSet;
-    }
-
-    lastRemoteSyncAt.set(userId, now);
-    if (data && data.length > 0) {
-      let changed = false;
-      data.forEach((row: any) => {
-        if (row.modulo && row.solicitud_key != null) {
-          const key = buildSolicitudCompositeKey(row.modulo as SolicitudModulo, row.solicitud_key);
-          if (!localSet.has(key)) {
-            localSet.add(key);
-            changed = true;
-          }
-        }
-      });
-      if (changed) {
-        saveLocalReadSet(userId, localSet);
-      }
-    }
-  } catch {
-    // Fallback silencioso a localStorage
+  const pending = inFlightReadSync.get(userId);
+  if (pending) {
+    return pending;
   }
 
-  return localSet;
+  const syncPromise = (async () => {
+    try {
+      const { data, error } = await supabase
+        .from('solicitudes_lecturas')
+        .select('modulo, solicitud_key')
+        .eq('user_id', userId)
+        .limit(1500);
+
+      if (error) {
+        const msg = (error.message || '').toLowerCase();
+        if (error.code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
+          tableMissingDetected = true;
+        }
+        return localSet;
+      }
+
+      lastRemoteSyncAt.set(userId, Date.now());
+      if (data && data.length > 0) {
+        let changed = false;
+        data.forEach((row: any) => {
+          if (row.modulo && row.solicitud_key != null) {
+            const key = buildSolicitudCompositeKey(row.modulo as SolicitudModulo, row.solicitud_key);
+            if (!localSet.has(key)) {
+              localSet.add(key);
+              changed = true;
+            }
+          }
+        });
+        if (changed) {
+          saveLocalReadSet(userId, localSet);
+        }
+      }
+    } catch {
+      // Fallback silencioso a localStorage
+    } finally {
+      inFlightReadSync.delete(userId);
+    }
+
+    return localSet;
+  })();
+
+  inFlightReadSync.set(userId, syncPromise);
+  return syncPromise;
 }
 
 const ACTIVE_CARNET_STATES = new Set(['Pendiente', 'En revisión', 'Observada']);

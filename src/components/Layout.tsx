@@ -20,7 +20,7 @@ import {
 import MisAccesosModal from './accesos/MisAccesosModal';
 import PresenceModal from './PresenceModal';
 import SoporteFormModal from './soporte/SoporteFormModal';
-import { fetchSoporteTickets } from '../lib/soporte';
+import { matchesSoporteTicketScope } from '../lib/soporte';
 
 interface NavItem {
   name: string;
@@ -86,7 +86,14 @@ export default function Layout() {
   const [unreadGeneral, setUnreadGeneral] = useState(0);
   const [unreadSoporte, setUnreadSoporte] = useState(0);
 
-  const checkUnreadSolicitudes = async () => {
+  const unreadInFlightRef = useRef(false);
+  const lastUnreadCheckAtRef = useRef(0);
+  const seccionalesCacheRef = useRef<{ at: number; items: { id: number; nombre: string }[] }>({
+    at: 0,
+    items: [],
+  });
+
+  const checkUnreadSolicitudes = async (force = false) => {
     if (authLoading || !user) {
       setUnreadCombustible(0);
       setUnreadCompra(0);
@@ -96,19 +103,39 @@ export default function Layout() {
       return;
     }
 
+    // Evitar consultas en segundo plano o solapadas que saturan Supabase/PostgREST
+    if (!force && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
+    if (unreadInFlightRef.current) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - lastUnreadCheckAtRef.current < 20000) {
+      return;
+    }
+
+    unreadInFlightRef.current = true;
+    lastUnreadCheckAtRef.current = now;
+
     try {
       const readSet = await syncReadReceiptsFromSupabase(user.id);
 
-      // Catálogo de seccionales para resolver nombres e IDs en alcances por seccional
-      let secList: { id: number; nombre: string }[] = [];
-      if (
+      // Catálogo de seccionales con caché en memoria de 5 minutos
+      let secList: { id: number; nombre: string }[] = seccionalesCacheRef.current.items;
+      const needsSeccionalesCatalog =
         (canViewCombustible && combustibleScope === 'seccional') ||
         (canViewCompra && compraScope === 'seccional') ||
-        (canViewCarnet && carnetScope === 'seccional')
-      ) {
+        (canViewCarnet && carnetScope === 'seccional') ||
+        (canViewSoporte && soporteScope === 'seccional');
+
+      if (needsSeccionalesCatalog && (secList.length === 0 || now - seccionalesCacheRef.current.at > 300000)) {
         try {
           const { data: secData } = await supabase.from('seccionales').select('id, nombre');
-          if (secData) secList = secData;
+          if (secData) {
+            secList = secData;
+            seccionalesCacheRef.current = { at: Date.now(), items: secData };
+          }
         } catch {}
       }
 
@@ -149,249 +176,263 @@ export default function Layout() {
         return isSolicitudRealizadaPorUsuario(row, user, userName);
       };
 
-      // 1. Solicitudes de combustible observables por el usuario
-      let scopedCombItems: any[] = [];
-      if (canViewCombustible) {
-        let rawComb: any[] = [];
-        let combQueryFailed = false;
-        try {
-          const { data: combData, error: combErr } = await supabase
-            .from('solicitudes_combustible')
-            .select('id, folio, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, nombre_solicitante, correo_electronico')
-            .order('created_at', { ascending: false })
-            .limit(200);
-          if (combErr) {
-            combQueryFailed = true;
-          } else if (combData) {
-            rawComb = combData;
-          }
-        } catch {
-          combQueryFailed = true;
-        }
+      const ACTIVE_LOGISTICA_STATES = ['Pendiente', 'En Proceso', 'En Proceso de Compra'];
+      const ACTIVE_CARNET_STATES = ['Pendiente', 'En revisión', 'Observada'];
+      const ACTIVE_SOPORTE_STATES = ['Pendiente', 'En revisión'];
 
-        if (combQueryFailed) {
-          try {
-            const localComb =
-              sessionStorage.getItem('cruz_verde_solicitudes_combustible') ||
-              localStorage.getItem('cruz_verde_solicitudes_combustible');
-            if (localComb) rawComb = JSON.parse(localComb);
-          } catch {}
-        }
+      // Ejecutar en paralelo solo consultas ligeras de estados activos/pendientes
+      const [unreadCombCount, unreadCompCount, carnetUnreadCount, soporteUnreadCount] =
+        await Promise.all([
+          // 1. Combustible activo
+          (async () => {
+            if (!canViewCombustible) return 0;
+            let rawComb: any[] = [];
+            let combQueryFailed = false;
+            try {
+              const { data: combData, error: combErr } = await supabase
+                .from('solicitudes_combustible')
+                .select('id, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, nombre_solicitante, correo_electronico')
+                .in('estado', ACTIVE_LOGISTICA_STATES)
+                .order('created_at', { ascending: false })
+                .limit(100);
+              if (combErr) {
+                combQueryFailed = true;
+              } else if (combData) {
+                rawComb = combData;
+              }
+            } catch {
+              combQueryFailed = true;
+            }
 
-        scopedCombItems = rawComb.filter((row) =>
-          matchesLogisticaScope(combustibleScope, combustibleSeccionalIds, row)
-        );
-      }
+            if (combQueryFailed) {
+              try {
+                const localComb =
+                  sessionStorage.getItem('cruz_verde_solicitudes_combustible') ||
+                  localStorage.getItem('cruz_verde_solicitudes_combustible');
+                if (localComb) rawComb = JSON.parse(localComb);
+              } catch {}
+            }
 
-      const unreadCombCount = scopedCombItems.filter((s) =>
-        isSolicitudUnread({
-          userId: user.id,
-          readSet,
-          modulo: 'combustible',
-          solicitudKey: s.id,
-          estado: s.estado,
-          createdAt: s.created_at || s.fecha_solicitud,
-        })
-      ).length;
+            const scopedCombItems = rawComb.filter((row) =>
+              matchesLogisticaScope(combustibleScope, combustibleSeccionalIds, row)
+            );
+            return scopedCombItems.filter((s) =>
+              isSolicitudUnread({
+                userId: user.id,
+                readSet,
+                modulo: 'combustible',
+                solicitudKey: s.id,
+                estado: s.estado,
+                createdAt: s.created_at || s.fecha_solicitud,
+              })
+            ).length;
+          })(),
+
+          // 2. Compras activas
+          (async () => {
+            if (!canViewCompra) return 0;
+            let rawComp: any[] = [];
+            let compQueryFailed = false;
+            try {
+              const { data: compData, error: compErr } = await supabase
+                .from('solicitudes_compra')
+                .select('id, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, solicitado_por, user_email')
+                .in('estado', ACTIVE_LOGISTICA_STATES)
+                .order('created_at', { ascending: false })
+                .limit(100);
+              if (compErr) {
+                compQueryFailed = true;
+              } else if (compData) {
+                rawComp = compData;
+              }
+            } catch {
+              compQueryFailed = true;
+            }
+
+            if (compQueryFailed) {
+              try {
+                const localComp =
+                  sessionStorage.getItem('cruz_verde_solicitudes_compra') ||
+                  localStorage.getItem('cruz_verde_solicitudes_compra');
+                if (localComp) rawComp = JSON.parse(localComp);
+              } catch {}
+            }
+
+            const scopedCompItems = rawComp.filter((row) =>
+              matchesLogisticaScope(compraScope, compraSeccionalIds, row)
+            );
+            return scopedCompItems.filter((s) =>
+              isSolicitudUnread({
+                userId: user.id,
+                readSet,
+                modulo: 'compra',
+                solicitudKey: s.id,
+                estado: s.estado,
+                createdAt: s.created_at || s.fecha_solicitud,
+              })
+            ).length;
+          })(),
+
+          // 3. Solicitudes de carnet activas
+          (async () => {
+            if (!canViewCarnet) return 0;
+            try {
+              const secNameById = new Map<number, string>();
+              secList.forEach((s) => secNameById.set(s.id, s.nombre));
+
+              const { data: carnetRows } = await supabase
+                .from('solicitudes_carnet')
+                .select(`
+                  id,
+                  socorrista_id,
+                  seccional_id,
+                  seccional_nombre,
+                  solicitado_por,
+                  solicitado_por_email,
+                  estado_solicitud,
+                  fecha_solicitud,
+                  socorristas (
+                    id,
+                    seccional_id,
+                    seccionales (id, nombre)
+                  )
+                `)
+                .in('estado_solicitud', ACTIVE_CARNET_STATES)
+                .order('fecha_solicitud', { ascending: false })
+                .limit(120);
+
+              const normalizedDbCarnet = (carnetRows || []).map((row: any) => {
+                const soc = Array.isArray(row.socorristas) ? row.socorristas[0] : row.socorristas;
+                const socSec = Array.isArray(soc?.seccionales) ? soc.seccionales[0] : soc?.seccionales;
+                const resolvedSecId = row.seccional_id || soc?.seccional_id || socSec?.id || null;
+                const resolvedSecNombre =
+                  row.seccional_nombre ||
+                  socSec?.nombre ||
+                  (resolvedSecId ? secNameById.get(resolvedSecId) : '') ||
+                  '';
+                return {
+                  id: row.id as number | string,
+                  socorrista_id: Number(row.socorrista_id || 0),
+                  seccional_id: resolvedSecId,
+                  seccional_nombre: resolvedSecNombre,
+                  solicitado_por: row.solicitado_por || '',
+                  solicitado_por_email: row.solicitado_por_email || null,
+                  estado_solicitud: row.estado_solicitud || 'Pendiente',
+                  fecha_solicitud: row.fecha_solicitud || '',
+                };
+              });
+
+              const scopedCarnet = normalizedDbCarnet.filter((item) => {
+                if (carnetScope === 'global') return true;
+                if (carnetScope === 'seccional') {
+                  const targetIds =
+                    carnetSeccionalIds.length > 0
+                      ? carnetSeccionalIds
+                      : effectiveSeccionalId
+                      ? [Number(effectiveSeccionalId)]
+                      : [];
+                  if (targetIds.length > 0) {
+                    if (item.seccional_id && targetIds.includes(Number(item.seccional_id))) return true;
+                    const allowedNames = secList
+                      .filter((s) => targetIds.includes(s.id))
+                      .map((s) => String(s.nombre || '').toLowerCase());
+                    if (
+                      item.seccional_nombre &&
+                      allowedNames.some((n) => n && item.seccional_nombre.toLowerCase().includes(n))
+                    ) {
+                      return true;
+                    }
+                    return false;
+                  }
+                  if (userSeccionalNombre) {
+                    return item.seccional_nombre.toLowerCase().includes(userSeccionalNombre.toLowerCase());
+                  }
+                  return false;
+                }
+                const emailMatch =
+                  user?.email &&
+                  item.solicitado_por_email &&
+                  item.solicitado_por_email.toLowerCase() === user.email.toLowerCase();
+                const nameMatch =
+                  userName &&
+                  userName !== 'Usuario' &&
+                  item.solicitado_por &&
+                  item.solicitado_por.toLowerCase() === userName.toLowerCase();
+                const socMatch = socorristaId && item.socorrista_id === socorristaId;
+                return Boolean(emailMatch || nameMatch || socMatch);
+              });
+
+              return scopedCarnet.filter((item) =>
+                isSolicitudUnread({
+                  userId: user.id,
+                  readSet,
+                  modulo: 'carnet',
+                  solicitudKey: item.id,
+                  estado: item.estado_solicitud,
+                  createdAt: item.fecha_solicitud,
+                })
+              ).length;
+            } catch {
+              return 0;
+            }
+          })(),
+
+          // 4. Soporte activo (consulta ligera sin JSONB de imágenes ni descripción)
+          (async () => {
+            if (!canViewSoporte) return 0;
+            try {
+              let q = supabase
+                .from('soporte_tickets')
+                .select('id, usuario_id, usuario_email, seccional_id, seccional_nombre, estado, created_at')
+                .in('estado', ACTIVE_SOPORTE_STATES)
+                .order('created_at', { ascending: false })
+                .limit(100);
+
+              if (soporteScope === 'usuario' && user.id) {
+                q = q.eq('usuario_id', user.id);
+              }
+
+              const { data: soporteRows, error: soporteErr } = await q;
+              if (soporteErr || !Array.isArray(soporteRows)) return 0;
+
+              const scopedSoporte = soporteRows.filter((row: any) =>
+                matchesSoporteTicketScope(row, {
+                  scope: soporteScope,
+                  usuarioId: user.id,
+                  usuarioEmail: user.email || null,
+                  allowedSeccionalIds: soporteSeccionalIds,
+                  userSeccionalId: effectiveSeccionalId,
+                  userSeccionalNombre: userSeccionalNombre || null,
+                  seccionalesCatalog: secList,
+                })
+              );
+
+              return scopedSoporte.filter((t: any) =>
+                isSolicitudUnread({
+                  userId: user.id,
+                  readSet,
+                  modulo: 'soporte',
+                  solicitudKey: t.id,
+                  estado: t.estado,
+                  createdAt: t.created_at,
+                })
+              ).length;
+            } catch {
+              return 0;
+            }
+          })(),
+        ]);
 
       setUnreadCombustible(canViewCombustible && canViewCombustibleHistorial ? unreadCombCount : 0);
-
-      // 2. Solicitudes de compra observables por el usuario
-      let scopedCompItems: any[] = [];
-      if (canViewCompra) {
-        let rawComp: any[] = [];
-        let compQueryFailed = false;
-        try {
-          const { data: compData, error: compErr } = await supabase
-            .from('solicitudes_compra')
-            .select('id, folio, created_at, fecha_solicitud, estado, seccional_id, seccional_nombre, solicitado_por, user_email')
-            .order('created_at', { ascending: false })
-            .limit(200);
-          if (compErr) {
-            compQueryFailed = true;
-          } else if (compData) {
-            rawComp = compData;
-          }
-        } catch {
-          compQueryFailed = true;
-        }
-
-        if (compQueryFailed) {
-          try {
-            const localComp =
-              sessionStorage.getItem('cruz_verde_solicitudes_compra') ||
-              localStorage.getItem('cruz_verde_solicitudes_compra');
-            if (localComp) rawComp = JSON.parse(localComp);
-          } catch {}
-        }
-
-        scopedCompItems = rawComp.filter((row) =>
-          matchesLogisticaScope(compraScope, compraSeccionalIds, row)
-        );
-      }
-
-      const unreadCompCount = scopedCompItems.filter((s) =>
-        isSolicitudUnread({
-          userId: user.id,
-          readSet,
-          modulo: 'compra',
-          solicitudKey: s.id,
-          estado: s.estado,
-          createdAt: s.created_at || s.fecha_solicitud,
-        })
-      ).length;
-
       setUnreadCompra(canViewCompra && canViewCompraHistorial ? unreadCompCount : 0);
-
-      // 3. Solicitudes de carnet no leídas observables según alcance del usuario
-      let carnetUnreadCount = 0;
-      if (canViewCarnet) {
-        try {
-          const secNameById = new Map<number, string>();
-          secList.forEach((s) => secNameById.set(s.id, s.nombre));
-
-          const { data: carnetRows } = await supabase
-            .from('solicitudes_carnet')
-            .select(`
-              id,
-              socorrista_id,
-              seccional_id,
-              seccional_nombre,
-              solicitado_por,
-              solicitado_por_email,
-              estado_solicitud,
-              fecha_solicitud,
-              foto_url,
-              socorristas (
-                id,
-                seccional_id,
-                seccionales (id, nombre)
-              )
-            `)
-            .order('fecha_solicitud', { ascending: false })
-            .limit(300);
-
-          const normalizedDbCarnet = (carnetRows || []).map((row: any) => {
-            const soc = Array.isArray(row.socorristas) ? row.socorristas[0] : row.socorristas;
-            const socSec = Array.isArray(soc?.seccionales) ? soc.seccionales[0] : soc?.seccionales;
-            const resolvedSecId = row.seccional_id || soc?.seccional_id || socSec?.id || null;
-            const resolvedSecNombre =
-              row.seccional_nombre ||
-              socSec?.nombre ||
-              (resolvedSecId ? secNameById.get(resolvedSecId) : '') ||
-              '';
-            return {
-              id: row.id as number | string,
-              socorrista_id: Number(row.socorrista_id || 0),
-              seccional_id: resolvedSecId,
-              seccional_nombre: resolvedSecNombre,
-              solicitado_por: row.solicitado_por || '',
-              solicitado_por_email: row.solicitado_por_email || null,
-              estado_solicitud: row.estado_solicitud || 'Pendiente',
-              fecha_solicitud: row.fecha_solicitud || '',
-              foto_url: row.foto_url || null,
-            };
-          });
-
-          // Incluir respaldo en configuracion (`solicitud_carnet_%`) si existiera
-          const mergedCarnet = [...normalizedDbCarnet];
-          try {
-            const { data: cfgRows } = await supabase
-              .from('configuracion')
-              .select('clave, valor')
-              .like('clave', 'solicitud_carnet_%');
-            if (cfgRows) {
-              cfgRows.forEach((r: any) => {
-                try {
-                  const parsed = JSON.parse(r.valor);
-                  const est = parsed.estado_solicitud || 'Pendiente';
-                  const sid = Number(parsed.socorrista_id || 0);
-                  const fSol = parsed.fecha_solicitud || '';
-                  const dup = normalizedDbCarnet.some(
-                    (di) =>
-                      di.socorrista_id === sid &&
-                      ((di.foto_url && parsed.foto_url && di.foto_url === parsed.foto_url) ||
-                        Math.abs(new Date(di.fecha_solicitud).getTime() - new Date(fSol).getTime()) < 60000)
-                  );
-                  if (!dup) {
-                    const secId = parsed.seccional_id || null;
-                    mergedCarnet.push({
-                      id: r.clave as number | string,
-                      socorrista_id: sid,
-                      seccional_id: secId,
-                      seccional_nombre:
-                        parsed.seccional_nombre || (secId ? secNameById.get(secId) || '' : ''),
-                      solicitado_por: parsed.solicitado_por || parsed.nombre_completo || '',
-                      solicitado_por_email: parsed.solicitado_por_email || null,
-                      estado_solicitud: est,
-                      fecha_solicitud: fSol,
-                      foto_url: parsed.foto_url || null,
-                    });
-                  }
-                } catch {}
-              });
-            }
-          } catch {}
-
-          const scopedCarnet = mergedCarnet.filter((item) => {
-            if (carnetScope === 'global') return true;
-            if (carnetScope === 'seccional') {
-              const targetIds =
-                carnetSeccionalIds.length > 0
-                  ? carnetSeccionalIds
-                  : effectiveSeccionalId
-                  ? [Number(effectiveSeccionalId)]
-                  : [];
-              if (targetIds.length > 0) {
-                if (item.seccional_id && targetIds.includes(Number(item.seccional_id))) return true;
-                const allowedNames = secList
-                  .filter((s) => targetIds.includes(s.id))
-                  .map((s) => String(s.nombre || '').toLowerCase());
-                if (
-                  item.seccional_nombre &&
-                  allowedNames.some((n) => n && item.seccional_nombre.toLowerCase().includes(n))
-                ) {
-                  return true;
-                }
-                return false;
-              }
-              if (userSeccionalNombre) {
-                return item.seccional_nombre.toLowerCase().includes(userSeccionalNombre.toLowerCase());
-              }
-              return false;
-            }
-            // carnetScope === 'usuario'
-            const emailMatch =
-              user?.email &&
-              item.solicitado_por_email &&
-              item.solicitado_por_email.toLowerCase() === user.email.toLowerCase();
-            const nameMatch =
-              userName &&
-              userName !== 'Usuario' &&
-              item.solicitado_por &&
-              item.solicitado_por.toLowerCase() === userName.toLowerCase();
-            const socMatch = socorristaId && item.socorrista_id === socorristaId;
-            return Boolean(emailMatch || nameMatch || socMatch);
-          });
-
-          carnetUnreadCount = scopedCarnet.filter((item) =>
-            isSolicitudUnread({
-              userId: user.id,
-              readSet,
-              modulo: 'carnet',
-              solicitudKey: item.id,
-              estado: item.estado_solicitud,
-              createdAt: item.fecha_solicitud,
-            })
-          ).length;
-        } catch {}
-      }
       setUnreadCarnet(carnetUnreadCount);
+      setUnreadSoporte(soporteUnreadCount);
+
       publishModuleUnreadCount('carnet', carnetUnreadCount);
       publishModuleUnreadCount('combustible', canViewCombustible ? unreadCombCount : 0);
       publishModuleUnreadCount('compra', canViewCompra ? unreadCompCount : 0);
+      publishModuleUnreadCount('soporte', soporteUnreadCount);
 
-      // 4. Solicitudes generales (Compras + Combustible no leídas dentro del alcance del usuario)
       if (!canViewCompra && !canViewCombustible) {
         setUnreadGeneral(0);
       } else {
@@ -399,43 +440,17 @@ export default function Layout() {
           (canViewCombustible ? unreadCombCount : 0) + (canViewCompra ? unreadCompCount : 0)
         );
       }
-
-      // 5. Solicitudes de soporte no leídas según el alcance del usuario (global, seccional o propias)
-      let soporteUnreadCount = 0;
-      if (canViewSoporte) {
-        try {
-          const { tickets: scopedSoporte } = await fetchSoporteTickets({
-            usuarioId: user.id,
-            usuarioEmail: user.email || null,
-            scope: soporteScope,
-            allowedSeccionalIds: soporteSeccionalIds,
-            userSeccionalId: effectiveSeccionalId,
-            userSeccionalNombre: userSeccionalNombre || null,
-          });
-
-          soporteUnreadCount = scopedSoporte.filter((t) =>
-            isSolicitudUnread({
-              userId: user.id,
-              readSet,
-              modulo: 'soporte',
-              solicitudKey: t.id,
-              estado: t.estado,
-              createdAt: t.created_at,
-            })
-          ).length;
-        } catch {}
-      }
-      setUnreadSoporte(soporteUnreadCount);
-      publishModuleUnreadCount('soporte', soporteUnreadCount);
     } catch {
       // Ignorar errores silenciosos
+    } finally {
+      unreadInFlightRef.current = false;
     }
   };
 
   const checkUnreadRef = useRef(checkUnreadSolicitudes);
   checkUnreadRef.current = checkUnreadSolicitudes;
 
-  // Recalcular cuando cambian permisos, alcances o ruta activa (sin borrar solicitudes no vistas)
+  // Recalcular cuando cambian usuario, permisos o alcances (sin saturar al cambiar de ruta)
   useEffect(() => {
     if (authLoading || !user) {
       setUnreadCombustible(0);
@@ -446,7 +461,7 @@ export default function Layout() {
       return;
     }
 
-    checkUnreadRef.current();
+    checkUnreadRef.current(true);
   }, [
     authLoading,
     user?.id,
@@ -463,23 +478,36 @@ export default function Layout() {
     canViewCarnet,
     canViewSoporte,
     scopesDepsKey,
-    location.pathname,
-    location.search,
   ]);
 
-  // Escuchar eventos globales (incluyendo lectura individual de solicitudes) y polling periódico
+  // Escuchar eventos explícitos de cambios (actualización inmediata) y polling moderado cada 60s solo si la pestaña está visible
   useEffect(() => {
-    const handleUpdate = () => checkUnreadRef.current();
-    window.addEventListener('solicitudes_updated', handleUpdate);
-    window.addEventListener(SOLICITUDES_READ_EVENT, handleUpdate);
-    window.addEventListener('soporte_updated', handleUpdate);
-    window.addEventListener('focus', handleUpdate);
-    const interval = setInterval(() => checkUnreadRef.current(), 15000);
+    const handleExplicitUpdate = () => checkUnreadRef.current(true);
+    const handleThrottledCheck = () => checkUnreadRef.current(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkUnreadRef.current(false);
+      }
+    };
+
+    window.addEventListener('solicitudes_updated', handleExplicitUpdate);
+    window.addEventListener(SOLICITUDES_READ_EVENT, handleExplicitUpdate);
+    window.addEventListener('soporte_updated', handleExplicitUpdate);
+    window.addEventListener('focus', handleThrottledCheck);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        checkUnreadRef.current(false);
+      }
+    }, 60000);
+
     return () => {
-      window.removeEventListener('solicitudes_updated', handleUpdate);
-      window.removeEventListener(SOLICITUDES_READ_EVENT, handleUpdate);
-      window.removeEventListener('soporte_updated', handleUpdate);
-      window.removeEventListener('focus', handleUpdate);
+      window.removeEventListener('solicitudes_updated', handleExplicitUpdate);
+      window.removeEventListener(SOLICITUDES_READ_EVENT, handleExplicitUpdate);
+      window.removeEventListener('soporte_updated', handleExplicitUpdate);
+      window.removeEventListener('focus', handleThrottledCheck);
+      document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
   }, []);
@@ -967,7 +995,13 @@ export default function Layout() {
         </header>
         
         <main className="flex-1 w-full overflow-x-hidden">
-          <div className="py-6 sm:py-8 w-full max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+          <div
+            className={`py-5 sm:py-7 w-full mx-auto ${
+              location.pathname === '/socorristas' || location.pathname === '/actividad'
+                ? 'max-w-[1920px] px-3 sm:px-5 lg:px-6'
+                : 'max-w-7xl px-4 sm:px-6 md:px-8'
+            }`}
+          >
             <Outlet />
           </div>
         </main>

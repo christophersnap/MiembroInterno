@@ -7,11 +7,37 @@ export const logActivity = async (
   details?: any
 ) => {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Obtener nombre del usuario si está disponible en metadatos o perfil de socorrista
-    let userNombre = user.user_metadata?.full_name || user.user_metadata?.nombre || null;
+    // Resolver nombre real del usuario desde user_roles, metadatos o socorristas
+    let userNombre: string | null =
+      user.user_metadata?.nombre_usuario ||
+      user.user_metadata?.nombre_completo ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.nombre ||
+      null;
+
+    try {
+      const { data: ur } = await supabase
+        .from('user_roles')
+        .select('nombre_usuario, nombre_completo, socorristas (primer_nombre, primer_apellido)')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (ur) {
+        const explicit = String(ur.nombre_usuario || ur.nombre_completo || '').trim();
+        const soc: any = Array.isArray(ur.socorristas) ? ur.socorristas[0] : ur.socorristas;
+        if (explicit) {
+          userNombre = explicit;
+        } else if (soc?.primer_nombre) {
+          userNombre = `${soc.primer_nombre} ${soc.primer_apellido || ''}`.trim();
+        }
+      }
+    } catch {}
+
     if (!userNombre && user.email) {
       try {
         const { data: soc } = await supabase
@@ -20,52 +46,62 @@ export const logActivity = async (
           .eq('email', user.email)
           .maybeSingle();
         if (soc) {
-          userNombre = `${soc.primer_nombre} ${soc.primer_apellido}`.trim();
+          userNombre = `${soc.primer_nombre} ${soc.primer_apellido || ''}`.trim();
         }
-      } catch (e) {}
+      } catch {}
     }
 
     const enrichedDetails = {
-      ...(details || {}),
-      user_nombre: userNombre || user.email?.split('@')[0] || 'Usuario'
+      ...(details && typeof details === 'object' ? details : details ? { descripcion: String(details) } : {}),
+      user_nombre: userNombre || user.email?.split('@')[0] || 'Usuario',
     };
 
-    // Fetch max ID to avoid sequence out of sync errors if id is integer
-    const { data: maxIdData } = await supabase
-      .from('activity_logs')
-      .select('id')
-      .order('id', { ascending: false })
-      .limit(1);
-      
-    let nextId = undefined;
-    if (maxIdData && maxIdData.length > 0 && typeof maxIdData[0].id === 'number') {
-      nextId = maxIdData[0].id + 1;
-    }
-
-    const { error } = await supabase.from('activity_logs').insert([{
-      ...(nextId ? { id: nextId } : {}),
+    const basePayload = {
       user_id: user.id,
-      user_email: user.email,
+      user_email: user.email || null,
       action,
       entity_type: entityType,
-      entity_id: entityId ? String(entityId) : null,
-      details: enrichedDetails
-    }]);
+      entity_id: entityId !== undefined && entityId !== null ? String(entityId) : null,
+      details: enrichedDetails,
+    };
 
-    // If it fails, try without user_email
+    // Intento 1: inserción directa permitiendo que la secuencia / UUID asigne ID
+    let { error } = await supabase.from('activity_logs').insert([basePayload]);
+
+    // Intento 2: si falló por secuencia desfasada o ID entero requerido, calcular nextId
     if (error) {
-      console.warn('Failed to log activity with user_email, trying fallback:', error);
-      const { error: fallbackError } = await supabase.from('activity_logs').insert([{
-        ...(nextId ? { id: nextId } : {}),
-        user_id: user.id,
-        action,
-        entity_type: entityType,
-        entity_id: entityId ? String(entityId) : null,
-        details: enrichedDetails
-      }]);
-      if (fallbackError) {
-        console.error('Fallback activity log failed:', fallbackError);
+      const errMsg = String(error.message || '').toLowerCase();
+      if (errMsg.includes('duplicate') || errMsg.includes('null value in column "id"') || errMsg.includes('pkey')) {
+        const { data: maxIdData } = await supabase
+          .from('activity_logs')
+          .select('id')
+          .order('id', { ascending: false })
+          .limit(1);
+
+        const nextId =
+          maxIdData && maxIdData.length > 0 && typeof maxIdData[0].id === 'number'
+            ? maxIdData[0].id + 1
+            : undefined;
+
+        const retry = await supabase.from('activity_logs').insert([
+          {
+            ...(nextId ? { id: nextId } : {}),
+            ...basePayload,
+          },
+        ]);
+        error = retry.error;
       }
+    }
+
+    // Intento 3: fallback si la columna user_email no existiera aún
+    if (error && String(error.message || '').toLowerCase().includes('user_email')) {
+      const { user_email: _omit, ...withoutEmail } = basePayload;
+      const fallback = await supabase.from('activity_logs').insert([withoutEmail]);
+      if (fallback.error) {
+        console.error('Fallback activity log failed:', fallback.error);
+      }
+    } else if (error) {
+      console.warn('Activity log warning:', error.message);
     }
   } catch (error) {
     console.error('Failed to log activity:', error);

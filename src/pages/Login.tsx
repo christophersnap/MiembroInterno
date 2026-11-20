@@ -6,6 +6,8 @@ import { useSettings } from '../contexts/SettingsContext';
 import { generarTextoCorreoPasswordTemporal } from '../lib/emailNotification';
 import { sendEmailNotification } from '../lib/api';
 import { getOfficialLoginUrl } from '../utils/appUrl';
+import { logActivity } from '../lib/logger';
+import { getClientDeviceSummary } from '../utils/activityFormatter';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -103,6 +105,7 @@ export default function Login() {
 
       // VERIFICAR ESTADO DEL USUARIO (PENDIENTE O INACTIVO)
       const { data: { user: loggedInUser } } = await supabase.auth.getUser();
+      let resolvedRole = loggedInUser?.email === 'christopher.snap@gmail.com' ? 'admin' : 'usuario';
       if (loggedInUser && loggedInUser.email !== 'christopher.snap@gmail.com') {
         const { data: roleRow } = await supabase
           .from('user_roles')
@@ -110,6 +113,7 @@ export default function Login() {
           .eq('id', loggedInUser.id)
           .single();
 
+        if (roleRow?.role) resolvedRole = roleRow.role;
         const isPending = roleRow?.role === 'pendiente';
         const isInactive = roleRow?.role === 'inactivo';
 
@@ -122,6 +126,20 @@ export default function Login() {
           await supabase.auth.signOut();
           throw new Error('Su cuenta ha sido desactivada por el administrador. No tiene acceso para ingresar al sistema.');
         }
+      }
+
+      // Registrar inicio de sesión en Actividad
+      if (loggedInUser) {
+        try {
+          sessionStorage.setItem('cvs_last_login_logged_uid', loggedInUser.id);
+          const { navegador, dispositivo } = getClientDeviceSummary();
+          await logActivity('Inició sesión', 'Sesión', loggedInUser.id, {
+            metodo: 'Correo y contraseña',
+            rol: resolvedRole,
+            navegador,
+            dispositivo,
+          });
+        } catch {}
       }
 
       navigate('/');

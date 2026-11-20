@@ -278,9 +278,25 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     root.style.setProperty('--app-ticker-badge-text', cols.tickerBadgeText || '#ffffff');
   };
 
+  const lastFetchedAtRef = React.useRef<number>(0);
+
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase.from('configuracion').select('*');
+      const SETTINGS_KEYS = [
+        'logos',
+        'colores',
+        'verificacion_titulo',
+        'verificacion_mensaje',
+        'verificacion_fields',
+        'login_show_solicitar',
+        'login_show_verificar',
+        'optimizacion_imagenes_config',
+      ];
+      lastFetchedAtRef.current = Date.now();
+      const { data, error } = await supabase
+        .from('configuracion')
+        .select('*')
+        .in('clave', SETTINGS_KEYS);
       
       const newSettings = JSON.parse(JSON.stringify(defaultSettings));
 
@@ -399,8 +415,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     fetchSettings();
     
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchSettings();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' && Date.now() - lastFetchedAtRef.current > 10000) {
+        fetchSettings();
+      }
     });
     
     return () => {

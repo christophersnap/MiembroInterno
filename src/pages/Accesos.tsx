@@ -3,7 +3,7 @@ import {
   Shield, Save, Check, X, UserPlus, Trash2, Globe, 
   Building2, KeyRound, CheckCircle2, 
   AlertTriangle, Eye, Mail, Copy,
-  Sliders, Database, Search, Pencil, ChevronDown
+  Sliders, Database, Search, Pencil, ChevronDown, Plus
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -22,6 +22,7 @@ import { getApiUrl, sendEmailNotification } from '../lib/api';
 import { SQL_MIGRATION_47_TEXT } from '../utils/imageOptimizer';
 import { SQL_MIGRATION_48_TEXT, SQL_MIGRATION_49_TEXT } from '../utils/conoceSocorrista';
 import { SQL_MIGRATION_50_TEXT } from '../lib/soporte';
+import { SQL_MIGRATION_51_TEXT } from '../utils/activityFormatter';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -100,6 +101,7 @@ export default function Accesos() {
   const [sql48Copied, setSql48Copied] = useState(false);
   const [sql49Copied, setSql49Copied] = useState(false);
   const [sql50Copied, setSql50Copied] = useState(false);
+  const [sql51Copied, setSql51Copied] = useState(false);
   const [usingLegacyExposedView, setUsingLegacyExposedView] = useState(false);
   const [sendingConfirmUserId, setSendingConfirmUserId] = useState<string | null>(null);
   const [showOlderMigrations, setShowOlderMigrations] = useState(false);
@@ -109,6 +111,12 @@ export default function Accesos() {
   const [selectedRoleTab, setSelectedRoleTab] = useState<string>('director');
   const [rolePermSearch, setRolePermSearch] = useState<string>('');
   const [savingRolePerms, setSavingRolePerms] = useState<boolean>(false);
+  const [showCreateRoleModal, setShowCreateRoleModal] = useState<boolean>(false);
+  const [newRoleName, setNewRoleName] = useState<string>('');
+  const [newRoleCopyFrom, setNewRoleCopyFrom] = useState<string>('');
+  const [creatingRole, setCreatingRole] = useState<boolean>(false);
+  const [createRoleError, setCreateRoleError] = useState<string>('');
+  const [deletingRole, setDeletingRole] = useState<boolean>(false);
 
   const notifyStatus = (text: string, type: 'success' | 'error' = 'success') => {
     setStatusNotice({ type, text });
@@ -476,7 +484,11 @@ export default function Accesos() {
         newActiveState ? 'Activó cuenta de usuario' : 'Desactivó cuenta de usuario',
         'Usuario',
         targetUser.id,
-        { usuario: targetUser.email, nuevo_estado: newActiveState ? 'activo' : 'inactivo' }
+        {
+          nombre_usuario: getUserDisplayName(targetUser),
+          usuario: targetUser.email,
+          nuevo_estado: newActiveState ? 'activo' : 'inactivo',
+        }
       );
 
       notifyStatus(`Usuario ${newActiveState ? 'activado' : 'desactivado'} con éxito.`);
@@ -950,7 +962,12 @@ export default function Accesos() {
 
       if (error) throw error;
 
-      await logActivity('Vinculó carnet a usuario', 'Usuario', userId, { carnet: cleanCarnet });
+      const targetUsrForCarnet = usuarios.find((u) => u.id === userId);
+      await logActivity('Vinculó carnet a usuario', 'Usuario', userId, {
+        nombre_usuario: targetUsrForCarnet ? getUserDisplayName(targetUsrForCarnet) : undefined,
+        email: targetUsrForCarnet?.email,
+        carnet: cleanCarnet,
+      });
       setLinkingCarnetUserId(null);
       setLinkingCarnetValue('');
       fetchData();
@@ -967,15 +984,25 @@ export default function Accesos() {
     }
     
     try {
+      const targetUsr = usuarios.find((u) => u.id === userId);
       const { error } = await supabase.rpc('delete_user', { target_user_id: userId });
       
       if (error) {
         console.warn('RPC delete_user falló, desactivando usuario:', error);
         await supabase.from('user_roles').update({ role: 'inactivo', activo: false, estado: 'inactivo' }).eq('id', userId);
+        await logActivity('Desactivó cuenta de usuario', 'Usuario', userId, {
+          nombre_usuario: targetUsr ? getUserDisplayName(targetUsr) : undefined,
+          usuario: targetUsr?.email,
+          nuevo_estado: 'inactivo',
+        });
         notifyStatus('El usuario ha sido desactivado permanentemente.');
         fetchData();
       } else {
-        await logActivity('Eliminó usuario', 'Usuario', userId, {});
+        await logActivity('Eliminó usuario', 'Usuario', userId, {
+          nombre_usuario: targetUsr ? getUserDisplayName(targetUsr) : undefined,
+          email: targetUsr?.email,
+          rol: targetUsr?.role,
+        });
         setUsuarios(usuarios.filter(u => u.id !== userId));
         notifyStatus('Usuario eliminado correctamente.');
       }
@@ -987,6 +1014,7 @@ export default function Accesos() {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
+      const targetUsr = usuarios.find((u) => u.id === userId);
       const { error } = await supabase
         .from('user_roles')
         .update({ 
@@ -1005,7 +1033,12 @@ export default function Accesos() {
         estado: newRole === 'inactivo' ? 'inactivo' : (newRole === 'pendiente' ? 'pendiente' : 'activo')
       } : u));
       
-      await logActivity('Cambió rol de usuario', 'Usuario', userId, { nuevo_rol: newRole });
+      await logActivity('Cambió rol de usuario', 'Usuario', userId, {
+        nombre_usuario: targetUsr ? getUserDisplayName(targetUsr) : undefined,
+        email: targetUsr?.email,
+        rol_anterior: targetUsr?.role,
+        nuevo_rol: newRole,
+      });
       notifyStatus(`Rol actualizado a ${newRole}.`);
     } catch (error) {
       console.error('Error updating role:', error);
@@ -1020,6 +1053,7 @@ export default function Accesos() {
     updatedRole?: string
   ) => {
     try {
+      const targetUsr = usuarios.find((u) => u.id === targetUserId);
       const updatePayload: Record<string, any> = {
         custom_permissions: updatedCustomPermissions,
         can_upload_files: updatedCanUploadFiles,
@@ -1066,6 +1100,8 @@ export default function Accesos() {
       }));
 
       await logActivity('Actualizó accesos individuales', 'Usuario', targetUserId, {
+        nombre_usuario: targetUsr ? getUserDisplayName(targetUsr) : undefined,
+        email: targetUsr?.email,
         custom_permissions: updatedCustomPermissions,
         can_upload_files: updatedCanUploadFiles,
         ...(updatedRole ? { nuevo_rol: updatedRole } : {}),
@@ -1090,13 +1126,147 @@ export default function Accesos() {
       
       setRolePermissions(rolePermissions.map(rp => rp.role === role ? { ...rp, permissions: editedPermissions } : rp));
       setEditingRole(null);
-      await logActivity('Actualizó permisos de rol', 'Rol', role, { permisos: editedPermissions });
+      await logActivity('Actualizó permisos de rol', 'Rol', role, { rol: role, permisos: editedPermissions });
       notifyStatus(`Permisos del rol ${role} guardados.`);
     } catch (error) {
       console.error('Error updating permissions:', error);
       notifyStatus('Error al actualizar permisos del rol.', 'error');
     } finally {
       setSavingRolePerms(false);
+    }
+  };
+
+  const CORE_SYSTEM_ROLES = ['admin', 'socorrista', 'director', 'instructor'];
+
+  const normalizeRoleSlug = (raw: string): string => {
+    return raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+  };
+
+  const handleCreateRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateRoleError('');
+
+    const slug = normalizeRoleSlug(newRoleName);
+    if (!slug || slug.length < 2) {
+      setCreateRoleError('Ingresa un nombre válido de al menos 2 caracteres.');
+      return;
+    }
+    if (slug === 'inactivo' || slug === 'pendiente') {
+      setCreateRoleError('Ese nombre está reservado por el sistema.');
+      return;
+    }
+    if (rolePermissions.some((rp) => rp.role.toLowerCase() === slug)) {
+      setCreateRoleError(`El rol «${slug}» ya existe.`);
+      return;
+    }
+
+    setCreatingRole(true);
+    try {
+      let basePermissions: Record<string, boolean> = {
+        view_dashboard: true,
+        view_directorio: true,
+        view_anuncios: true,
+        view_archivos: true,
+        view_soporte: true,
+        crear_soporte: true,
+      };
+
+      if (newRoleCopyFrom) {
+        const sourceRole = rolePermissions.find((rp) => rp.role === newRoleCopyFrom);
+        if (sourceRole?.permissions) {
+          basePermissions = { ...sourceRole.permissions };
+        }
+      }
+
+      const { data: inserted, error } = await supabase
+        .from('role_permissions')
+        .insert([{ role: slug, permissions: basePermissions }])
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '42501' || String(error.message || '').toLowerCase().includes('policy')) {
+          throw new Error(
+            'No tienes permiso en Supabase para insertar roles. Ejecuta la Migración 51 en Ajustes -> Migraciones SQL.'
+          );
+        }
+        throw error;
+      }
+
+      const newRoleRecord = inserted || { role: slug, permissions: basePermissions };
+      setRolePermissions((prev) => [...prev, newRoleRecord]);
+      setRoles((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
+      setSelectedRoleTab(slug);
+      setEditingRole(null);
+      setEditedPermissions({});
+      setShowCreateRoleModal(false);
+      setNewRoleName('');
+      setNewRoleCopyFrom('');
+
+      await logActivity('Creó nuevo rol', 'Rol', slug, {
+        rol: slug,
+        basado_en: newRoleCopyFrom || 'Permisos básicos',
+        cantidad_permisos_activos: Object.values(basePermissions).filter(Boolean).length,
+      });
+
+      notifyStatus(`Rol «${slug}» creado correctamente. Ya puedes ajustar sus permisos.`);
+    } catch (err: any) {
+      console.error('Error creando rol:', err);
+      setCreateRoleError(err.message || 'No se pudo crear el rol.');
+    } finally {
+      setCreatingRole(false);
+    }
+  };
+
+  const handleDeleteCustomRole = async (roleKey: string) => {
+    if (CORE_SYSTEM_ROLES.includes(roleKey)) return;
+    const assignedCount = usuarios.filter((u) => u.role === roleKey).length;
+    if (assignedCount > 0) {
+      notifyStatus(
+        `No se puede eliminar «${roleKey}» porque tiene ${assignedCount} usuario(s) asignado(s).`,
+        'error'
+      );
+      return;
+    }
+    if (!window.confirm(`¿Eliminar el rol personalizado «${roleKey}»?`)) return;
+
+    setDeletingRole(true);
+    try {
+      const { error } = await supabase
+        .from('role_permissions')
+        .delete()
+        .eq('role', roleKey);
+
+      if (error) throw error;
+
+      const remaining = rolePermissions.filter((rp) => rp.role !== roleKey);
+      setRolePermissions(remaining);
+      setRoles((prev) => prev.filter((r) => r !== roleKey));
+      if (selectedRoleTab === roleKey) {
+        setSelectedRoleTab(remaining[0]?.role || 'director');
+      }
+      if (editingRole === roleKey) {
+        setEditingRole(null);
+        setEditedPermissions({});
+      }
+
+      await logActivity('Eliminó rol personalizado', 'Rol', roleKey, { rol: roleKey });
+      notifyStatus(`Rol «${roleKey}» eliminado.`);
+    } catch (err: any) {
+      console.error('Error eliminando rol:', err);
+      notifyStatus(
+        err.message || 'Error al eliminar el rol. Verifica haber ejecutado Migración 51.',
+        'error'
+      );
+    } finally {
+      setDeletingRole(false);
     }
   };
 
@@ -2097,6 +2267,12 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql50Copied(false), 3000);
   };
 
+  const handleCopySqlMigration51 = () => {
+    navigator.clipboard.writeText(SQL_MIGRATION_51_TEXT);
+    setSql51Copied(true);
+    setTimeout(() => setSql51Copied(false), 3000);
+  };
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
@@ -2930,45 +3106,75 @@ NOTIFY pgrst, 'reload schema';`;
       {/* TAB 3: PERMISOS POR ROL (ESTILO iOS AGRUPADO CON SWITCHES) */}
       {activeTab === 'roles' && (
         <div className="space-y-5 max-w-4xl">
-          {/* Selector segmentado de Rol + Buscador + Guardar */}
+          {/* Selector segmentado de Rol + Crear Rol + Buscador + Guardar */}
           <div className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Permisos por Rol</h3>
                 <p className="text-xs text-slate-500">
-                  Selecciona un rol para activar o desactivar sus permisos base (incluyendo «Conoce a tu Socorrista»)
+                  Crea roles personalizados y define los permisos base que heredarán los usuarios asignados.
                 </p>
               </div>
 
-              {activeRoleObject && editingRole === activeRoleObject.role && (
-                <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {activeRoleObject && editingRole === activeRoleObject.role && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingRole(null);
+                        setEditedPermissions({});
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      Descartar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingRolePerms}
+                      onClick={() => handleSavePermissions(activeRoleObject.role)}
+                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{savingRolePerms ? 'Guardando...' : `Guardar rol ${activeRoleObject.role}`}</span>
+                    </button>
+                  </>
+                )}
+
+                {activeRoleObject && !CORE_SYSTEM_ROLES.includes(activeRoleObject.role) && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditingRole(null);
-                      setEditedPermissions({});
-                    }}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer whitespace-nowrap shrink-0"
+                    disabled={deletingRole}
+                    onClick={() => handleDeleteCustomRole(activeRoleObject.role)}
+                    className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+                    title="Eliminar este rol personalizado"
                   >
-                    Descartar
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar rol</span>
                   </button>
-                  <button
-                    type="button"
-                    disabled={savingRolePerms}
-                    onClick={() => handleSavePermissions(activeRoleObject.role)}
-                    className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{savingRolePerms ? 'Guardando...' : `Guardar rol ${activeRoleObject.role}`}</span>
-                  </button>
-                </div>
-              )}
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateRoleError('');
+                    setNewRoleName('');
+                    setNewRoleCopyFrom('');
+                    setShowCreateRoleModal(true);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Nuevo Rol</span>
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="bg-slate-100 p-1 rounded-xl flex flex-wrap gap-1">
                 {rolePermissions.map((rp) => {
                   const isSelected = (activeRoleObject?.role || '') === rp.role;
+                  const usersInRole = usuarios.filter((u) => u.role === rp.role).length;
                   return (
                     <button
                       key={rp.role}
@@ -2980,13 +3186,16 @@ NOTIFY pgrst, 'reload schema';`;
                         }
                         setSelectedRoleTab(rp.role);
                       }}
-                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                         isSelected
                           ? 'bg-white text-slate-900 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      {rp.role}
+                      <span className="capitalize">{rp.role.replace(/_/g, ' ')}</span>
+                      <span className="text-[11px] font-medium text-slate-400 tabular-nums">
+                        {usersInRole}
+                      </span>
                     </button>
                   );
                 })}
@@ -3004,6 +3213,105 @@ NOTIFY pgrst, 'reload schema';`;
               </div>
             </div>
           </div>
+
+          {/* Modal Crear Nuevo Rol (Estilo iOS limpio) */}
+          {showCreateRoleModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+              onClick={() => !creatingRole && setShowCreateRoleModal(false)}
+            >
+              <div
+                className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-emerald-600" />
+                    <h4 className="text-sm font-bold text-slate-900">Crear Nuevo Rol</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateRoleModal(false)}
+                    disabled={creatingRole}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateRole} className="p-5 space-y-4">
+                  {createRoleError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+                      {createRoleError}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Nombre del Rol
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      placeholder="Ej. Jefe de Seccional, Logística, Tesorería..."
+                      value={newRoleName}
+                      onChange={(e) => setNewRoleName(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-slate-400 outline-none"
+                    />
+                    {newRoleName.trim() && (
+                      <p className="text-[11px] text-slate-500">
+                        Identificador en sistema:{' '}
+                        <span className="font-mono font-semibold text-slate-800">
+                          {normalizeRoleSlug(newRoleName) || '—'}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Permisos iniciales (opcional)
+                    </label>
+                    <select
+                      value={newRoleCopyFrom}
+                      onChange={(e) => setNewRoleCopyFrom(e.target.value)}
+                      className="w-full px-3.5 py-2 text-xs font-medium bg-slate-50 focus:bg-white border border-slate-200 rounded-xl outline-none cursor-pointer"
+                    >
+                      <option value="">Empezar con permisos básicos mínimos</option>
+                      {rolePermissions.map((rp) => (
+                        <option key={rp.role} value={rp.role}>
+                          Copiar permisos del rol {rp.role}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-500">
+                      Al crearse podrás activar o desactivar cada permiso individualmente.
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={creatingRole}
+                      onClick={() => setShowCreateRoleModal(false)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creatingRole || !normalizeRoleSlug(newRoleName)}
+                      className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{creatingRole ? 'Creando...' : 'Crear Rol'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {/* Grupos estilo iOS Settings para el rol seleccionado */}
           {activeRoleObject && (
@@ -3295,6 +3603,13 @@ NOTIFY pgrst, 'reload schema';`;
 
             <div className="divide-y divide-slate-100">
               {[
+                {
+                  num: '51',
+                  title: 'Roles Personalizados, Auditoría de Sesiones y Seccionales',
+                  desc: 'Habilita crear/asignar roles nuevos sin bloqueo CHECK y permisos RLS para registrar inicios de sesión en Actividad',
+                  copied: sql51Copied,
+                  onCopy: handleCopySqlMigration51,
+                },
                 {
                   num: '50',
                   title: 'Soporte: Notificaciones de Lectura, Alcance por Seccional y Permisos',
