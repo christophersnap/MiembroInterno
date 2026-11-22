@@ -30,7 +30,11 @@ import { logActivity } from '../../lib/logger';
 import SmartStorageImage from '../common/SmartStorageImage';
 import CarnetPhotoCaptureModal, { CarnetPhotoReadyMeta } from '../common/CarnetPhotoCaptureModal';
 import { uploadCarnetPhotoWithFallback } from '../../utils/solicitudesCarnet';
-import { useSolicitudReadTracker, publishModuleUnreadCount } from '../../utils/solicitudReadTracker';
+import {
+  useSolicitudReadTracker,
+  publishModuleUnreadCount,
+  getCarnetReadTrackingKey,
+} from '../../utils/solicitudReadTracker';
 import {
   analyzeCarnetPhoto,
   loadImageSafelyAsDataUrl,
@@ -119,12 +123,12 @@ export default function SolicitudesCarnetTab() {
     getModuleSeccionalIds,
   } = useAuth();
 
-  const isAdmin = role === 'admin';
+  const isAdmin = role === 'admin' || role === 'superadmin';
   const scope = getModuleScope('solicitudes_carnet');
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_carnet');
   const canEdit = isAdmin || Boolean(permissions?.edit_solicitudes_carnet);
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
-  const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
+  const { isCarnetUnread, markCarnetAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
 
   const [records, setRecords] = useState<SolicitudCarnetRecord[]>([]);
   const [seccionales, setSeccionales] = useState<{ id: number; nombre: string }[]>([]);
@@ -493,14 +497,26 @@ export default function SolicitudesCarnetTab() {
     };
   }, [filteredRecords]);
 
+  const isRecordUnread = (r: SolicitudCarnetRecord) =>
+    isCarnetUnread(r.id, r.estado_solicitud, r.fecha_revision, r.fecha_solicitud, canEdit);
+
+  const markRecordAsRead = (r: SolicitudCarnetRecord) =>
+    markCarnetAsRead(r.id, r.estado_solicitud, r.fecha_revision, canEdit);
+
   const unreadVisibleRecords = useMemo(
-    () => filteredRecords.filter((r) => isUnread('carnet', r.id, r.estado_solicitud, r.fecha_solicitud)),
-    [filteredRecords, isUnread]
+    () =>
+      filteredRecords.filter((r) =>
+        isCarnetUnread(r.id, r.estado_solicitud, r.fecha_revision, r.fecha_solicitud, canEdit)
+      ),
+    [filteredRecords, isCarnetUnread, canEdit]
   );
 
   const totalUnreadScope = useMemo(
-    () => records.filter((r) => isUnread('carnet', r.id, r.estado_solicitud, r.fecha_solicitud)).length,
-    [records, isUnread]
+    () =>
+      records.filter((r) =>
+        isCarnetUnread(r.id, r.estado_solicitud, r.fecha_revision, r.fecha_solicitud, canEdit)
+      ).length,
+    [records, isCarnetUnread, canEdit]
   );
 
   useEffect(() => {
@@ -510,12 +526,12 @@ export default function SolicitudesCarnetTab() {
   }, [loading, totalUnreadScope]);
 
   const handleOpenDetail = (rec: SolicitudCarnetRecord) => {
-    markAsRead('carnet', rec.id);
+    markRecordAsRead(rec);
     setDetailRecord(rec);
   };
 
   const handleOpenEdit = (rec: SolicitudCarnetRecord) => {
-    markAsRead('carnet', rec.id);
+    markRecordAsRead(rec);
     setEditRecord(rec);
     setEditEstado(rec.estado_solicitud || 'Pendiente');
     setEditObservaciones(rec.observaciones || '');
@@ -526,7 +542,7 @@ export default function SolicitudesCarnetTab() {
   };
 
   const handleOpenDirectCrop = (rec: SolicitudCarnetRecord) => {
-    markAsRead('carnet', rec.id);
+    markRecordAsRead(rec);
     setQuickCropRecord(rec);
     setPhotoModalMode('crop-direct');
     setShowReplacePhotoModal(true);
@@ -534,7 +550,7 @@ export default function SolicitudesCarnetTab() {
 
   const handleQuickAccept = async (rec: SolicitudCarnetRecord) => {
     if (!canEdit) return;
-    markAsRead('carnet', rec.id);
+    markRecordAsRead(rec);
     setSavingQuickActionId(rec.id);
     setFeedbackError(null);
     setFeedbackSuccess(null);
@@ -939,7 +955,6 @@ export default function SolicitudesCarnetTab() {
         Observaciones: r.observaciones || '',
         'Solicitado Por': r.solicitado_por,
         'Correo Solicitante': r.solicitado_por_email || '',
-        'Revisado Por': r.revisado_por || '',
         'Fecha Revisión': r.fecha_revision ? new Date(r.fecha_revision).toLocaleDateString('es-SV') : '',
         'Fotografía Adjunta': r.foto_url || r.socorrista_foto_actual ? 'Sí' : 'No',
       }));
@@ -958,7 +973,6 @@ export default function SolicitudesCarnetTab() {
         { wch: 30 },
         { wch: 24 },
         { wch: 24 },
-        { wch: 22 },
         { wch: 15 },
         { wch: 14 },
       ];
@@ -1071,7 +1085,15 @@ export default function SolicitudesCarnetTab() {
               type="button"
               onClick={() =>
                 markManyAsRead(
-                  unreadVisibleRecords.map((r) => ({ modulo: 'carnet' as const, solicitudKey: r.id }))
+                  unreadVisibleRecords.map((r) => ({
+                    modulo: 'carnet' as const,
+                    solicitudKey: getCarnetReadTrackingKey({
+                      solicitudKey: r.id,
+                      estado: r.estado_solicitud,
+                      fechaRevision: r.fecha_revision,
+                      canSolveCarnet: canEdit,
+                    }),
+                  }))
                 )
               }
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-xs font-semibold text-sky-900 cursor-pointer transition-colors"
@@ -1313,12 +1335,12 @@ export default function SolicitudesCarnetTab() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {filteredRecords.map((rec) => {
                   const hasAnyPhoto = Boolean(rec.foto_url || rec.socorrista_foto_actual);
-                  const rowUnread = isUnread('carnet', rec.id, rec.estado_solicitud, rec.fecha_solicitud);
+                  const rowUnread = isRecordUnread(rec);
                   return (
                     <tr
                       key={String(rec.id)}
                       onClick={() => {
-                        if (rowUnread) markAsRead('carnet', rec.id);
+                        if (rowUnread) markRecordAsRead(rec);
                       }}
                       className={`transition-colors ${
                         rowUnread
@@ -1333,7 +1355,7 @@ export default function SolicitudesCarnetTab() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                markAsRead('carnet', rec.id);
+                                markRecordAsRead(rec);
                                 if (hasAnyPhoto) {
                                   setZoomPhotoInfo({
                                     src: rec.foto_url,
@@ -1688,19 +1710,13 @@ export default function SolicitudesCarnetTab() {
                     {new Date(detailRecord.fecha_solicitud).toLocaleString('es-SV')}
                   </span>
                 </div>
-                {detailRecord.revisado_por && (
-                  <>
-                    <div>
-                      <span className="text-slate-400 block">Revisado por</span>
-                      <span className="font-semibold text-slate-800">{detailRecord.revisado_por}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Fecha revisión</span>
-                      <span className="font-semibold text-slate-800">
-                        {detailRecord.fecha_revision ? new Date(detailRecord.fecha_revision).toLocaleString('es-SV') : '-'}
-                      </span>
-                    </div>
-                  </>
+                {detailRecord.fecha_revision && (
+                  <div className="col-span-2">
+                    <span className="text-slate-400 block">Última actualización de estado</span>
+                    <span className="font-semibold text-slate-800">
+                      {new Date(detailRecord.fecha_revision).toLocaleString('es-SV')}
+                    </span>
+                  </div>
                 )}
               </div>
             </div>

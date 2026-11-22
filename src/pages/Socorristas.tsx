@@ -1261,6 +1261,7 @@ export default function Socorristas() {
             >
               {paginatedData.map((person) => {
                 const secundarios = parseCargosSecundarios(person.cargos_secundarios);
+                const isInactive = person.estado !== 'Activo';
                 const canToggle = Boolean(
                   permissions.cambiar_estado_socorrista ||
                     canAccessSeccionalSocorristas(person.seccional_id, 'edit')
@@ -1269,7 +1270,11 @@ export default function Socorristas() {
                 return (
                   <div
                     key={person.id}
-                    className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 transition-colors flex flex-col justify-between overflow-hidden"
+                    className={`rounded-2xl border transition-colors flex flex-col justify-between overflow-hidden ${
+                      isInactive
+                        ? 'bg-slate-100/90 border-slate-200/80 hover:border-slate-300'
+                        : 'bg-white border-slate-200/90 hover:border-slate-300'
+                    }`}
                   >
                     <div className="p-4 space-y-3">
                       {/* Identidad */}
@@ -1279,22 +1284,38 @@ export default function Socorristas() {
                             <img
                               src={person.foto_url}
                               alt={`${person.primer_nombre} ${person.primer_apellido}`}
-                              className="h-11 w-11 border border-slate-200 rounded-full object-cover"
+                              className={`h-11 w-11 border border-slate-200 rounded-full object-cover ${
+                                isInactive ? 'grayscale opacity-60' : ''
+                              }`}
                               referrerPolicy="no-referrer"
                             />
                           ) : (
-                            <div className="h-11 w-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm">
+                            <div
+                              className={`h-11 w-11 rounded-full border border-slate-200 flex items-center justify-center font-bold text-sm ${
+                                isInactive
+                                  ? 'bg-slate-200/80 text-slate-400'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
                               {(person.primer_nombre?.[0] || '') + (person.primer_apellido?.[0] || '')}
                             </div>
                           )}
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <h3 className="text-sm font-bold text-slate-900 leading-snug truncate">
+                          <h3
+                            className={`text-sm font-bold leading-snug truncate ${
+                              isInactive ? 'text-slate-500' : 'text-slate-900'
+                            }`}
+                          >
                             {person.primer_nombre} {person.primer_apellido}
                           </h3>
                           <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 flex-wrap">
-                            <span className="font-mono font-semibold text-slate-700 tabular-nums">
+                            <span
+                              className={`font-mono font-semibold tabular-nums ${
+                                isInactive ? 'text-slate-400' : 'text-slate-700'
+                              }`}
+                            >
                               {person.carnet || 'Sin carnet'}
                             </span>
                             <span aria-hidden="true">·</span>
@@ -1303,7 +1324,7 @@ export default function Socorristas() {
                                 person.estado === 'Activo' ? 'text-emerald-700' : 'text-rose-600'
                               }`}
                             >
-                              {person.estado !== 'Activo' && (
+                              {isInactive && (
                                 <UserDisabledIcon className="w-3 h-3 shrink-0" />
                               )}
                               <span>{person.estado}</span>
@@ -1313,18 +1334,36 @@ export default function Socorristas() {
                       </div>
 
                       {/* Datos clave */}
-                      <div className="space-y-1.5 pt-2 border-t border-slate-100 text-xs text-slate-600">
+                      <div
+                        className={`space-y-1.5 pt-2 border-t text-xs ${
+                          isInactive
+                            ? 'border-slate-200/70 text-slate-400'
+                            : 'border-slate-100 text-slate-600'
+                        }`}
+                      >
                         <div className="flex items-center gap-1.5">
                           <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span className="truncate font-medium text-slate-800">
+                          <span
+                            className={`truncate font-medium ${
+                              isInactive ? 'text-slate-500' : 'text-slate-800'
+                            }`}
+                          >
                             {person.seccional_nombre || 'Sin seccional'}
                           </span>
                         </div>
 
                         {(person.cargo_institucional || secundarios.length > 0) && (
                           <div className="flex items-start gap-1.5">
-                            <Shield className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span className="leading-snug text-slate-700">
+                            <Shield
+                              className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                                isInactive ? 'text-slate-400' : 'text-emerald-600'
+                              }`}
+                            />
+                            <span
+                              className={`leading-snug ${
+                                isInactive ? 'text-slate-500' : 'text-slate-700'
+                              }`}
+                            >
                               {person.cargo_institucional || secundarios[0]}
                               {person.cargo_institucional && secundarios.length > 0
                                 ? ` · ${secundarios.join(', ')}`
@@ -1336,7 +1375,11 @@ export default function Socorristas() {
                         {(person.cargo_administrativo || person.segundo_cargo_administrativo) && (
                           <div className="flex items-start gap-1.5">
                             <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                            <span className="leading-snug text-slate-600 truncate">
+                            <span
+                              className={`leading-snug truncate ${
+                                isInactive ? 'text-slate-400' : 'text-slate-600'
+                              }`}
+                            >
                               {[person.cargo_administrativo, person.segundo_cargo_administrativo]
                                 .filter(Boolean)
                                 .join(' · ')}
@@ -1347,23 +1390,47 @@ export default function Socorristas() {
                         {person.telefono && (
                           <div className="flex items-center gap-1.5">
                             <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="tabular-nums text-slate-600">{person.telefono}</span>
+                            <span
+                              className={`tabular-nums ${
+                                isInactive ? 'text-slate-400' : 'text-slate-600'
+                              }`}
+                            >
+                              {person.telefono}
+                            </span>
                           </div>
                         )}
                       </div>
 
                       {/* Indicadores operativos (Licencias) */}
                       {(person.licencia_vehiculo_numero || person.licencia_moto_numero) && (
-                        <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100 text-[11px] text-slate-600">
+                        <div
+                          className={`flex items-center gap-1.5 pt-2 border-t text-[11px] ${
+                            isInactive
+                              ? 'border-slate-200/70 text-slate-400'
+                              : 'border-slate-100 text-slate-600'
+                          }`}
+                        >
                           {person.licencia_vehiculo_numero && (
-                            <SteeringWheelIcon className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <SteeringWheelIcon
+                              className={`w-3.5 h-3.5 shrink-0 ${
+                                isInactive ? 'text-slate-400' : 'text-slate-500'
+                              }`}
+                            />
                           )}
                           {person.licencia_moto_numero && (
-                            <Bike className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <Bike
+                              className={`w-3.5 h-3.5 shrink-0 ${
+                                isInactive ? 'text-slate-400' : 'text-slate-500'
+                              }`}
+                            />
                           )}
                           <span
                             className={`truncate font-medium ${
-                              person.motorista_autorizado ? 'text-emerald-700' : 'text-rose-600'
+                              isInactive
+                                ? 'text-slate-400'
+                                : person.motorista_autorizado
+                                ? 'text-emerald-700'
+                                : 'text-rose-600'
                             }`}
                           >
                             {person.motorista_autorizado ? 'Autorizado' : 'No autorizado'}
@@ -1373,7 +1440,13 @@ export default function Socorristas() {
                     </div>
 
                     {/* Barra compacta de Acciones solo con íconos */}
-                    <div className="px-3.5 py-2 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <div
+                      className={`px-3.5 py-2 border-t flex items-center justify-between gap-2 ${
+                        isInactive
+                          ? 'bg-slate-200/60 border-slate-200/80'
+                          : 'bg-slate-50/80 border-slate-100'
+                      }`}
+                    >
                       <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                         Acciones
                       </span>
@@ -1476,23 +1549,37 @@ export default function Socorristas() {
             <div className="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden bg-white">
               {paginatedData.map((person) => {
                 const secundarios = parseCargosSecundarios(person.cargos_secundarios);
+                const isInactive = person.estado !== 'Activo';
                 const canToggle = Boolean(
                   permissions.cambiar_estado_socorrista ||
                     canAccessSeccionalSocorristas(person.seccional_id, 'edit')
                 );
 
                 return (
-                  <div key={person.id} className="p-3.5 flex items-center gap-3">
+                  <div
+                    key={person.id}
+                    className={`p-3.5 flex items-center gap-3 transition-colors ${
+                      isInactive ? 'bg-slate-100/90' : 'bg-white'
+                    }`}
+                  >
                     <div className="flex-shrink-0 h-11 w-11">
                       {person.foto_url ? (
                         <img
                           src={person.foto_url}
                           alt={`${person.primer_nombre} ${person.primer_apellido}`}
-                          className="h-11 w-11 border border-slate-200 rounded-full object-cover"
+                          className={`h-11 w-11 border border-slate-200 rounded-full object-cover ${
+                            isInactive ? 'grayscale opacity-60' : ''
+                          }`}
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <div className="h-11 w-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs">
+                        <div
+                          className={`h-11 w-11 rounded-full border border-slate-200 flex items-center justify-center font-bold text-xs ${
+                            isInactive
+                              ? 'bg-slate-200/80 text-slate-400'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
                           {(person.primer_nombre?.[0] || '') + (person.primer_apellido?.[0] || '')}
                         </div>
                       )}
@@ -1500,13 +1587,21 @@ export default function Socorristas() {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-bold text-slate-900 leading-tight truncate">
+                        <p
+                          className={`text-sm font-bold leading-tight truncate ${
+                            isInactive ? 'text-slate-500' : 'text-slate-900'
+                          }`}
+                        >
                           {person.primer_nombre} {person.primer_apellido}
                         </p>
                       </div>
 
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 flex-wrap">
-                        <span className="font-mono font-semibold text-slate-700 tabular-nums">
+                        <span
+                          className={`font-mono font-semibold tabular-nums ${
+                            isInactive ? 'text-slate-400' : 'text-slate-700'
+                          }`}
+                        >
                           {person.carnet || 'Sin carnet'}
                         </span>
                         <span aria-hidden="true">·</span>
@@ -1515,14 +1610,18 @@ export default function Socorristas() {
                             person.estado === 'Activo' ? 'text-emerald-700' : 'text-rose-600'
                           }`}
                         >
-                          {person.estado !== 'Activo' && (
+                          {isInactive && (
                             <UserDisabledIcon className="w-3 h-3 shrink-0" />
                           )}
                           <span>{person.estado}</span>
                         </span>
                       </div>
 
-                      <p className="mt-0.5 text-xs text-slate-600 truncate">
+                      <p
+                        className={`mt-0.5 text-xs truncate ${
+                          isInactive ? 'text-slate-400' : 'text-slate-600'
+                        }`}
+                      >
                         {[
                           person.seccional_nombre || 'N/A',
                           person.cargo_institucional,
@@ -1534,7 +1633,11 @@ export default function Socorristas() {
                     </div>
 
                     {/* Acciones compactas solo íconos */}
-                    <div className="flex items-center gap-1 shrink-0 pl-1 border-l border-slate-100">
+                    <div
+                      className={`flex items-center gap-1 shrink-0 pl-1 border-l ${
+                        isInactive ? 'border-slate-200/80' : 'border-slate-100'
+                      }`}
+                    >
                       {person.carnet_generado_url && canSeeCarnetColumn && canSeeImages && (
                         <button
                           type="button"
@@ -1735,13 +1838,21 @@ export default function Socorristas() {
                 <tbody className="bg-white divide-y divide-slate-100">
                   {paginatedData.map((person) => {
                     const secundarios = parseCargosSecundarios(person.cargos_secundarios);
+                    const isInactive = person.estado !== 'Activo';
                     const canToggle = Boolean(
                       permissions.cambiar_estado_socorrista ||
                         canAccessSeccionalSocorristas(person.seccional_id, 'edit')
                     );
 
                     return (
-                      <tr key={person.id} className="group hover:bg-slate-50 transition-colors">
+                      <tr
+                        key={person.id}
+                        className={`group transition-colors ${
+                          isInactive
+                            ? 'bg-slate-100/90 hover:bg-slate-200/60 text-slate-400'
+                            : 'bg-white hover:bg-slate-50'
+                        }`}
+                      >
                         {tableColumns.elemento && (
                           <td className="px-4 py-3 whitespace-nowrap border-b border-slate-100">
                             <div className="flex items-center">
@@ -1750,32 +1861,50 @@ export default function Socorristas() {
                                   <img
                                     src={person.foto_url}
                                     alt={`${person.primer_nombre} ${person.primer_apellido}`}
-                                    className="h-9 w-9 border border-slate-200 rounded-full object-cover"
+                                    className={`h-9 w-9 border border-slate-200 rounded-full object-cover ${
+                                      isInactive ? 'grayscale opacity-60' : ''
+                                    }`}
                                     referrerPolicy="no-referrer"
                                   />
                                 ) : (
-                                  <div className="h-9 w-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs">
+                                  <div
+                                    className={`h-9 w-9 rounded-full border border-slate-200 flex items-center justify-center font-bold text-xs ${
+                                      isInactive
+                                        ? 'bg-slate-200/80 text-slate-400'
+                                        : 'bg-slate-100 text-slate-600'
+                                    }`}
+                                  >
                                     {(person.primer_nombre?.[0] || '') +
                                       (person.primer_apellido?.[0] || '')}
                                   </div>
                                 )}
                               </div>
                               <div className="ml-3">
-                                <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                                <div
+                                  className={`text-sm font-semibold flex items-center gap-1.5 ${
+                                    isInactive ? 'text-slate-500' : 'text-slate-900'
+                                  }`}
+                                >
                                   <span>
                                     {person.primer_nombre} {person.primer_apellido}
                                   </span>
                                   {person.carnet_generado_url && (
                                     <span
                                       title="Carnet digital generado"
-                                      className="text-emerald-600 inline-flex items-center shrink-0"
+                                      className={`inline-flex items-center shrink-0 ${
+                                        isInactive ? 'text-slate-400' : 'text-emerald-600'
+                                      }`}
                                     >
                                       <IdCard className="w-3.5 h-3.5" />
                                     </span>
                                   )}
                                 </div>
                                 {person.telefono && !isPhoneLandscape && (
-                                  <div className="text-xs text-slate-500 tabular-nums">
+                                  <div
+                                    className={`text-xs tabular-nums ${
+                                      isInactive ? 'text-slate-400' : 'text-slate-500'
+                                    }`}
+                                  >
                                     {person.telefono}
                                   </div>
                                 )}
@@ -1786,7 +1915,11 @@ export default function Socorristas() {
 
                         {tableColumns.carnet && (
                           <td className="px-4 py-3 whitespace-nowrap border-b border-slate-100">
-                            <span className="text-xs font-mono font-semibold text-slate-800 tabular-nums">
+                            <span
+                              className={`text-xs font-mono font-semibold tabular-nums ${
+                                isInactive ? 'text-slate-400' : 'text-slate-800'
+                              }`}
+                            >
                               {person.carnet || 'Sin asignar'}
                             </span>
                           </td>
@@ -1797,12 +1930,20 @@ export default function Socorristas() {
                             {person.cargo_institucional || secundarios.length > 0 ? (
                               <div className="space-y-0.5">
                                 {person.cargo_institucional && (
-                                  <div className="text-xs font-medium text-slate-900">
+                                  <div
+                                    className={`text-xs font-medium ${
+                                      isInactive ? 'text-slate-500' : 'text-slate-900'
+                                    }`}
+                                  >
                                     {person.cargo_institucional}
                                   </div>
                                 )}
                                 {secundarios.length > 0 && (
-                                  <div className="text-[11px] text-emerald-700 font-medium">
+                                  <div
+                                    className={`text-[11px] font-medium ${
+                                      isInactive ? 'text-slate-400' : 'text-emerald-700'
+                                    }`}
+                                  >
                                     {secundarios.join(' · ')}
                                   </div>
                                 )}
@@ -1818,12 +1959,20 @@ export default function Socorristas() {
                             {person.cargo_administrativo || person.segundo_cargo_administrativo ? (
                               <div className="space-y-0.5">
                                 {person.cargo_administrativo && (
-                                  <div className="text-xs text-slate-900 font-medium">
+                                  <div
+                                    className={`text-xs font-medium ${
+                                      isInactive ? 'text-slate-500' : 'text-slate-900'
+                                    }`}
+                                  >
                                     {person.cargo_administrativo}
                                   </div>
                                 )}
                                 {person.segundo_cargo_administrativo && (
-                                  <div className="text-[11px] text-sky-700 font-medium">
+                                  <div
+                                    className={`text-[11px] font-medium ${
+                                      isInactive ? 'text-slate-400' : 'text-sky-700'
+                                    }`}
+                                  >
                                     {person.segundo_cargo_administrativo}
                                   </div>
                                 )}
@@ -1836,7 +1985,11 @@ export default function Socorristas() {
 
                         {tableColumns.seccional && (
                           <td className="px-4 py-3 whitespace-nowrap border-b border-slate-100">
-                            <span className="text-xs font-medium text-slate-800">
+                            <span
+                              className={`text-xs font-medium ${
+                                isInactive ? 'text-slate-500' : 'text-slate-800'
+                              }`}
+                            >
                               {person.seccional_nombre || 'N/A'}
                             </span>
                           </td>
@@ -1849,7 +2002,7 @@ export default function Socorristas() {
                                 person.estado === 'Activo' ? 'text-emerald-700' : 'text-rose-600'
                               }`}
                             >
-                              {person.estado !== 'Activo' && (
+                              {isInactive && (
                                 <UserDisabledIcon className="w-3.5 h-3.5 shrink-0" />
                               )}
                               <span>{person.estado}</span>
@@ -1861,12 +2014,20 @@ export default function Socorristas() {
                           <td className="px-4 py-3 whitespace-nowrap border-b border-slate-100">
                             {person.licencia_vehiculo_numero || person.licencia_moto_numero ? (
                               person.motorista_autorizado ? (
-                                <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-medium">
+                                <span
+                                  className={`inline-flex items-center gap-1 text-xs font-medium ${
+                                    isInactive ? 'text-slate-400' : 'text-emerald-700'
+                                  }`}
+                                >
                                   <Check className="h-3.5 w-3.5" />
                                   <span>Autorizado</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-xs text-rose-600 font-medium">
+                                <span
+                                  className={`inline-flex items-center gap-1 text-xs font-medium ${
+                                    isInactive ? 'text-slate-400' : 'text-rose-600'
+                                  }`}
+                                >
                                   <X className="h-3.5 w-3.5" />
                                   <span>No autorizado</span>
                                 </span>
@@ -1884,12 +2045,20 @@ export default function Socorristas() {
                                 <>
                                   {person.licencia_vehiculo_numero && (
                                     <span title="Licencia de Vehículo">
-                                      <SteeringWheelIcon className="h-4 w-4 text-slate-600" />
+                                      <SteeringWheelIcon
+                                        className={`h-4 w-4 ${
+                                          isInactive ? 'text-slate-400' : 'text-slate-600'
+                                        }`}
+                                      />
                                     </span>
                                   )}
                                   {person.licencia_moto_numero && (
                                     <span title="Licencia de Motocicleta">
-                                      <Bike className="h-4 w-4 text-slate-600" />
+                                      <Bike
+                                        className={`h-4 w-4 ${
+                                          isInactive ? 'text-slate-400' : 'text-slate-600'
+                                        }`}
+                                      />
                                     </span>
                                   )}
                                 </>
@@ -1912,7 +2081,11 @@ export default function Socorristas() {
                                       name: `${person.primer_nombre} ${person.primer_apellido}`,
                                     })
                                   }
-                                  className="text-primary hover:text-primary-hover text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                  className={`text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                                    isInactive
+                                      ? 'text-slate-500 hover:text-slate-800'
+                                      : 'text-primary hover:text-primary-hover'
+                                  }`}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                   <span>Ver</span>
@@ -1923,7 +2096,11 @@ export default function Socorristas() {
                                     onClick={() =>
                                       handleDownloadCarnet(person.carnet_generado_url, person.carnet)
                                     }
-                                    className="text-emerald-700 hover:text-emerald-900 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                    className={`text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                                      isInactive
+                                        ? 'text-slate-500 hover:text-slate-800'
+                                        : 'text-emerald-700 hover:text-emerald-900'
+                                    }`}
                                   >
                                     <Download className="w-3.5 h-3.5" />
                                     <span>JPG</span>
@@ -1937,7 +2114,13 @@ export default function Socorristas() {
                         )}
 
                         {/* Celda Acciones FIJA y compacta (solo íconos) */}
-                        <td className="sticky right-0 z-10 bg-white group-hover:bg-slate-50 px-2.5 py-2.5 whitespace-nowrap text-center border-b border-l border-slate-200/80 shadow-[-6px_0_12px_-6px_rgba(15,23,42,0.10)] transition-colors">
+                        <td
+                          className={`sticky right-0 z-10 px-2.5 py-2.5 whitespace-nowrap text-center border-b border-l border-slate-200/80 shadow-[-6px_0_12px_-6px_rgba(15,23,42,0.10)] transition-colors ${
+                            isInactive
+                              ? 'bg-slate-100 group-hover:bg-slate-200/70'
+                              : 'bg-white group-hover:bg-slate-50'
+                          }`}
+                        >
                           <div className="flex items-center justify-center gap-1">
                             {canToggle && (
                               <button

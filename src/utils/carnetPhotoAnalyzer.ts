@@ -283,7 +283,7 @@ export async function analyzeCarnetPhoto(
       status: 'fail',
       message: 'La imagen se percibe borrosa o desenfocada. Toma la foto con mejor enfoque.',
     };
-  } else if (minDim < 360 || lapVar < 120) {
+  } else if (minDim < 320 || lapVar < 85) {
     resolutionCheck = {
       id: 'resolution',
       label: 'Resolución y nitidez',
@@ -374,7 +374,7 @@ export async function analyzeCarnetPhoto(
       status: 'fail',
       message: 'Se detectan objetos, textura o variación fuerte en el fondo. Usa "Reemplazar fondo" abajo.',
     };
-  } else if (bgMeanLuma < 145 || bgMeanSat > 0.24 || bgStdLuma > 22) {
+  } else if (bgMeanLuma < 145 || bgMeanSat > 0.24 || bgStdLuma > 24) {
     suggestBackgroundReplace = true;
     backgroundCheck = {
       id: 'background',
@@ -494,7 +494,7 @@ export async function analyzeCarnetPhoto(
       status: 'warn',
       message: 'Iluminación muy intensa o sobreexpuesta en el rostro.',
     };
-  } else if (sideShadowDiff > 32) {
+  } else if (sideShadowDiff > 36) {
     lightingCheck = {
       id: 'lighting',
       label: 'Iluminación uniforme',
@@ -567,14 +567,14 @@ export async function analyzeCarnetPhoto(
     } else {
       const avgSkinX = skinXSum / skinCount / w;
       const avgSkinY = skinYSum / skinCount / h;
-      if (Math.abs(avgSkinX - 0.5) > 0.15) {
+      if (Math.abs(avgSkinX - 0.5) > 0.17) {
         framingCheck = {
           id: 'framing',
           label: 'Encuadre y centrado',
           status: 'warn',
           message: 'El rostro aparece ligeramente desplazado. Céntralo dentro del círculo guía.',
         };
-      } else if (avgSkinY < 0.2 || avgSkinY > 0.62) {
+      } else if (avgSkinY < 0.18 || avgSkinY > 0.64) {
         framingCheck = {
           id: 'framing',
           label: 'Encuadre y centrado',
@@ -604,7 +604,7 @@ export async function analyzeCarnetPhoto(
       status: 'fail',
       message: 'Posible obstrucción en ojos o frente (cabello cubriendo el rostro, gorra o lentes oscuros).',
     };
-  } else if (eyeDarkRatio > 0.22 || skinRatio < 0.08) {
+  } else if (eyeDarkRatio > 0.25 || skinRatio < 0.06) {
     faceClearCheck = {
       id: 'face_clear',
       label: 'Rostro despejado (cabello / lentes)',
@@ -620,17 +620,22 @@ export async function analyzeCarnetPhoto(
     };
   }
 
-  // 6. VESTIMENTA CLARA (CAMISA BLANCA FORMAL — verificación orientativa)
+  // 6. VESTIMENTA CLARA (CAMISA BLANCA FORMAL — excluye piel del cuello para evitar falsos avisos)
   let attireLumaSum = 0;
   let attireSatSum = 0;
   let attireCount = 0;
-  for (let y = Math.floor(h * 0.76); y < Math.floor(h * 0.96); y++) {
-    for (let x = Math.floor(w * 0.24); x < Math.floor(w * 0.76); x++) {
+  for (let y = Math.floor(h * 0.78); y < Math.floor(h * 0.96); y++) {
+    for (let x = Math.floor(w * 0.22); x < Math.floor(w * 0.78); x++) {
       const idx = y * w + x;
       const off = idx * 4;
       if (data[off + 3] < 200) continue;
+      const r = data[off];
+      const g = data[off + 1];
+      const b = data[off + 2];
+      // Ignorar píxeles de piel del cuello para medir únicamente la camisa
+      if (isSkinToneRgb(r, g, b)) continue;
       attireLumaSum += luma[idx];
-      attireSatSum += rgbSaturation(data[off], data[off + 1], data[off + 2]);
+      attireSatSum += rgbSaturation(r, g, b);
       attireCount++;
     }
   }
@@ -638,7 +643,7 @@ export async function analyzeCarnetPhoto(
   const attireMeanSat = attireCount > 0 ? attireSatSum / attireCount : 0.1;
 
   let attireCheck: CarnetPhotoCheck;
-  if (attireMeanLuma >= 155 && attireMeanSat <= 0.24) {
+  if (attireMeanLuma >= 138 && attireMeanSat <= 0.26) {
     attireCheck = {
       id: 'attire',
       label: 'Vestimenta (camisa blanca)',

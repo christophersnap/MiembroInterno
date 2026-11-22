@@ -14,6 +14,7 @@ import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
 import {
   syncReadReceiptsFromSupabase,
   isSolicitudUnread,
+  isCarnetSolicitudUnread,
   SOLICITUDES_READ_EVENT,
   publishModuleUnreadCount,
 } from '../utils/solicitudReadTracker';
@@ -57,7 +58,7 @@ export default function Layout() {
   const [showPresenceModal, setShowPresenceModal] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
 
-  const isAdmin = role === 'admin';
+  const isAdmin = role === 'admin' || role === 'superadmin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const canViewOnlineUsers = isAdmin || Boolean(permissions.ver_personas_conectadas);
   const canViewSoporte = isAdmin || Boolean(permissions.view_soporte ?? true);
@@ -68,6 +69,7 @@ export default function Layout() {
   const canViewCombustible = isAdmin || Boolean(permissions.view_solicitudes_combustible);
   const canViewCombustibleHistorial = isAdmin || Boolean(permissions.view_combustible_historial);
   const canViewCarnet = isAdmin || Boolean(permissions.view_solicitudes_carnet);
+  const canSolveCarnet = isAdmin || Boolean(permissions.edit_solicitudes_carnet);
 
   const compraScope = getModuleScope('solicitudes_compra');
   const combustibleScope = getModuleScope('solicitudes_combustible');
@@ -273,14 +275,14 @@ export default function Layout() {
             ).length;
           })(),
 
-          // 3. Solicitudes de carnet activas
+          // 3. Solicitudes de carnet (regla diferenciada: quienes solventan ven activas/entrantes; quienes solo solicitan ven cuando su estado fue actualizado)
           (async () => {
             if (!canViewCarnet) return 0;
             try {
               const secNameById = new Map<number, string>();
               secList.forEach((s) => secNameById.set(s.id, s.nombre));
 
-              const { data: carnetRows } = await supabase
+              let carnetQuery = supabase
                 .from('solicitudes_carnet')
                 .select(`
                   id,
@@ -291,15 +293,27 @@ export default function Layout() {
                   solicitado_por_email,
                   estado_solicitud,
                   fecha_solicitud,
+                  fecha_revision,
                   socorristas (
                     id,
                     seccional_id,
                     seccionales (id, nombre)
                   )
-                `)
-                .in('estado_solicitud', ACTIVE_CARNET_STATES)
-                .order('fecha_solicitud', { ascending: false })
-                .limit(120);
+                `);
+
+              if (canSolveCarnet) {
+                carnetQuery = carnetQuery
+                  .in('estado_solicitud', ACTIVE_CARNET_STATES)
+                  .order('fecha_solicitud', { ascending: false })
+                  .limit(120);
+              } else {
+                carnetQuery = carnetQuery
+                  .neq('estado_solicitud', 'Pendiente')
+                  .order('fecha_solicitud', { ascending: false })
+                  .limit(150);
+              }
+
+              const { data: carnetRows } = await carnetQuery;
 
               const normalizedDbCarnet = (carnetRows || []).map((row: any) => {
                 const soc = Array.isArray(row.socorristas) ? row.socorristas[0] : row.socorristas;
@@ -319,6 +333,7 @@ export default function Layout() {
                   solicitado_por_email: row.solicitado_por_email || null,
                   estado_solicitud: row.estado_solicitud || 'Pendiente',
                   fecha_solicitud: row.fecha_solicitud || '',
+                  fecha_revision: row.fecha_revision || null,
                 };
               });
 
@@ -363,13 +378,14 @@ export default function Layout() {
               });
 
               return scopedCarnet.filter((item) =>
-                isSolicitudUnread({
+                isCarnetSolicitudUnread({
                   userId: user.id,
                   readSet,
-                  modulo: 'carnet',
                   solicitudKey: item.id,
                   estado: item.estado_solicitud,
+                  fechaRevision: item.fecha_revision,
                   createdAt: item.fecha_solicitud,
+                  canSolveCarnet,
                 })
               ).length;
             } catch {
@@ -476,6 +492,7 @@ export default function Layout() {
     canViewCombustible,
     canViewCombustibleHistorial,
     canViewCarnet,
+    canSolveCarnet,
     canViewSoporte,
     scopesDepsKey,
   ]);

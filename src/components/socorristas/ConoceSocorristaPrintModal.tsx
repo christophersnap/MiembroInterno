@@ -10,9 +10,10 @@ import {
   Check,
   FileText,
 } from 'lucide-react';
-import { toJpeg, toPng } from 'html-to-image';
+import { toPng } from 'html-to-image';
 import { useSettings } from '../../contexts/SettingsContext';
 import { logActivity } from '../../lib/logger';
+import { loadImageSafelyAsDataUrl } from '../../utils/carnetPhotoAnalyzer';
 import ConoceSocorristaFormFields from './ConoceSocorristaFormFields';
 import {
   ConoceSocorristaExtraData,
@@ -46,22 +47,105 @@ function formatDateDisplay(isoOrText?: string | null): string {
   return trimmed;
 }
 
-async function toSafeDataUrl(url?: string | null): Promise<string | null> {
-  if (!url) return null;
-  if (url.startsWith('data:')) return url;
-  try {
-    const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
-    if (!response.ok) return url;
-    const blob = await response.blob();
-    return await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : url);
-      reader.onerror = () => resolve(url);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return url;
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    if (!src.startsWith('data:') && !src.startsWith('blob:')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.decoding = 'sync';
+    img.onload = () => resolve(img);
+    img.onerror = (err) => reject(err);
+    img.src = src;
+  });
+}
+
+async function waitForDomImagesReady(container: HTMLElement): Promise<void> {
+  const imgs = Array.from(container.querySelectorAll('img'));
+  await Promise.all(
+    imgs.map(async (img) => {
+      try {
+        if (!img.complete) {
+          await new Promise<void>((res) => {
+            const done = () => res();
+            img.addEventListener('load', done, { once: true });
+            img.addEventListener('error', done, { once: true });
+            setTimeout(done, 4000);
+          });
+        }
+        if (typeof img.decode === 'function') {
+          await img.decode().catch(() => {});
+        }
+      } catch {
+        // continuar
+      }
+    })
+  );
+  await new Promise<void>((res) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => res()))
+  );
+}
+
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number
+) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih || dw <= 0 || dh <= 0) return;
+
+  const targetRatio = dw / dh;
+  const sourceRatio = iw / ih;
+  let sx = 0;
+  let sy = 0;
+  let sw = iw;
+  let sh = ih;
+
+  if (sourceRatio > targetRatio) {
+    sw = ih * targetRatio;
+    sx = (iw - sw) / 2;
+  } else {
+    sh = iw / targetRatio;
+    sy = (ih - sh) / 2;
   }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(dx, dy, dw, dh);
+  ctx.clip();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(dx, dy, dw, dh);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+function drawImageContain(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number
+) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih || dw <= 0 || dh <= 0) return;
+
+  const scale = Math.min(dw / iw, dh / ih);
+  const rw = iw * scale;
+  const rh = ih * scale;
+  const rx = dx + (dw - rw) / 2;
+  const ry = dy + (dh - rh) / 2;
+
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(dx, dy, dw, dh);
+  ctx.drawImage(img, rx, ry, rw, rh);
+  ctx.restore();
 }
 
 const CruzVerdeOfficialSeal = () => (
@@ -106,6 +190,8 @@ export default function ConoceSocorristaPrintModal({
 }: ConoceSocorristaPrintModalProps) {
   const { logos } = useSettings();
   const sheetRef = useRef<HTMLDivElement>(null);
+  const photoBoxRef = useRef<HTMLDivElement>(null);
+  const logoImgRef = useRef<HTMLImageElement>(null);
 
   const [extraData, setExtraData] = useState<ConoceSocorristaExtraData>(() =>
     extractKycFromSocorrista(socorrista)
@@ -154,16 +240,27 @@ export default function ConoceSocorristaPrintModal({
     if (!isOpen || !socorrista) return;
     let active = true;
     setLogoLoadFailed(false);
+    setPhotoDataUrl(null);
 
-    toSafeDataUrl(socorrista.foto_url).then((res) => {
-      if (active) setPhotoDataUrl(res);
-    });
+    if (socorrista.foto_url) {
+      loadImageSafelyAsDataUrl(socorrista.foto_url)
+        .then((res) => {
+          if (active) setPhotoDataUrl(res || socorrista.foto_url);
+        })
+        .catch(() => {
+          if (active) setPhotoDataUrl(socorrista.foto_url);
+        });
+    }
 
     const candidateLogo = logos?.verificacion || logos?.login || logos?.dashboard || '';
     if (candidateLogo && candidateLogo !== '/logo.png') {
-      toSafeDataUrl(candidateLogo).then((res) => {
-        if (active) setLogoDataUrl(res);
-      });
+      loadImageSafelyAsDataUrl(candidateLogo)
+        .then((res) => {
+          if (active) setLogoDataUrl(res || candidateLogo);
+        })
+        .catch(() => {
+          if (active) setLogoDataUrl(candidateLogo);
+        });
     } else {
       setLogoDataUrl(null);
     }
@@ -280,30 +377,120 @@ export default function ConoceSocorristaPrintModal({
     }
   };
 
+  /**
+   * Captura la ficha a un Canvas con la fotografía del elemento (y logo) incrustados de forma
+   * determinística vía Canvas API, evitando el bug de imágenes en blanco de Safari/iOS/Android.
+   */
+  const renderSheetToExportCanvas = async () => {
+    const node = sheetRef.current;
+    if (!node) {
+      throw new Error('La vista previa de la ficha no está disponible.');
+    }
+
+    // 1. Garantizar que la foto y logo estén resueltos en DataURL seguro antes de exportar
+    let resolvedPhoto: string | null =
+      photoDataUrl && photoDataUrl.startsWith('data:image/') ? photoDataUrl : null;
+    if (!resolvedPhoto && socorrista?.foto_url) {
+      resolvedPhoto = await loadImageSafelyAsDataUrl(socorrista.foto_url);
+      if (resolvedPhoto) {
+        setPhotoDataUrl(resolvedPhoto);
+      }
+    }
+
+    const candidateLogo = logos?.verificacion || logos?.login || logos?.dashboard || '';
+    let resolvedLogo: string | null =
+      !logoLoadFailed && logoDataUrl && logoDataUrl.startsWith('data:image/') ? logoDataUrl : null;
+    if (!resolvedLogo && !logoLoadFailed && candidateLogo && candidateLogo !== '/logo.png') {
+      resolvedLogo = await loadImageSafelyAsDataUrl(candidateLogo);
+      if (resolvedLogo) {
+        setLogoDataUrl(resolvedLogo);
+      }
+    }
+
+    await waitForDomImagesReady(node);
+
+    const pixelRatio = 2.5;
+    const width = 816;
+    const height = Math.max(1056, node.scrollHeight);
+
+    const captureOpts = {
+      pixelRatio,
+      backgroundColor: '#ffffff',
+      cacheBust: false,
+      width,
+      height,
+    };
+
+    // En iOS/Safari/WebKit el primer pase de foreignObject a veces decodifica tarde las imágenes embebidas
+    try {
+      await toPng(node, captureOpts);
+    } catch {
+      // continuar con el pase definitivo
+    }
+
+    const sheetPngDataUrl = await toPng(node, captureOpts);
+    const sheetImg = await loadHtmlImage(sheetPngDataUrl);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * pixelRatio);
+    canvas.height = Math.round(height * pixelRatio);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('No se pudo inicializar el lienzo de exportación.');
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(sheetImg, 0, 0, canvas.width, canvas.height);
+
+    // 2. Re-estampar directamente la foto del elemento sobre su marco exacto (garantiza 100% presencia en todos los dispositivos)
+    const sheetRect = node.getBoundingClientRect();
+    const scaleX = sheetRect.width > 0 ? canvas.width / sheetRect.width : pixelRatio;
+    const scaleY = sheetRect.height > 0 ? canvas.height / sheetRect.height : pixelRatio;
+
+    if (resolvedPhoto && photoBoxRef.current && sheetRect.width > 0) {
+      try {
+        const photoImg = await loadHtmlImage(resolvedPhoto);
+        const boxRect = photoBoxRef.current.getBoundingClientRect();
+        const borderInsetX = 1.2 * scaleX;
+        const borderInsetY = 1.2 * scaleY;
+        const dx = (boxRect.left - sheetRect.left) * scaleX + borderInsetX;
+        const dy = (boxRect.top - sheetRect.top) * scaleY + borderInsetY;
+        const dw = boxRect.width * scaleX - borderInsetX * 2;
+        const dh = boxRect.height * scaleY - borderInsetY * 2;
+        drawImageCover(ctx, photoImg, dx, dy, dw, dh);
+      } catch (e) {
+        console.warn('No se pudo re-estampar la foto en el canvas final:', e);
+      }
+    }
+
+    // 3. Re-estampar el logo institucional si usa imagen remota
+    if (resolvedLogo && !logoLoadFailed && logoImgRef.current && sheetRect.width > 0) {
+      try {
+        const logoImg = await loadHtmlImage(resolvedLogo);
+        const logoRect = logoImgRef.current.getBoundingClientRect();
+        const dx = (logoRect.left - sheetRect.left) * scaleX;
+        const dy = (logoRect.top - sheetRect.top) * scaleY;
+        const dw = logoRect.width * scaleX;
+        const dh = logoRect.height * scaleY;
+        drawImageContain(ctx, logoImg, dx, dy, dw, dh);
+      } catch {
+        // El SVG o imagen ya quedó pintado por html-to-image
+      }
+    }
+
+    return { canvas, width: canvas.width, height: canvas.height };
+  };
+
   const handleDownloadPdf = async () => {
     if (!sheetRef.current) return;
     setDownloadingPdf(true);
     setErrorMsg(null);
     try {
-      const node = sheetRef.current;
-      const pixelRatio = 2.5;
-      const width = 816;
-      const height = Math.max(1056, node.scrollHeight);
+      const { canvas, width, height } = await renderSheetToExportCanvas();
+      const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      const jpegDataUrl = await toJpeg(node, {
-        quality: 0.95,
-        pixelRatio,
-        backgroundColor: '#ffffff',
-        cacheBust: true,
-        width,
-        height,
-      });
-
-      const pdfBlob = jpegDataUrlToLetterPdfBlob(
-        jpegDataUrl,
-        width * pixelRatio,
-        height * pixelRatio
-      );
+      const pdfBlob = jpegDataUrlToLetterPdfBlob(jpegDataUrl, width, height);
       const blobUrl = URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
       const safeCode = (socorrista.carnet || socorrista.id || 'elemento')
@@ -340,20 +527,30 @@ export default function ConoceSocorristaPrintModal({
     setDownloadingPng(true);
     setErrorMsg(null);
     try {
-      const dataUrl = await toPng(sheetRef.current, {
-        pixelRatio: 2.5,
-        backgroundColor: '#ffffff',
-        cacheBust: true,
-      });
-      const link = document.createElement('a');
+      const { canvas } = await renderSheetToExportCanvas();
+      const pngBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png')
+      );
       const safeCode = (socorrista.carnet || socorrista.id || 'elemento')
         .toString()
         .replace(/[^a-zA-Z0-9_-]/g, '_');
-      link.href = dataUrl;
-      link.download = `CVSSOCC_FORM001_${safeCode}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+
+      const link = document.createElement('a');
+      if (pngBlob) {
+        const blobUrl = URL.createObjectURL(pngBlob);
+        link.href = blobUrl;
+        link.download = `CVSSOCC_FORM001_${safeCode}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      } else {
+        link.href = canvas.toDataURL('image/png');
+        link.download = `CVSSOCC_FORM001_${safeCode}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     } catch (err) {
       console.error('Error generando imagen PNG:', err);
       setErrorMsg('No se pudo exportar la imagen de la ficha.');
@@ -622,8 +819,10 @@ export default function ConoceSocorristaPrintModal({
                   <div className="flex flex-col items-center text-center w-36 shrink-0">
                     {logoDataUrl && !logoLoadFailed ? (
                       <img
+                        ref={logoImgRef}
                         src={logoDataUrl}
                         alt="Cruz Verde Salvadoreña"
+                        decoding="sync"
                         referrerPolicy="no-referrer"
                         onError={() => setLogoLoadFailed(true)}
                         className="w-16 h-16 object-contain"
@@ -655,11 +854,15 @@ export default function ConoceSocorristaPrintModal({
 
                   {/* Derecha: Fotografía Tipo ID */}
                   <div className="w-28 flex flex-col items-center shrink-0">
-                    <div className="w-[92px] h-[114px] border border-black bg-neutral-50 overflow-hidden flex items-center justify-center">
+                    <div
+                      ref={photoBoxRef}
+                      className="w-[92px] h-[114px] border border-black bg-neutral-50 overflow-hidden flex items-center justify-center"
+                    >
                       {photoDataUrl ? (
                         <img
                           src={photoDataUrl}
                           alt={`Foto ID ${fullName}`}
+                          decoding="sync"
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
                         />

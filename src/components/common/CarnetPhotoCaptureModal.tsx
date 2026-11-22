@@ -33,6 +33,7 @@ import {
   replaceCarnetPhotoBackground,
   BackgroundPreset,
 } from '../../utils/carnetBackgroundReplace';
+import { useAuth } from '../../contexts/AuthContext';
 import CarnetPhotoGuideVisual from './CarnetPhotoGuideVisual';
 
 export interface CarnetPhotoReadyMeta {
@@ -111,6 +112,10 @@ export default function CarnetPhotoCaptureModal({
   initialImageSrc = null,
   initialFallbackSrc = null,
 }: CarnetPhotoCaptureModalProps) {
+  const { role } = useAuth();
+  const isAdminUser = role === 'admin' || role === 'superadmin';
+  const minRequiredScore = isAdminUser ? 50 : 98;
+
   const [step, setStep] = useState<'guidelines' | 'camera' | 'crop'>(initialStep);
   const [zoomGuideModal, setZoomGuideModal] = useState(false);
   const [guideImgIndex, setGuideImgIndex] = useState(0);
@@ -524,8 +529,18 @@ export default function CarnetPhotoCaptureModal({
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
+  const meetsScoreRequirement = Boolean(analysis && !analyzingPhoto && analysis.score >= minRequiredScore);
+
   const handleApplyCrop = async () => {
     if (!imageSrc || !croppedAreaPixels) return;
+    if (!analysis || analyzingPhoto || analysis.score < minRequiredScore) {
+      setModalError(
+        `La fotografía debe alcanzar al menos ${minRequiredScore}% de cumplimiento para poder aplicarla (actual: ${
+          analysis ? `${analysis.score}%` : 'evaluando...'
+        }).`
+      );
+      return;
+    }
     setProcessingCrop(true);
     setModalError(null);
     try {
@@ -1340,11 +1355,25 @@ export default function CarnetPhotoCaptureModal({
 
               {/* Footer Apply Bar */}
               <div className="bg-white p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between flex-wrap gap-3">
-                <p className="text-[11px] text-slate-500">
-                  {bgReplaced
-                    ? `Fondo reemplazado (${BG_COLOR_OPTIONS.find((o) => o.value === bgColor)?.label || bgColor}) listo para guardar.`
-                    : 'Ajusta el encuadre dentro del área visible y confirma para guardar.'}
-                </p>
+                <div className="text-[11px] space-y-0.5 min-w-0 flex-1">
+                  {analyzingPhoto ? (
+                    <p className="text-slate-500 font-medium">
+                      Evaluando cumplimiento mínimo ({minRequiredScore}%)...
+                    </p>
+                  ) : analysis && analysis.score >= minRequiredScore ? (
+                    <p className="text-emerald-700 font-semibold tabular-nums">
+                      Cumple el requisito mínimo ({analysis.score}% de {minRequiredScore}%{isAdminUser ? ' · Modo Admin' : ''}).{' '}
+                      {bgReplaced
+                        ? `Fondo ${BG_COLOR_OPTIONS.find((o) => o.value === bgColor)?.label || bgColor} listo para aplicar.`
+                        : 'Lista para aplicar.'}
+                    </p>
+                  ) : (
+                    <p className="text-rose-700 font-semibold tabular-nums">
+                      Requiere mínimo {minRequiredScore}% para habilitar el botón
+                      {isAdminUser ? ' (Admin)' : ''} — actual: {analysis ? `${analysis.score}%` : '0%'}. Ajusta el encuadre o reemplaza el fondo.
+                    </p>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-2 ml-auto">
                   <button
@@ -1356,9 +1385,14 @@ export default function CarnetPhotoCaptureModal({
                   </button>
                   <button
                     type="button"
-                    disabled={processingCrop || replacingBg}
+                    disabled={processingCrop || replacingBg || !meetsScoreRequirement}
                     onClick={handleApplyCrop}
-                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-sm cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                    title={
+                      meetsScoreRequirement
+                        ? 'Aplicar fotografía recortada'
+                        : `Se requiere mínimo ${minRequiredScore}% de cumplimiento para aplicar esta fotografía`
+                    }
+                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-sm cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
                   >
                     <Crop className="w-4 h-4" />
                     {processingCrop ? 'Procesando...' : 'Aplicar Fotografía'}

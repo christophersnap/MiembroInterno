@@ -169,6 +169,84 @@ const ACTIVE_LOGISTICA_STATES = new Set(['Pendiente', 'En Proceso', 'En Proceso 
 const ACTIVE_SOPORTE_STATES = new Set(['Pendiente', 'En revisión']);
 
 /**
+ * Construye la clave de lectura para solicitudes de carnet según el rol:
+ * - Quienes pueden solventar (admin / edit_solicitudes_carnet): leen la solicitud por su ID.
+ * - Quienes solo solicitan: registran lectura por cada cambio de estado/revisión realizado por quien solventa,
+ *   de modo que cada nueva actualización de estado vuelve a marcarse como no leída.
+ */
+export function getCarnetReadTrackingKey(params: {
+  solicitudKey: string | number | undefined | null;
+  estado?: string | null;
+  fechaRevision?: string | null;
+  canSolveCarnet: boolean;
+}): string {
+  const baseKey = String(params.solicitudKey ?? '').trim();
+  if (!baseKey) return '';
+  if (params.canSolveCarnet) {
+    return baseKey;
+  }
+  const normalizedEstado = String(params.estado || '').trim() || 'Actualizada';
+  let revStamp = '';
+  if (params.fechaRevision) {
+    const ms = new Date(params.fechaRevision).getTime();
+    if (!Number.isNaN(ms) && ms > 0) {
+      revStamp = `:${Math.floor(ms / 1000)}`;
+    }
+  }
+  return `${baseKey}:estado:${normalizedEstado}${revStamp}`;
+}
+
+/**
+ * Reglas diferenciadas de "sin leer" para Solicitudes de Carnet:
+ * - Usuarios que pueden solventar (`canSolveCarnet = true`): ven sin leer y con notificación las solicitudes activas/entrantes.
+ * - Usuarios que solo solicitan (`canSolveCarnet = false`): NO reciben notificación por solicitudes recién enviadas en "Pendiente";
+ *   reciben "sin leer" y contador de notificación únicamente cuando alguien con permiso de solventar actualiza el estado de la solicitud.
+ */
+export function isCarnetSolicitudUnread(params: {
+  userId?: string | null;
+  readSet: Set<string>;
+  solicitudKey: string | number | undefined | null;
+  estado?: string | null;
+  fechaRevision?: string | null;
+  createdAt?: string | null;
+  canSolveCarnet: boolean;
+}): boolean {
+  const { userId, readSet, solicitudKey, estado, fechaRevision, createdAt, canSolveCarnet } = params;
+  if (!userId || solicitudKey === undefined || solicitudKey === null || String(solicitudKey).trim() === '') {
+    return false;
+  }
+
+  const normalizedEstado = String(estado || '').trim();
+  const trackingKey = getCarnetReadTrackingKey({
+    solicitudKey,
+    estado: normalizedEstado,
+    fechaRevision,
+    canSolveCarnet,
+  });
+  if (!trackingKey) return false;
+
+  const compositeKey = buildSolicitudCompositeKey('carnet', trackingKey);
+  if (readSet.has(compositeKey)) {
+    return false;
+  }
+
+  if (canSolveCarnet) {
+    if (ACTIVE_CARNET_STATES.has(normalizedEstado)) return true;
+    if (createdAt) {
+      const createdMs = new Date(createdAt).getTime();
+      const initMs = getUserInitTimestamp(userId);
+      if (!Number.isNaN(createdMs) && createdMs > initMs) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Solicitantes (sin permiso para solventar): solo sin leer cuando un revisor actualizó el estado desde Pendiente
+  return normalizedEstado !== '' && normalizedEstado !== 'Pendiente';
+}
+
+/**
  * Determina si una solicitud individual debe mostrarse con tonalidad "sin leer"
  * y sumarse al contador rojo de notificaciones del usuario actual.
  */
@@ -372,10 +450,52 @@ export function useSolicitudReadTracker(userId?: string | null) {
     [userId]
   );
 
+  const isCarnetUnread = useCallback(
+    (
+      solicitudKey: string | number | undefined | null,
+      estado?: string | null,
+      fechaRevision?: string | null,
+      createdAt?: string | null,
+      canSolveCarnet = true
+    ) => {
+      return isCarnetSolicitudUnread({
+        userId,
+        readSet,
+        solicitudKey,
+        estado,
+        fechaRevision,
+        createdAt,
+        canSolveCarnet,
+      });
+    },
+    [userId, readSet]
+  );
+
+  const markCarnetAsRead = useCallback(
+    (
+      solicitudKey: string | number | undefined | null,
+      estado?: string | null,
+      fechaRevision?: string | null,
+      canSolveCarnet = true
+    ) => {
+      const key = getCarnetReadTrackingKey({
+        solicitudKey,
+        estado,
+        fechaRevision,
+        canSolveCarnet,
+      });
+      if (!key) return Promise.resolve();
+      return markSolicitudAsRead(userId, 'carnet', key);
+    },
+    [userId]
+  );
+
   return {
     readSet,
     isUnread,
+    isCarnetUnread,
     markAsRead,
+    markCarnetAsRead,
     markManyAsRead,
   };
 }

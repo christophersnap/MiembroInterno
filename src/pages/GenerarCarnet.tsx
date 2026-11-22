@@ -1843,7 +1843,7 @@ export default function GenerarCarnet() {
                     Solicitud Aceptada · {selectedSocorrista.solicitud.tipo_solicitud || 'Carnet'}
                   </h3>
                   <p className="text-[11px] text-emerald-800/80">
-                    Aprobada {selectedSocorrista.solicitud.revisado_por ? `por ${selectedSocorrista.solicitud.revisado_por}` : ''} · Al guardar el carnet cambiará a Completado
+                    Solicitud aprobada · Al guardar el carnet cambiará a Completado
                   </p>
                 </div>
                 <span className="text-[11px] text-emerald-800 font-mono tabular-nums">
