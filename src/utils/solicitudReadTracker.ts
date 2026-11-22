@@ -218,6 +218,10 @@ export function isCarnetSolicitudUnread(params: {
   }
 
   const normalizedEstado = String(estado || '').trim();
+  if (normalizedEstado === 'Cancelada' || normalizedEstado === 'Cancelado') {
+    return false;
+  }
+
   const trackingKey = getCarnetReadTrackingKey({
     solicitudKey,
     estado: normalizedEstado,

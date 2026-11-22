@@ -308,7 +308,7 @@ export default function Layout() {
                   .limit(120);
               } else {
                 carnetQuery = carnetQuery
-                  .neq('estado_solicitud', 'Pendiente')
+                  .not('estado_solicitud', 'in', '("Pendiente","Cancelada","Cancelado")')
                   .order('fecha_solicitud', { ascending: false })
                   .limit(150);
               }

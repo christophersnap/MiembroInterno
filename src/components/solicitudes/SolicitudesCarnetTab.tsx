@@ -23,15 +23,24 @@ import {
   Crop,
   ScanFace,
   AlertCircle,
+  Ban,
+  Lock,
+  Wrench,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/logger';
 import SmartStorageImage from '../common/SmartStorageImage';
 import CarnetPhotoCaptureModal, { CarnetPhotoReadyMeta } from '../common/CarnetPhotoCaptureModal';
+import CorregirSolicitudCarnetModal from './CorregirSolicitudCarnetModal';
 import {
   uploadCarnetPhotoWithFallback,
   validateSocorristaNameForCarnet,
+  isCompletedCarnetEstado,
+  isCancelledCarnetEstado,
+  isClosedCarnetEstado,
+  isAcceptedCarnetEstado,
+  cancelCarnetSolicitudSafe,
 } from '../../utils/solicitudesCarnet';
 import {
   formatFechaHoraSV,
@@ -54,6 +63,10 @@ export interface SolicitudCarnetRecord {
   id: number | string;
   socorrista_id: number;
   socorrista_nombre: string;
+  primer_nombre?: string | null;
+  segundo_nombre?: string | null;
+  primer_apellido?: string | null;
+  segundo_apellido?: string | null;
   carnet: string;
   seccional_id: number | null;
   seccional_nombre: string;
@@ -63,6 +76,11 @@ export interface SolicitudCarnetRecord {
   foto_url: string | null;
   socorrista_foto_actual?: string | null;
   observaciones: string | null;
+  nota_correccion?: string | null;
+  fecha_correccion?: string | null;
+  motivo_cancelacion?: string | null;
+  fecha_cancelacion?: string | null;
+  cancelado_por?: string | null;
   solicitado_por: string;
   solicitado_por_email: string | null;
   revisado_por: string | null;
@@ -86,15 +104,8 @@ const ESTADOS_CARNET = [
   'Completada',
   'Finalizada',
   'Rechazada',
+  'Cancelada',
 ];
-
-function isCompletedCarnetEstado(estado?: string | null): boolean {
-  return estado === 'Completado' || estado === 'Completada' || estado === 'Finalizada';
-}
-
-function isAcceptedCarnetEstado(estado?: string | null): boolean {
-  return estado === 'Aprobada' || estado === 'Aceptada';
-}
 
 function getWeekDateRange(weekStr: string): { start: Date; end: Date; label: string } | null {
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
@@ -183,6 +194,12 @@ export default function SolicitudesCarnetTab() {
   const [savingQuickActionId, setSavingQuickActionId] = useState<string | number | null>(null);
   const [applyFotoToProfile, setApplyFotoToProfile] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Observed Request Correction & Cancellation Modals (for Solicitantes)
+  const [correctRecord, setCorrectRecord] = useState<SolicitudCarnetRecord | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<SolicitudCarnetRecord | null>(null);
+  const [cancelMotivo, setCancelMotivo] = useState('');
+  const [cancelling, setCancelling] = useState(false);
 
   const allowedSecKey = allowedSeccionalIds.join(',');
   useEffect(() => {
@@ -279,6 +296,10 @@ export default function SolicitudesCarnetTab() {
               id: row.id,
               socorrista_id: Number(row.socorrista_id),
               socorrista_nombre: nombreSoc,
+              primer_nombre: soc?.primer_nombre || null,
+              segundo_nombre: soc?.segundo_nombre || null,
+              primer_apellido: soc?.primer_apellido || null,
+              segundo_apellido: soc?.segundo_apellido || null,
               carnet: soc?.carnet || 'S/C',
               seccional_id: resolvedSecId,
               seccional_nombre: resolvedSecNombre,
@@ -288,6 +309,11 @@ export default function SolicitudesCarnetTab() {
               foto_url: row.foto_url || null,
               socorrista_foto_actual: soc?.foto_url || null,
               observaciones: row.observaciones || null,
+              nota_correccion: row.nota_correccion || null,
+              fecha_correccion: row.fecha_correccion || null,
+              motivo_cancelacion: row.motivo_cancelacion || null,
+              fecha_cancelacion: row.fecha_cancelacion || null,
+              cancelado_por: row.cancelado_por || null,
               solicitado_por: row.solicitado_por || nombreSoc,
               solicitado_por_email: row.solicitado_por_email || null,
               revisado_por: row.revisado_por || null,
@@ -326,6 +352,10 @@ export default function SolicitudesCarnetTab() {
                   id: r.clave,
                   socorrista_id: Number(parsed.socorrista_id || 0),
                   socorrista_nombre: parsed.nombre_completo || `Elemento #${parsed.socorrista_id}`,
+                  primer_nombre: parsed.primer_nombre || null,
+                  segundo_nombre: parsed.segundo_nombre || null,
+                  primer_apellido: parsed.primer_apellido || null,
+                  segundo_apellido: parsed.segundo_apellido || null,
                   carnet: parsed.carnet || 'S/C',
                   seccional_id: resolvedSecId,
                   seccional_nombre: resolvedSecName,
@@ -335,6 +365,11 @@ export default function SolicitudesCarnetTab() {
                   foto_url: parsed.foto_url || null,
                   socorrista_foto_actual: null,
                   observaciones: parsed.observaciones || null,
+                  nota_correccion: parsed.nota_correccion || null,
+                  fecha_correccion: parsed.fecha_correccion || null,
+                  motivo_cancelacion: parsed.motivo_cancelacion || null,
+                  fecha_cancelacion: parsed.fecha_cancelacion || null,
+                  cancelado_por: parsed.cancelado_por || null,
                   solicitado_por: parsed.solicitado_por || parsed.nombre_completo || 'Solicitante',
                   solicitado_por_email: parsed.solicitado_por_email || null,
                   revisado_por: parsed.revisado_por || null,
@@ -391,6 +426,10 @@ export default function SolicitudesCarnetTab() {
           ...item,
           socorrista_nombre:
             item.socorrista_nombre.startsWith('Elemento #') && fullName ? fullName : item.socorrista_nombre,
+          primer_nombre: item.primer_nombre || soc.primer_nombre || null,
+          segundo_nombre: item.segundo_nombre || soc.segundo_nombre || null,
+          primer_apellido: item.primer_apellido || soc.primer_apellido || null,
+          segundo_apellido: item.segundo_apellido || soc.segundo_apellido || null,
           carnet: item.carnet === 'S/C' && soc.carnet ? soc.carnet : item.carnet,
           seccional_id: secId,
           seccional_nombre: secName,
@@ -503,6 +542,7 @@ export default function SolicitudesCarnetTab() {
       aprobadas: filteredRecords.filter((r) => isAcceptedCarnetEstado(r.estado_solicitud)).length,
       observadas: filteredRecords.filter((r) => r.estado_solicitud === 'Observada').length,
       completadas: filteredRecords.filter((r) => isCompletedCarnetEstado(r.estado_solicitud)).length,
+      canceladas: filteredRecords.filter((r) => isCancelledCarnetEstado(r.estado_solicitud)).length,
     };
   }, [filteredRecords]);
 
@@ -555,6 +595,145 @@ export default function SolicitudesCarnetTab() {
     setQuickCropRecord(rec);
     setPhotoModalMode('crop-direct');
     setShowReplacePhotoModal(true);
+  };
+
+  const isDirectRequester = (rec: SolicitudCarnetRecord) => {
+    const emailMatch =
+      user?.email &&
+      rec.solicitado_por_email &&
+      rec.solicitado_por_email.toLowerCase() === user.email.toLowerCase();
+    const nameMatch =
+      userName && rec.solicitado_por && rec.solicitado_por.toLowerCase() === userName.toLowerCase();
+    const socMatch = socorristaId && rec.socorrista_id === socorristaId;
+    return Boolean(emailMatch || nameMatch || socMatch);
+  };
+
+  const canCorrectOrCancelObservedInline = (rec: SolicitudCarnetRecord) =>
+    rec.estado_solicitud === 'Observada' && (!canEdit || isDirectRequester(rec));
+
+  const handleOpenCorrect = (rec: SolicitudCarnetRecord) => {
+    markRecordAsRead(rec);
+    setDetailRecord(null);
+    setCorrectRecord(rec);
+  };
+
+  const handleOpenCancelModal = (rec: SolicitudCarnetRecord) => {
+    markRecordAsRead(rec);
+    setCancelTarget(rec);
+    setCancelMotivo('');
+  };
+
+  const handleRecordCorrected = (updated: {
+    id: number | string;
+    socorrista_nombre: string;
+    primer_nombre: string;
+    segundo_nombre: string;
+    primer_apellido: string;
+    segundo_apellido: string;
+    foto_url: string | null;
+    nota_correccion: string | null;
+    fecha_correccion: string;
+    fecha_solicitud: string;
+  }) => {
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id === updated.id
+          ? {
+              ...r,
+              socorrista_nombre: updated.socorrista_nombre,
+              primer_nombre: updated.primer_nombre,
+              segundo_nombre: updated.segundo_nombre || null,
+              primer_apellido: updated.primer_apellido,
+              segundo_apellido: updated.segundo_apellido || null,
+              foto_url: updated.foto_url || r.foto_url,
+              socorrista_foto_actual: updated.foto_url || r.socorrista_foto_actual,
+              estado_solicitud: 'Pendiente',
+              observaciones: null,
+              revisado_por: null,
+              fecha_revision: null,
+              nota_correccion: updated.nota_correccion,
+              fecha_correccion: updated.fecha_correccion,
+              fecha_solicitud: updated.fecha_solicitud,
+            }
+          : r
+      )
+    );
+    setCorrectRecord(null);
+    setFeedbackError(null);
+    setFeedbackSuccess(
+      `Corrección guardada para ${updated.socorrista_nombre}. La solicitud fue reenviada en estado Pendiente para revisión.`
+    );
+  };
+
+  const handleConfirmCancel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancelTarget) return;
+    setCancelling(true);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const actor = userName || user?.email || 'Solicitante';
+      const res = await cancelCarnetSolicitudSafe({
+        solicitudId: cancelTarget.id,
+        source: cancelTarget.source,
+        configClave: cancelTarget.config_clave,
+        motivo_cancelacion: cancelMotivo.trim() || null,
+        cancelado_por: actor,
+      });
+
+      if (!res.ok) {
+        setFeedbackError(res.error || 'No se pudo cancelar la solicitud.');
+        return;
+      }
+
+      markRecordAsRead(cancelTarget);
+
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === cancelTarget.id
+            ? {
+                ...r,
+                estado_solicitud: 'Cancelada',
+                motivo_cancelacion: cancelMotivo.trim() || null,
+                cancelado_por: actor,
+                fecha_cancelacion: res.updatedAt,
+              }
+            : r
+        )
+      );
+
+      if (detailRecord?.id === cancelTarget.id) {
+        setDetailRecord((prev) =>
+          prev
+            ? {
+                ...prev,
+                estado_solicitud: 'Cancelada',
+                motivo_cancelacion: cancelMotivo.trim() || null,
+                cancelado_por: actor,
+                fecha_cancelacion: res.updatedAt,
+              }
+            : null
+        );
+      }
+
+      await logActivity('Canceló solicitud de carnet', 'SolicitudCarnet', String(cancelTarget.id), {
+        socorrista: cancelTarget.socorrista_nombre,
+        carnet: cancelTarget.carnet,
+        motivo_cancelacion: cancelMotivo.trim() || null,
+      });
+
+      window.dispatchEvent(new Event('solicitudes_updated'));
+      setFeedbackSuccess(
+        `La solicitud de ${cancelTarget.socorrista_nombre} fue cancelada y cerrada correctamente.`
+      );
+      setCancelTarget(null);
+      setCancelMotivo('');
+    } catch (err: any) {
+      console.error('Error cancelando solicitud de carnet:', err);
+      setFeedbackError('No se pudo cancelar la solicitud: ' + (err?.message || 'Error de red'));
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const handleQuickAccept = async (rec: SolicitudCarnetRecord) => {
@@ -962,6 +1141,8 @@ export default function SolicitudesCarnetTab() {
         'Detalle Motivo': r.detalles_motivo || '',
         Estado: r.estado_solicitud,
         Observaciones: r.observaciones || '',
+        'Nota Corrección': r.nota_correccion || '',
+        'Motivo Cancelación': r.motivo_cancelacion || '',
         'Solicitado Por': r.solicitado_por,
         'Correo Solicitante': r.solicitado_por_email || '',
         'Fecha Revisión': r.fecha_revision ? formatFechaSV(r.fecha_revision) : '',
@@ -980,6 +1161,8 @@ export default function SolicitudesCarnetTab() {
         { wch: 24 },
         { wch: 18 },
         { wch: 30 },
+        { wch: 26 },
+        { wch: 26 },
         { wch: 24 },
         { wch: 24 },
         { wch: 15 },
@@ -1014,7 +1197,10 @@ export default function SolicitudesCarnetTab() {
       case 'Completado':
       case 'Completada':
       case 'Finalizada':
-        return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+        return 'bg-emerald-800 text-emerald-50 border-emerald-900/50';
+      case 'Cancelada':
+      case 'Cancelado':
+        return 'bg-slate-700 text-slate-100 border-slate-800/70';
       case 'Rechazada':
         return 'bg-rose-50 text-rose-800 border-rose-200';
       default:
@@ -1134,7 +1320,7 @@ export default function SolicitudesCarnetTab() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Filtradas</p>
@@ -1175,13 +1361,23 @@ export default function SolicitudesCarnetTab() {
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-emerald-200/70 shadow-xs flex items-center justify-between col-span-2 lg:col-span-1">
+        <div className="bg-slate-100/90 p-4 rounded-2xl border border-emerald-300/70 shadow-xs flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Completados</p>
-            <p className="text-2xl font-black tabular-nums text-emerald-800 mt-0.5">{stats.completadas}</p>
+            <p className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Completados</p>
+            <p className="text-2xl font-black tabular-nums text-emerald-900 mt-0.5">{stats.completadas}</p>
           </div>
-          <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-emerald-800 text-emerald-50 flex items-center justify-center">
             <CheckCircle2 className="w-4 h-4" />
+          </div>
+        </div>
+
+        <div className="bg-slate-200/80 p-4 rounded-2xl border border-slate-300 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider">Canceladas</p>
+            <p className="text-2xl font-black tabular-nums text-slate-800 mt-0.5">{stats.canceladas}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-slate-700 text-slate-100 flex items-center justify-center">
+            <Ban className="w-4 h-4" />
           </div>
         </div>
       </div>
@@ -1345,17 +1541,28 @@ export default function SolicitudesCarnetTab() {
                 {filteredRecords.map((rec) => {
                   const hasAnyPhoto = Boolean(rec.foto_url || rec.socorrista_foto_actual);
                   const rowUnread = isRecordUnread(rec);
+                  const isCompleted = isCompletedCarnetEstado(rec.estado_solicitud);
+                  const isCancelled = isCancelledCarnetEstado(rec.estado_solicitud);
+                  const isClosed = isCompleted || isCancelled;
+                  const showRequesterObservedActions = canCorrectOrCancelObservedInline(rec);
+
+                  const rowClasses = isCancelled
+                    ? 'bg-slate-200/85 hover:bg-slate-300/75 border-l-4 border-l-slate-700'
+                    : isCompleted
+                    ? rowUnread
+                      ? 'bg-slate-200/75 hover:bg-slate-200/95 border-l-4 border-l-rose-500 cursor-pointer'
+                      : 'bg-slate-200/65 hover:bg-slate-200/90 border-l-4 border-l-emerald-800/80'
+                    : rowUnread
+                    ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                    : 'bg-white hover:bg-slate-50/70 border-l-4 border-l-transparent';
+
                   return (
                     <tr
                       key={String(rec.id)}
                       onClick={() => {
                         if (rowUnread) markRecordAsRead(rec);
                       }}
-                      className={`transition-colors ${
-                        rowUnread
-                          ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
-                          : 'bg-white hover:bg-slate-50/70 border-l-4 border-l-transparent'
-                      }`}
+                      className={`transition-colors ${rowClasses}`}
                     >
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <div className="flex items-center gap-3">
@@ -1377,7 +1584,11 @@ export default function SolicitudesCarnetTab() {
                                 }
                               }}
                               title={hasAnyPhoto ? 'Clic para ampliar fotografía del elemento' : 'Sin fotografía registrada'}
-                              className="w-11 h-11 rounded-full bg-slate-200/80 border-2 border-slate-200 hover:border-emerald-400 overflow-hidden flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                              className={`w-11 h-11 rounded-full bg-slate-200/80 border-2 overflow-hidden flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                                isClosed
+                                  ? 'border-slate-400 opacity-80 grayscale-[40%] hover:opacity-100'
+                                  : 'border-slate-200 hover:border-emerald-400'
+                              }`}
                             >
                               <SmartStorageImage
                                 src={rec.foto_url}
@@ -1396,7 +1607,15 @@ export default function SolicitudesCarnetTab() {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className={`text-xs ${rowUnread ? 'font-black text-slate-950' : 'font-bold text-slate-900'}`}>
+                              <p
+                                className={`text-xs ${
+                                  isClosed
+                                    ? 'font-bold text-slate-700'
+                                    : rowUnread
+                                    ? 'font-black text-slate-950'
+                                    : 'font-bold text-slate-900'
+                                }`}
+                              >
                                 {rec.socorrista_nombre}
                               </p>
                               {rowUnread && (
@@ -1405,27 +1624,44 @@ export default function SolicitudesCarnetTab() {
                                 </span>
                               )}
                             </div>
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold mt-0.5">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold mt-0.5 ${
+                                isClosed
+                                  ? 'bg-slate-300/75 text-slate-700'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
                               {rec.carnet}
                             </span>
-                            {(() => {
-                              const nameCheck = validateSocorristaNameForCarnet({ nombre_completo: rec.socorrista_nombre });
-                              if (nameCheck.isValid) return null;
-                              return (
-                                <p className="text-[10px] font-semibold text-rose-700 flex items-center gap-1 mt-1">
-                                  <AlertTriangle className="w-3 h-3 shrink-0" />
-                                  <span>
-                                    Nombre con símbolos ({nameCheck.invalidSymbols.map((s) => `"${s}"`).join(', ')})
-                                  </span>
-                                </p>
-                              );
-                            })()}
+                            {!isClosed &&
+                              (() => {
+                                const nameCheck = validateSocorristaNameForCarnet({
+                                  nombre_completo: rec.socorrista_nombre,
+                                });
+                                if (nameCheck.isValid) return null;
+                                return (
+                                  <p className="text-[10px] font-semibold text-rose-700 flex items-center gap-1 mt-1">
+                                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                                    <span>
+                                      Nombre con símbolos ({nameCheck.invalidSymbols.map((s) => `"${s}"`).join(', ')})
+                                    </span>
+                                  </p>
+                                );
+                              })()}
                           </div>
                         </div>
                       </td>
 
                       <td className="px-4 py-3.5">
-                        <div className={`text-xs flex items-center gap-1 ${rowUnread ? 'font-bold text-slate-900' : 'font-semibold text-slate-800'}`}>
+                        <div
+                          className={`text-xs flex items-center gap-1 ${
+                            isClosed
+                              ? 'font-semibold text-slate-600'
+                              : rowUnread
+                              ? 'font-bold text-slate-900'
+                              : 'font-semibold text-slate-800'
+                          }`}
+                        >
                           <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           {rec.seccional_nombre}
                         </div>
@@ -1437,7 +1673,15 @@ export default function SolicitudesCarnetTab() {
 
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`text-xs ${rowUnread ? 'font-bold text-slate-950' : 'font-semibold text-slate-900'}`}>
+                          <span
+                            className={`text-xs ${
+                              isClosed
+                                ? 'font-semibold text-slate-700'
+                                : rowUnread
+                                ? 'font-bold text-slate-950'
+                                : 'font-semibold text-slate-900'
+                            }`}
+                          >
                             {rec.tipo_solicitud}
                           </span>
                           {rec.es_lote && (
@@ -1453,9 +1697,29 @@ export default function SolicitudesCarnetTab() {
                             {rec.observaciones}
                           </span>
                         )}
+                        {rec.nota_correccion && !rec.observaciones && !isClosed && (
+                          <span className="text-[11px] text-emerald-700 inline-flex items-center gap-1 mt-0.5 max-w-xs truncate">
+                            <CheckCircle2 className="w-3 h-3 shrink-0" />
+                            Corrección: {rec.nota_correccion}
+                          </span>
+                        )}
+                        {isCancelled && rec.motivo_cancelacion && (
+                          <span className="text-[11px] text-slate-600 inline-flex items-center gap-1 mt-0.5 max-w-xs truncate">
+                            <Ban className="w-3 h-3 shrink-0" />
+                            {rec.motivo_cancelacion}
+                          </span>
+                        )}
                       </td>
 
-                      <td className={`px-4 py-3.5 whitespace-nowrap text-xs ${rowUnread ? 'font-semibold text-slate-800' : 'text-slate-600'}`}>
+                      <td
+                        className={`px-4 py-3.5 whitespace-nowrap text-xs ${
+                          isClosed
+                            ? 'text-slate-600'
+                            : rowUnread
+                            ? 'font-semibold text-slate-800'
+                            : 'text-slate-600'
+                        }`}
+                      >
                         {formatFechaSV(rec.fecha_solicitud, {
                           day: '2-digit',
                           month: 'short',
@@ -1464,13 +1728,25 @@ export default function SolicitudesCarnetTab() {
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${getEstadoBadge(
-                            rec.estado_solicitud
-                          )}`}
-                        >
-                          {rec.estado_solicitud}
-                        </span>
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${getEstadoBadge(
+                              rec.estado_solicitud
+                            )}`}
+                          >
+                            {isCancelled ? (
+                              <Ban className="w-3 h-3 shrink-0" />
+                            ) : isCompleted ? (
+                              <Lock className="w-3 h-3 shrink-0" />
+                            ) : null}
+                            {rec.estado_solicitud}
+                          </span>
+                          {isClosed && (
+                            <span className="text-[10px] font-semibold text-slate-500 pl-1">
+                              {isCancelled ? 'Cerrada · Cancelada' : 'Cerrada · Completada'}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
@@ -1481,13 +1757,46 @@ export default function SolicitudesCarnetTab() {
                               e.stopPropagation();
                               handleOpenDetail(rec);
                             }}
-                            className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                            className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                              isClosed
+                                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/70'
+                                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
                             title="Ver detalle y evaluación de fotografía"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {canEdit && hasAnyPhoto && (
+                          {showRequesterObservedActions && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCorrect(rec);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                                title="Corregir nombre del elemento y/o subir nueva fotografía para reenviar"
+                              >
+                                <Wrench className="w-3.5 h-3.5" />
+                                Corregir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCancelModal(rec);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-300 hover:border-rose-300 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                                title="Cancelar definitivamente esta solicitud"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                                Cancelar
+                              </button>
+                            </>
+                          )}
+
+                          {canEdit && hasAnyPhoto && !isClosed && (
                             <button
                               type="button"
                               disabled={savingQuickActionId === rec.id}
@@ -1504,7 +1813,7 @@ export default function SolicitudesCarnetTab() {
 
                           {canEdit &&
                             !isAcceptedCarnetEstado(rec.estado_solicitud) &&
-                            !isCompletedCarnetEstado(rec.estado_solicitud) && (
+                            !isClosed && (
                               <button
                                 type="button"
                                 disabled={savingQuickActionId === rec.id}
@@ -1527,7 +1836,11 @@ export default function SolicitudesCarnetTab() {
                                 e.stopPropagation();
                                 handleOpenEdit(rec);
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                                isClosed
+                                  ? 'bg-slate-300/70 hover:bg-slate-300 text-slate-700 border-slate-400/70'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200/70'
+                              }`}
                               title="Gestionar estado, fotografía u observaciones"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
@@ -1562,7 +1875,43 @@ export default function SolicitudesCarnetTab() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+              {/* Closed Banner for Completed / Cancelled Requests */}
+              {isClosedCarnetEstado(detailRecord.estado_solicitud) && (
+                <div
+                  className={`p-3 rounded-2xl border flex items-start gap-2.5 text-xs ${
+                    isCancelledCarnetEstado(detailRecord.estado_solicitud)
+                      ? 'bg-slate-800 text-slate-100 border-slate-700'
+                      : 'bg-emerald-900 text-emerald-50 border-emerald-800'
+                  }`}
+                >
+                  {isCancelledCarnetEstado(detailRecord.estado_solicitud) ? (
+                    <Ban className="w-4 h-4 text-slate-300 shrink-0 mt-0.5" />
+                  ) : (
+                    <Lock className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-0.5">
+                    <p className="font-bold">
+                      {isCancelledCarnetEstado(detailRecord.estado_solicitud)
+                        ? 'Solicitud Cerrada — Cancelada'
+                        : 'Solicitud Cerrada — Trámite Completado'}
+                    </p>
+                    {isCancelledCarnetEstado(detailRecord.estado_solicitud) &&
+                      detailRecord.motivo_cancelacion && (
+                        <p className="text-[11px] text-slate-300">
+                          Motivo: {detailRecord.motivo_cancelacion}
+                        </p>
+                      )}
+                    {isCancelledCarnetEstado(detailRecord.estado_solicitud) &&
+                      detailRecord.fecha_cancelacion && (
+                        <p className="text-[11px] text-slate-400">
+                          Cancelada el {formatFechaHoraSV(detailRecord.fecha_cancelacion)}
+                        </p>
+                      )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-start gap-4">
                 <div className="flex flex-col items-center gap-1.5 shrink-0">
                   <button
@@ -1611,22 +1960,29 @@ export default function SolicitudesCarnetTab() {
                     <p className="text-slate-600">Motivo: <strong>{detailRecord.motivo}</strong></p>
                   )}
                   <div className="pt-1 flex flex-wrap items-center gap-1.5">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getEstadoBadge(detailRecord.estado_solicitud)}`}>
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getEstadoBadge(detailRecord.estado_solicitud)}`}>
+                      {isCancelledCarnetEstado(detailRecord.estado_solicitud) ? (
+                        <Ban className="w-3 h-3" />
+                      ) : isCompletedCarnetEstado(detailRecord.estado_solicitud) ? (
+                        <Lock className="w-3 h-3" />
+                      ) : null}
                       {detailRecord.estado_solicitud}
                     </span>
-                    {canEdit && (detailRecord.foto_url || detailRecord.socorrista_foto_actual) && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDirectCrop(detailRecord)}
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 cursor-pointer"
-                      >
-                        <Crop className="w-3 h-3" />
-                        Recortar / Fondo
-                      </button>
-                    )}
+                    {canEdit &&
+                      !isClosedCarnetEstado(detailRecord.estado_solicitud) &&
+                      (detailRecord.foto_url || detailRecord.socorrista_foto_actual) && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDirectCrop(detailRecord)}
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 cursor-pointer"
+                        >
+                          <Crop className="w-3 h-3" />
+                          Recortar / Fondo
+                        </button>
+                      )}
                     {canEdit &&
                       !isAcceptedCarnetEstado(detailRecord.estado_solicitud) &&
-                      !isCompletedCarnetEstado(detailRecord.estado_solicitud) && (
+                      !isClosedCarnetEstado(detailRecord.estado_solicitud) && (
                         <button
                           type="button"
                           disabled={savingQuickActionId === detailRecord.id}
@@ -1717,6 +2073,45 @@ export default function SolicitudesCarnetTab() {
                 <div className="p-3 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-900">
                   <span className="font-bold block mb-0.5">Observaciones logísticas:</span>
                   {detailRecord.observaciones}
+                </div>
+              )}
+
+              {detailRecord.estado_solicitud === 'Observada' && (
+                <div className="p-3.5 rounded-2xl bg-orange-50/90 border border-orange-300 space-y-2.5">
+                  <p className="text-xs font-bold text-orange-950">
+                    Acciones disponibles para esta solicitud observada:
+                  </p>
+                  <p className="text-[11px] text-orange-900/90 leading-snug">
+                    Puedes corregir el nombre según DUI y/o cargar una nueva fotografía para reenviar la solicitud, o cancelarla si ya no se requiere.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCorrect(detailRecord)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      Corregir Nombre / Foto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCancelModal(detailRecord)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-300 hover:border-rose-300 text-xs font-bold cursor-pointer transition-colors"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                      Cancelar Solicitud
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {detailRecord.nota_correccion && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                  <span className="font-bold block mb-0.5">
+                    Nota de corrección enviada
+                    {detailRecord.fecha_correccion ? ` (${formatFechaHoraSV(detailRecord.fecha_correccion)})` : ''}:
+                  </span>
+                  {detailRecord.nota_correccion}
                 </div>
               )}
 
@@ -1856,6 +2251,7 @@ export default function SolicitudesCarnetTab() {
                       { value: 'Observada', label: 'Observada' },
                       { value: 'Aprobada', label: 'Aceptar (Generar Carnet)' },
                       { value: 'Completado', label: 'Completado' },
+                      { value: 'Cancelada', label: 'Cancelada' },
                       { value: 'Rechazada', label: 'Rechazada' },
                     ] as const
                   ).map((quick) => (
@@ -1999,6 +2395,83 @@ export default function SolicitudesCarnetTab() {
             : 'Actualizar Fotografía de Solicitud'
         }
       />
+
+      {/* Modal de Corrección de Solicitud Observada (Nombre según DUI + Fotografía) */}
+      <CorregirSolicitudCarnetModal
+        record={correctRecord}
+        onClose={() => setCorrectRecord(null)}
+        onCorrected={handleRecordCorrected}
+      />
+
+      {/* Modal de Confirmación de Cancelación de Solicitud (Sin window.confirm) */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-[55] bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmCancel}
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200"
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0">
+                  <Ban className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Cancelar Solicitud de Carnet</h3>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    {cancelTarget.socorrista_nombre} ({cancelTarget.carnet})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelling}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-200/70 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3 rounded-2xl bg-slate-100 border border-slate-200 text-xs text-slate-700 leading-relaxed">
+                Esta solicitud quedará marcada como <strong>Cancelada</strong> y se mostrará cerrada en el historial. Si más adelante se requiere emitir el carnet, podrás crear una nueva solicitud sin bloqueo.
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Motivo de cancelación <span className="text-slate-400 font-normal">(Opcional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={cancelMotivo}
+                  onChange={(e) => setCancelMotivo(e.target.value)}
+                  placeholder="Ej. El elemento tramitará su carnet más adelante / Solicitud duplicada..."
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelling}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                Volver
+              </button>
+              <button
+                type="submit"
+                disabled={cancelling}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                {cancelling ? 'Cancelando...' : 'Confirmar Cancelación'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

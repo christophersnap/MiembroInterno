@@ -210,7 +210,25 @@ export const UNBLOCKED_CARNET_STATES = [
   'Completada',
   'Finalizada',
   'Rechazada',
+  'Cancelada',
+  'Cancelado',
 ] as const;
+
+export function isCompletedCarnetEstado(estado?: string | null): boolean {
+  return estado === 'Completado' || estado === 'Completada' || estado === 'Finalizada';
+}
+
+export function isCancelledCarnetEstado(estado?: string | null): boolean {
+  return estado === 'Cancelada' || estado === 'Cancelado';
+}
+
+export function isClosedCarnetEstado(estado?: string | null): boolean {
+  return isCompletedCarnetEstado(estado) || isCancelledCarnetEstado(estado);
+}
+
+export function isAcceptedCarnetEstado(estado?: string | null): boolean {
+  return estado === 'Aprobada' || estado === 'Aceptada';
+}
 
 export interface CarnetRequestStatusInfo {
   id: string | number;
@@ -527,4 +545,386 @@ export async function resubmitCarnetSolicitudSafe(
   // Fallback seguro si RLS aún no permite UPDATE a usuarios públicos sobre filas Observadas/Rechazadas:
   // crear nueva solicitud para que el cambio quede registrado de inmediato.
   return createCarnetSolicitudSafe(input);
+}
+
+export interface CorrectObservedCarnetInput {
+  solicitudId: number | string;
+  source: 'db' | 'config';
+  configClave?: string;
+  socorristaId: number;
+  primer_nombre: string;
+  segundo_nombre?: string | null;
+  primer_apellido: string;
+  segundo_apellido?: string | null;
+  foto_url?: string | null;
+  foto_analisis?: {
+    status: string;
+    score: number;
+    summary: string;
+    checked_at?: string;
+  } | null;
+  foto_fondo_reemplazado?: boolean | null;
+  nota_correccion?: string | null;
+}
+
+export async function correctObservedCarnetSolicitudSafe(
+  input: CorrectObservedCarnetInput
+): Promise<{ ok: boolean; via: 'rpc' | 'db' | 'config'; fullName: string; updatedAt: string; error?: string }> {
+  const primerNombre = String(input.primer_nombre || '').trim().toUpperCase();
+  const segundoNombre = String(input.segundo_nombre || '').trim().toUpperCase();
+  const primerApellido = String(input.primer_apellido || '').trim().toUpperCase();
+  const segundoApellido = String(input.segundo_apellido || '').trim().toUpperCase();
+
+  const nameValidation = validateSocorristaNameForCarnet({
+    primer_nombre: primerNombre,
+    segundo_nombre: segundoNombre || null,
+    primer_apellido: primerApellido,
+    segundo_apellido: segundoApellido || null,
+  });
+
+  const nowIso = getElSalvadorIsoTimestamp();
+
+  if (!nameValidation.isValid) {
+    return {
+      ok: false,
+      via: 'db',
+      fullName: nameValidation.fullName,
+      updatedAt: nowIso,
+      error: nameValidation.message,
+    };
+  }
+
+  const fullName = [primerNombre, segundoNombre, primerApellido, segundoApellido]
+    .filter(Boolean)
+    .join(' ');
+  const notaLimpia = input.nota_correccion ? input.nota_correccion.trim() : null;
+  const fotoAnalisisPayload = input.foto_analisis
+    ? {
+        ...input.foto_analisis,
+        checked_at: input.foto_analisis.checked_at || nowIso,
+      }
+    : null;
+
+  if (input.source === 'config' && input.configClave) {
+    try {
+      // Actualizar perfil de socorrista si hay permisos
+      if (input.socorristaId > 0) {
+        const socPatch: Record<string, any> = {
+          primer_nombre: primerNombre,
+          segundo_nombre: segundoNombre || null,
+          primer_apellido: primerApellido,
+          segundo_apellido: segundoApellido || null,
+        };
+        if (input.foto_url) socPatch.foto_url = input.foto_url;
+        await supabase.from('socorristas').update(socPatch).eq('id', input.socorristaId);
+      }
+
+      const { data: existing } = await supabase
+        .from('configuracion')
+        .select('valor')
+        .eq('clave', input.configClave)
+        .maybeSingle();
+      const currentObj = existing?.valor ? JSON.parse(existing.valor) : {};
+      const { error: cfgErr } = await supabase
+        .from('configuracion')
+        .update({
+          valor: JSON.stringify({
+            ...currentObj,
+            nombre_completo: fullName,
+            primer_nombre: primerNombre,
+            segundo_nombre: segundoNombre || null,
+            primer_apellido: primerApellido,
+            segundo_apellido: segundoApellido || null,
+            foto_url: input.foto_url ?? currentObj.foto_url ?? null,
+            estado_solicitud: 'Pendiente',
+            observaciones: null,
+            revisado_por: null,
+            fecha_revision: null,
+            nota_correccion: notaLimpia,
+            fecha_correccion: nowIso,
+            fecha_solicitud: nowIso,
+            updated_at: nowIso,
+          }),
+        })
+        .eq('clave', input.configClave);
+
+      if (!cfgErr) {
+        return { ok: true, via: 'config', fullName, updatedAt: nowIso };
+      }
+      return { ok: false, via: 'config', fullName, updatedAt: nowIso, error: cfgErr.message };
+    } catch (e: any) {
+      return { ok: false, via: 'config', fullName, updatedAt: nowIso, error: e?.message || 'Error al guardar corrección.' };
+    }
+  }
+
+  // 1. Intentar vía RPC SECURITY DEFINER (Migración 56 — permite corregir nombre y foto sin requerir edit_socorristas)
+  const numericId = Number(input.solicitudId);
+  if (!Number.isNaN(numericId) && numericId > 0) {
+    try {
+      const { error: rpcErr } = await supabase.rpc('corregir_solicitud_carnet', {
+        p_solicitud_id: numericId,
+        p_primer_nombre: primerNombre,
+        p_segundo_nombre: segundoNombre || null,
+        p_primer_apellido: primerApellido,
+        p_segundo_apellido: segundoApellido || null,
+        p_foto_url: input.foto_url ?? null,
+        p_foto_analisis: fotoAnalisisPayload,
+        p_foto_fondo_reemplazado:
+          typeof input.foto_fondo_reemplazado === 'boolean' ? input.foto_fondo_reemplazado : null,
+        p_nota_correccion: notaLimpia,
+      });
+
+      if (!rpcErr) {
+        return { ok: true, via: 'rpc', fullName, updatedAt: nowIso };
+      }
+
+      const rpcMsg = (rpcErr.message || '').toLowerCase();
+      const isMissingRpc =
+        rpcErr.code === '42883' ||
+        rpcErr.code === 'PGRST202' ||
+        rpcMsg.includes('could not find the function') ||
+        rpcMsg.includes('does not exist');
+
+      if (!isMissingRpc) {
+        return { ok: false, via: 'rpc', fullName, updatedAt: nowIso, error: rpcErr.message };
+      }
+    } catch {
+      // Continuar al fallback directo de tablas
+    }
+  }
+
+  // 2. Fallback directo sobre tablas si Migración 56 aún no ha sido ejecutada
+  try {
+    if (input.socorristaId > 0) {
+      const socPatch: Record<string, any> = {
+        primer_nombre: primerNombre,
+        segundo_nombre: segundoNombre || null,
+        primer_apellido: primerApellido,
+        segundo_apellido: segundoApellido || null,
+      };
+      if (input.foto_url) {
+        socPatch.foto_url = input.foto_url;
+      }
+      const { error: socErr } = await supabase
+        .from('socorristas')
+        .update(socPatch)
+        .eq('id', input.socorristaId);
+
+      if (socErr) {
+        return {
+          ok: false,
+          via: 'db',
+          fullName,
+          updatedAt: nowIso,
+          error:
+            'No se pudo actualizar el nombre del elemento en la base de datos. Ejecuta la migración 56 en Supabase para habilitar la corrección directa por solicitantes.',
+        };
+      }
+    }
+
+    const fullUpdate: Record<string, any> = {
+      estado_solicitud: 'Pendiente',
+      observaciones: null,
+      revisado_por: null,
+      fecha_revision: null,
+      fecha_solicitud: nowIso,
+      updated_at: nowIso,
+      nota_correccion: notaLimpia,
+      fecha_correccion: nowIso,
+    };
+    if (input.foto_url) {
+      fullUpdate.foto_url = input.foto_url;
+    }
+    if (fotoAnalisisPayload) {
+      fullUpdate.foto_analisis = fotoAnalisisPayload;
+    }
+    if (typeof input.foto_fondo_reemplazado === 'boolean') {
+      fullUpdate.foto_fondo_reemplazado = input.foto_fondo_reemplazado;
+    }
+
+    const { data: updRows, error: err1 } = await supabase
+      .from('solicitudes_carnet')
+      .update(fullUpdate)
+      .eq('id', input.solicitudId)
+      .select('id');
+
+    if (!err1 && Array.isArray(updRows) && updRows.length > 0) {
+      return { ok: true, via: 'db', fullName, updatedAt: nowIso };
+    }
+
+    // Fallback sin columnas nuevas de migración 56 / 53
+    const baseUpdate: Record<string, any> = {
+      estado_solicitud: 'Pendiente',
+      observaciones: null,
+      revisado_por: null,
+      fecha_revision: null,
+      fecha_solicitud: nowIso,
+    };
+    if (input.foto_url) {
+      baseUpdate.foto_url = input.foto_url;
+    }
+    const { data: retryRows, error: err2 } = await supabase
+      .from('solicitudes_carnet')
+      .update(baseUpdate)
+      .eq('id', input.solicitudId)
+      .select('id');
+
+    if (!err2 && Array.isArray(retryRows) && retryRows.length > 0) {
+      return { ok: true, via: 'db', fullName, updatedAt: nowIso };
+    }
+
+    return {
+      ok: false,
+      via: 'db',
+      fullName,
+      updatedAt: nowIso,
+      error: err2?.message || err1?.message || 'No se pudo reenviar la solicitud corregida.',
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      via: 'db',
+      fullName,
+      updatedAt: nowIso,
+      error: e?.message || 'Error de red al guardar la corrección.',
+    };
+  }
+}
+
+export interface CancelCarnetSolicitudInput {
+  solicitudId: number | string;
+  source: 'db' | 'config';
+  configClave?: string;
+  motivo_cancelacion?: string | null;
+  cancelado_por?: string | null;
+}
+
+export async function cancelCarnetSolicitudSafe(
+  input: CancelCarnetSolicitudInput
+): Promise<{ ok: boolean; via: 'rpc' | 'db' | 'config'; updatedAt: string; error?: string }> {
+  const nowIso = getElSalvadorIsoTimestamp();
+  const motivoLimpio = input.motivo_cancelacion ? input.motivo_cancelacion.trim() : null;
+  const canceladoPor = input.cancelado_por ? input.cancelado_por.trim() : null;
+
+  if (input.source === 'config' && input.configClave) {
+    try {
+      const { data: existing } = await supabase
+        .from('configuracion')
+        .select('valor')
+        .eq('clave', input.configClave)
+        .maybeSingle();
+      const currentObj = existing?.valor ? JSON.parse(existing.valor) : {};
+      const { error: cfgErr } = await supabase
+        .from('configuracion')
+        .update({
+          valor: JSON.stringify({
+            ...currentObj,
+            estado_solicitud: 'Cancelada',
+            motivo_cancelacion: motivoLimpio,
+            cancelado_por: canceladoPor,
+            fecha_cancelacion: nowIso,
+            updated_at: nowIso,
+          }),
+        })
+        .eq('clave', input.configClave);
+
+      if (!cfgErr) {
+        return { ok: true, via: 'config', updatedAt: nowIso };
+      }
+      return { ok: false, via: 'config', updatedAt: nowIso, error: cfgErr.message };
+    } catch (e: any) {
+      return { ok: false, via: 'config', updatedAt: nowIso, error: e?.message || 'Error al cancelar la solicitud.' };
+    }
+  }
+
+  // 1. Intentar vía RPC SECURITY DEFINER (Migración 56)
+  const numericId = Number(input.solicitudId);
+  if (!Number.isNaN(numericId) && numericId > 0) {
+    try {
+      const { error: rpcErr } = await supabase.rpc('cancelar_solicitud_carnet', {
+        p_solicitud_id: numericId,
+        p_motivo: motivoLimpio,
+        p_cancelado_por: canceladoPor,
+      });
+
+      if (!rpcErr) {
+        return { ok: true, via: 'rpc', updatedAt: nowIso };
+      }
+
+      const rpcMsg = (rpcErr.message || '').toLowerCase();
+      const isMissingRpc =
+        rpcErr.code === '42883' ||
+        rpcErr.code === 'PGRST202' ||
+        rpcMsg.includes('could not find the function') ||
+        rpcMsg.includes('does not exist');
+
+      if (!isMissingRpc) {
+        return { ok: false, via: 'rpc', updatedAt: nowIso, error: rpcErr.message };
+      }
+    } catch {
+      // Continuar al fallback directo
+    }
+  }
+
+  // 2. Fallback directo sobre tabla
+  try {
+    const fullPayload: Record<string, any> = {
+      estado_solicitud: 'Cancelada',
+      motivo_cancelacion: motivoLimpio,
+      cancelado_por: canceladoPor,
+      fecha_cancelacion: nowIso,
+      updated_at: nowIso,
+    };
+
+    const { data: rows1, error: err1 } = await supabase
+      .from('solicitudes_carnet')
+      .update(fullPayload)
+      .eq('id', input.solicitudId)
+      .select('id');
+
+    if (!err1 && Array.isArray(rows1) && rows1.length > 0) {
+      return { ok: true, via: 'db', updatedAt: nowIso };
+    }
+
+    // Fallback sin columnas nuevas de migración 56
+    const { data: rows2, error: err2 } = await supabase
+      .from('solicitudes_carnet')
+      .update({
+        estado_solicitud: 'Cancelada',
+        observaciones: motivoLimpio
+          ? `Cancelada por solicitante: ${motivoLimpio}`
+          : 'Cancelada por solicitante',
+      })
+      .eq('id', input.solicitudId)
+      .select('id');
+
+    if (!err2 && Array.isArray(rows2) && rows2.length > 0) {
+      return { ok: true, via: 'db', updatedAt: nowIso };
+    }
+
+    const errMsg = err2?.message || err1?.message || '';
+    if (err2?.code === '23514' || err1?.code === '23514' || errMsg.toLowerCase().includes('check constraint')) {
+      return {
+        ok: false,
+        via: 'db',
+        updatedAt: nowIso,
+        error:
+          'La base de datos aún no tiene habilitado el estado "Cancelada". Ejecuta el archivo 56_correccion_cancelacion_solicitudes_carnet.sql en Supabase.',
+      };
+    }
+
+    return {
+      ok: false,
+      via: 'db',
+      updatedAt: nowIso,
+      error: errMsg || 'No se pudo cancelar la solicitud.',
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      via: 'db',
+      updatedAt: nowIso,
+      error: e?.message || 'Error de red al cancelar la solicitud.',
+    };
+  }
 }
