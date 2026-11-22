@@ -19,6 +19,11 @@ const GUIDE_RULES = [
     desc: 'Tipo pasaporte, con el rostro completamente visible.',
   },
   {
+    icon: User,
+    title: 'Peinado y cabello despejado',
+    desc: 'Peinado ordenado; el cabello no debe tapar ni cubrir el rostro ni los ojos.',
+  },
+  {
     icon: Shirt,
     title: 'Vestimenta formal',
     desc: 'Camisa de botones blanca.',

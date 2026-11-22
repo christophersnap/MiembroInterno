@@ -20,14 +20,22 @@ import {
   ZoomIn,
   ImagePlus,
   CheckCheck,
+  Crop,
+  ScanFace,
+  AlertCircle,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/logger';
 import SmartStorageImage from '../common/SmartStorageImage';
-import CarnetPhotoCaptureModal from '../common/CarnetPhotoCaptureModal';
+import CarnetPhotoCaptureModal, { CarnetPhotoReadyMeta } from '../common/CarnetPhotoCaptureModal';
 import { uploadCarnetPhotoWithFallback } from '../../utils/solicitudesCarnet';
 import { useSolicitudReadTracker, publishModuleUnreadCount } from '../../utils/solicitudReadTracker';
+import {
+  analyzeCarnetPhoto,
+  loadImageSafelyAsDataUrl,
+  CarnetPhotoAnalysis,
+} from '../../utils/carnetPhotoAnalyzer';
 
 export interface SolicitudCarnetRecord {
   id: number | string;
@@ -61,10 +69,19 @@ const ESTADOS_CARNET = [
   'Aprobada',
   'En impresión',
   'Lista para entrega',
+  'Completado',
   'Completada',
   'Finalizada',
   'Rechazada',
 ];
+
+function isCompletedCarnetEstado(estado?: string | null): boolean {
+  return estado === 'Completado' || estado === 'Completada' || estado === 'Finalizada';
+}
+
+function isAcceptedCarnetEstado(estado?: string | null): boolean {
+  return estado === 'Aprobada' || estado === 'Aceptada';
+}
 
 function getWeekDateRange(weekStr: string): { start: Date; end: Date; label: string } | null {
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
@@ -114,6 +131,7 @@ export default function SolicitudesCarnetTab() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
   // Smart Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -130,8 +148,10 @@ export default function SolicitudesCarnetTab() {
     return `${now.getFullYear()}-W${String(Math.max(1, Math.min(53, weekNum))).padStart(2, '0')}`;
   });
 
-  // Detail, Zoom & Edit Modals
+  // Detail, Zoom, Crop & Edit Modals
   const [detailRecord, setDetailRecord] = useState<SolicitudCarnetRecord | null>(null);
+  const [detailAnalysis, setDetailAnalysis] = useState<CarnetPhotoAnalysis | null>(null);
+  const [analyzingDetail, setAnalyzingDetail] = useState(false);
   const [zoomPhotoInfo, setZoomPhotoInfo] = useState<{
     src?: string | null;
     fallbackSrc?: string | null;
@@ -143,7 +163,11 @@ export default function SolicitudesCarnetTab() {
   const [editObservaciones, setEditObservaciones] = useState('');
   const [editReplacementFile, setEditReplacementFile] = useState<File | null>(null);
   const [editReplacementPreview, setEditReplacementPreview] = useState<string | null>(null);
+  const [editPhotoMeta, setEditPhotoMeta] = useState<CarnetPhotoReadyMeta | null>(null);
   const [showReplacePhotoModal, setShowReplacePhotoModal] = useState(false);
+  const [photoModalMode, setPhotoModalMode] = useState<'new' | 'crop-edit' | 'crop-direct'>('new');
+  const [quickCropRecord, setQuickCropRecord] = useState<SolicitudCarnetRecord | null>(null);
+  const [savingQuickActionId, setSavingQuickActionId] = useState<string | number | null>(null);
   const [applyFotoToProfile, setApplyFotoToProfile] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -151,6 +175,41 @@ export default function SolicitudesCarnetTab() {
   useEffect(() => {
     loadData();
   }, [scope, allowedSecKey, effectiveSeccionalId, userSeccionalNombre]);
+
+  // Refrescar automáticamente cuando se genera un carnet o se actualiza una solicitud en otra vista
+  useEffect(() => {
+    const onUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('solicitudes_updated', onUpdated);
+    return () => window.removeEventListener('solicitudes_updated', onUpdated);
+  }, []);
+
+  // Analizar automáticamente la fotografía en el modal de detalle (100% local, sin tokens de IA)
+  useEffect(() => {
+    let cancelled = false;
+    if (!detailRecord || (!detailRecord.foto_url && !detailRecord.socorrista_foto_actual)) {
+      setDetailAnalysis(null);
+      setAnalyzingDetail(false);
+      return;
+    }
+    setAnalyzingDetail(true);
+    setDetailAnalysis(null);
+    loadImageSafelyAsDataUrl(detailRecord.foto_url, detailRecord.socorrista_foto_actual)
+      .then((safeUrl) => (safeUrl ? analyzeCarnetPhoto(safeUrl) : null))
+      .then((res) => {
+        if (!cancelled) setDetailAnalysis(res);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailAnalysis(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyzingDetail(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailRecord?.id, detailRecord?.foto_url, detailRecord?.socorrista_foto_actual]);
 
   const loadData = async () => {
     setLoading(true);
@@ -428,8 +487,9 @@ export default function SolicitudesCarnetTab() {
     return {
       total: filteredRecords.length,
       pendientes: filteredRecords.filter((r) => r.estado_solicitud === 'Pendiente' || r.estado_solicitud === 'En revisión').length,
+      aprobadas: filteredRecords.filter((r) => isAcceptedCarnetEstado(r.estado_solicitud)).length,
       observadas: filteredRecords.filter((r) => r.estado_solicitud === 'Observada').length,
-      completadas: filteredRecords.filter((r) => r.estado_solicitud === 'Completada' || r.estado_solicitud === 'Finalizada' || r.estado_solicitud === 'Aprobada').length,
+      completadas: filteredRecords.filter((r) => isCompletedCarnetEstado(r.estado_solicitud)).length,
     };
   }, [filteredRecords]);
 
@@ -461,12 +521,235 @@ export default function SolicitudesCarnetTab() {
     setEditObservaciones(rec.observaciones || '');
     setEditReplacementFile(null);
     setEditReplacementPreview(null);
+    setEditPhotoMeta(null);
     setApplyFotoToProfile(Boolean(rec.foto_url && rec.foto_url !== rec.socorrista_foto_actual));
   };
 
-  const handleReplacementPhotoReady = (file: File, previewUrl: string) => {
+  const handleOpenDirectCrop = (rec: SolicitudCarnetRecord) => {
+    markAsRead('carnet', rec.id);
+    setQuickCropRecord(rec);
+    setPhotoModalMode('crop-direct');
+    setShowReplacePhotoModal(true);
+  };
+
+  const handleQuickAccept = async (rec: SolicitudCarnetRecord) => {
+    if (!canEdit) return;
+    markAsRead('carnet', rec.id);
+    setSavingQuickActionId(rec.id);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const revisadoPor = userName || user?.email || 'Administración';
+      const fechaRev = new Date().toISOString();
+
+      if (rec.source === 'db') {
+        const { error } = await supabase
+          .from('solicitudes_carnet')
+          .update({
+            estado_solicitud: 'Aprobada',
+            revisado_por: revisadoPor,
+            fecha_revision: fechaRev,
+            updated_at: fechaRev,
+          })
+          .eq('id', rec.id);
+
+        if (error) {
+          const { error: fallbackErr } = await supabase
+            .from('solicitudes_carnet')
+            .update({ estado_solicitud: 'Aprobada' })
+            .eq('id', rec.id);
+          if (fallbackErr) throw fallbackErr;
+        }
+      } else if (rec.config_clave) {
+        const { data: existing } = await supabase
+          .from('configuracion')
+          .select('valor')
+          .eq('clave', rec.config_clave)
+          .maybeSingle();
+        const currentObj = existing?.valor ? JSON.parse(existing.valor) : {};
+        await supabase
+          .from('configuracion')
+          .update({
+            valor: JSON.stringify({
+              ...currentObj,
+              estado_solicitud: 'Aprobada',
+              revisado_por: revisadoPor,
+              fecha_revision: fechaRev,
+            }),
+          })
+          .eq('clave', rec.config_clave);
+      }
+
+      // Sincronizar fotografía aprobada con el perfil si existe
+      if (rec.foto_url && rec.socorrista_id) {
+        await supabase
+          .from('socorristas')
+          .update({ foto_url: rec.foto_url })
+          .eq('id', rec.socorrista_id);
+      }
+
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === rec.id
+            ? {
+                ...r,
+                estado_solicitud: 'Aprobada',
+                revisado_por: revisadoPor,
+                fecha_revision: fechaRev,
+                socorrista_foto_actual: rec.foto_url || r.socorrista_foto_actual,
+              }
+            : r
+        )
+      );
+      if (detailRecord?.id === rec.id) {
+        setDetailRecord((prev) =>
+          prev
+            ? {
+                ...prev,
+                estado_solicitud: 'Aprobada',
+                revisado_por: revisadoPor,
+                fecha_revision: fechaRev,
+              }
+            : null
+        );
+      }
+
+      await logActivity('Aceptó solicitud de carnet para emisión', 'SolicitudCarnet', String(rec.id), {
+        socorrista: rec.socorrista_nombre,
+        carnet: rec.carnet,
+        estado: 'Aprobada',
+      });
+
+      window.dispatchEvent(new Event('solicitudes_updated'));
+      setFeedbackSuccess(
+        `Solicitud de ${rec.socorrista_nombre} aceptada. Ahora está disponible en Generar Carnet.`
+      );
+    } catch (err: any) {
+      console.error('Error aceptando solicitud de carnet:', err);
+      setFeedbackError('No se pudo aceptar la solicitud: ' + (err?.message || 'Error de red'));
+    } finally {
+      setSavingQuickActionId(null);
+    }
+  };
+
+  const handleReplacementPhotoReady = async (
+    file: File,
+    previewUrl: string,
+    meta?: CarnetPhotoReadyMeta
+  ) => {
+    if (photoModalMode === 'crop-direct' && quickCropRecord) {
+      const target = quickCropRecord;
+      setSavingQuickActionId(target.id);
+      setFeedbackError(null);
+      setFeedbackSuccess(null);
+      try {
+        const uploadedUrl = await uploadCarnetPhotoWithFallback(
+          file,
+          `${target.carnet || `SOC_${target.socorrista_id}`}_recorte`
+        );
+        const nowIso = new Date().toISOString();
+        const revisadoPor = userName || user?.email || 'Administración';
+
+        if (target.source === 'db') {
+          const fullPayload: any = {
+            foto_url: uploadedUrl,
+            updated_at: nowIso,
+            revisado_por: revisadoPor,
+            fecha_revision: nowIso,
+          };
+          if (meta?.analysis) {
+            fullPayload.foto_analisis = {
+              status: meta.analysis.status,
+              score: meta.analysis.score,
+              summary: meta.analysis.summary,
+              checked_at: nowIso,
+            };
+          }
+          if (typeof meta?.backgroundReplaced === 'boolean') {
+            fullPayload.foto_fondo_reemplazado = meta.backgroundReplaced;
+          }
+
+          const { error } = await supabase
+            .from('solicitudes_carnet')
+            .update(fullPayload)
+            .eq('id', target.id);
+
+          if (error) {
+            const { error: fallbackErr } = await supabase
+              .from('solicitudes_carnet')
+              .update({ foto_url: uploadedUrl })
+              .eq('id', target.id);
+            if (fallbackErr) throw fallbackErr;
+          }
+        } else if (target.config_clave) {
+          const { data: existing } = await supabase
+            .from('configuracion')
+            .select('valor')
+            .eq('clave', target.config_clave)
+            .maybeSingle();
+          const currentObj = existing?.valor ? JSON.parse(existing.valor) : {};
+          await supabase
+            .from('configuracion')
+            .update({
+              valor: JSON.stringify({
+                ...currentObj,
+                foto_url: uploadedUrl,
+                revisado_por: revisadoPor,
+                fecha_revision: nowIso,
+              }),
+            })
+            .eq('clave', target.config_clave);
+        }
+
+        // Si ya estaba aprobada, mantener sincronizada la foto en el perfil del socorrista
+        if (isAcceptedCarnetEstado(target.estado_solicitud) && target.socorrista_id) {
+          await supabase
+            .from('socorristas')
+            .update({ foto_url: uploadedUrl })
+            .eq('id', target.socorrista_id);
+        }
+
+        setRecords((prev) =>
+          prev.map((r) =>
+            r.id === target.id
+              ? {
+                  ...r,
+                  foto_url: uploadedUrl,
+                  socorrista_foto_actual: isAcceptedCarnetEstado(target.estado_solicitud)
+                    ? uploadedUrl
+                    : r.socorrista_foto_actual,
+                }
+              : r
+          )
+        );
+        if (detailRecord?.id === target.id) {
+          setDetailRecord((prev) => (prev ? { ...prev, foto_url: uploadedUrl } : null));
+        }
+
+        await logActivity('Recortó/editó fotografía de solicitud de carnet', 'SolicitudCarnet', String(target.id), {
+          socorrista: target.socorrista_nombre,
+          carnet: target.carnet,
+          fondo_reemplazado: Boolean(meta?.backgroundReplaced),
+          evaluacion: meta?.analysis?.status || null,
+        });
+
+        window.dispatchEvent(new Event('solicitudes_updated'));
+        setFeedbackSuccess(
+          `Fotografía de ${target.socorrista_nombre} recortada y guardada correctamente.`
+        );
+      } catch (err: any) {
+        console.error('Error guardando recorte directo:', err);
+        setFeedbackError('No se pudo guardar el recorte de fotografía: ' + (err?.message || 'Error de red'));
+      } finally {
+        setSavingQuickActionId(null);
+        setQuickCropRecord(null);
+      }
+      return;
+    }
+
     setEditReplacementFile(file);
     setEditReplacementPreview(previewUrl);
+    setEditPhotoMeta(meta || null);
     setApplyFotoToProfile(true);
   };
 
@@ -475,6 +758,7 @@ export default function SolicitudesCarnetTab() {
     if (!editRecord || !canEdit) return;
     setSavingEdit(true);
     setFeedbackError(null);
+    setFeedbackSuccess(null);
     try {
       const revisadoPor = userName || user?.email || 'Administración';
       const fechaRev = new Date().toISOString();
@@ -487,6 +771,8 @@ export default function SolicitudesCarnetTab() {
         );
       }
 
+      let savedEstado = editEstado;
+
       if (editRecord.source === 'db') {
         const payload: any = {
           estado_solicitud: editEstado,
@@ -498,22 +784,65 @@ export default function SolicitudesCarnetTab() {
         if (updatedFotoUrl !== editRecord.foto_url) {
           payload.foto_url = updatedFotoUrl;
         }
+        if (editPhotoMeta?.analysis) {
+          payload.foto_analisis = {
+            status: editPhotoMeta.analysis.status,
+            score: editPhotoMeta.analysis.score,
+            summary: editPhotoMeta.analysis.summary,
+            checked_at: fechaRev,
+          };
+        }
+        if (typeof editPhotoMeta?.backgroundReplaced === 'boolean') {
+          payload.foto_fondo_reemplazado = editPhotoMeta.backgroundReplaced;
+        }
+        if (editEstado === 'Completado' || editEstado === 'Completada') {
+          payload.fecha_completado = fechaRev;
+          payload.completado_por = revisadoPor;
+        }
 
-        const { error } = await supabase
+        let { error } = await supabase
           .from('solicitudes_carnet')
           .update(payload)
           .eq('id', editRecord.id);
 
         if (error) {
-          const minimalPayload: any = { estado_solicitud: editEstado };
+          // Fallback sin columnas nuevas de migración 53
+          const basePayload: any = {
+            estado_solicitud: editEstado,
+            observaciones: editObservaciones.trim() || null,
+            revisado_por: revisadoPor,
+            fecha_revision: fechaRev,
+          };
           if (updatedFotoUrl !== editRecord.foto_url) {
-            minimalPayload.foto_url = updatedFotoUrl;
+            basePayload.foto_url = updatedFotoUrl;
           }
-          const { error: fallbackErr } = await supabase
+          const retry1 = await supabase
             .from('solicitudes_carnet')
-            .update(minimalPayload)
+            .update(basePayload)
             .eq('id', editRecord.id);
-          if (fallbackErr) throw fallbackErr;
+          error = retry1.error;
+
+          // Si el CHECK constraint previo aún no acepta 'Completado', usar 'Completada' sin fallar
+          if (error && editEstado === 'Completado') {
+            savedEstado = 'Completada';
+            const retry2 = await supabase
+              .from('solicitudes_carnet')
+              .update({ ...basePayload, estado_solicitud: 'Completada' })
+              .eq('id', editRecord.id);
+            error = retry2.error;
+          }
+
+          if (error) {
+            const minimalPayload: any = { estado_solicitud: savedEstado };
+            if (updatedFotoUrl !== editRecord.foto_url) {
+              minimalPayload.foto_url = updatedFotoUrl;
+            }
+            const { error: fallbackErr } = await supabase
+              .from('solicitudes_carnet')
+              .update(minimalPayload)
+              .eq('id', editRecord.id);
+            if (fallbackErr) throw fallbackErr;
+          }
         }
       } else if (editRecord.config_clave) {
         const { data: existing } = await supabase
@@ -529,7 +858,7 @@ export default function SolicitudesCarnetTab() {
             valor: JSON.stringify({
               ...currentObj,
               foto_url: updatedFotoUrl,
-              estado_solicitud: editEstado,
+              estado_solicitud: savedEstado,
               observaciones: editObservaciones.trim() || null,
               revisado_por: revisadoPor,
               fecha_revision: fechaRev,
@@ -538,8 +867,8 @@ export default function SolicitudesCarnetTab() {
           .eq('clave', editRecord.config_clave);
       }
 
-      // Optionally sync submitted photo to socorrista profile when approved/completed
-      if (applyFotoToProfile && updatedFotoUrl && editRecord.socorrista_id) {
+      // Sincronizar foto al perfil si se marcó o al aceptar la solicitud
+      if ((applyFotoToProfile || isAcceptedCarnetEstado(savedEstado)) && updatedFotoUrl && editRecord.socorrista_id) {
         await supabase
           .from('socorristas')
           .update({ foto_url: updatedFotoUrl })
@@ -552,26 +881,35 @@ export default function SolicitudesCarnetTab() {
             ? {
                 ...r,
                 foto_url: updatedFotoUrl,
-                estado_solicitud: editEstado,
+                estado_solicitud: savedEstado,
                 observaciones: editObservaciones.trim() || null,
                 revisado_por: revisadoPor,
                 fecha_revision: fechaRev,
                 socorrista_foto_actual:
-                  applyFotoToProfile && updatedFotoUrl ? updatedFotoUrl : r.socorrista_foto_actual,
+                  (applyFotoToProfile || isAcceptedCarnetEstado(savedEstado)) && updatedFotoUrl
+                    ? updatedFotoUrl
+                    : r.socorrista_foto_actual,
               }
             : r
         )
       );
 
-      await logActivity(`Actualizó solicitud de carnet a ${editEstado}`, 'SolicitudCarnet', String(editRecord.id), {
+      await logActivity(`Actualizó solicitud de carnet a ${savedEstado}`, 'SolicitudCarnet', String(editRecord.id), {
         socorrista: editRecord.socorrista_nombre,
         carnet: editRecord.carnet,
-        estado: editEstado,
+        estado: savedEstado,
         observaciones: editObservaciones,
         foto_actualizada: Boolean(editReplacementFile),
       });
 
       window.dispatchEvent(new Event('solicitudes_updated'));
+      if (isAcceptedCarnetEstado(savedEstado)) {
+        setFeedbackSuccess(
+          `Solicitud de ${editRecord.socorrista_nombre} aceptada. Ya está visible en Generar Carnet.`
+        );
+      } else {
+        setFeedbackSuccess(`Solicitud de ${editRecord.socorrista_nombre} actualizada a ${savedEstado}.`);
+      }
       setEditRecord(null);
     } catch (err: any) {
       console.error('Error updating carnet request:', err);
@@ -647,8 +985,10 @@ export default function SolicitudesCarnetTab() {
       case 'Observada':
         return 'bg-orange-50 text-orange-800 border-orange-300';
       case 'Aprobada':
+      case 'Aceptada':
       case 'Lista para entrega':
         return 'bg-indigo-50 text-indigo-800 border-indigo-200';
+      case 'Completado':
       case 'Completada':
       case 'Finalizada':
         return 'bg-emerald-50 text-emerald-800 border-emerald-200';
@@ -679,6 +1019,22 @@ export default function SolicitudesCarnetTab() {
             type="button"
             onClick={() => setFeedbackError(null)}
             className="text-rose-500 hover:text-rose-800 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {feedbackSuccess && (
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-900 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{feedbackSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackSuccess(null)}
+            className="text-emerald-600 hover:text-emerald-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -747,11 +1103,11 @@ export default function SolicitudesCarnetTab() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Filtradas</p>
-            <p className="text-2xl font-black text-slate-900 mt-0.5">{stats.total}</p>
+            <p className="text-2xl font-black tabular-nums text-slate-900 mt-0.5">{stats.total}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
             <IdCard className="w-4 h-4" />
@@ -761,27 +1117,37 @@ export default function SolicitudesCarnetTab() {
         <div className="bg-white p-4 rounded-2xl border border-amber-200/70 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">Pendientes</p>
-            <p className="text-2xl font-black text-amber-800 mt-0.5">{stats.pendientes}</p>
+            <p className="text-2xl font-black tabular-nums text-amber-800 mt-0.5">{stats.pendientes}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
             <Clock className="w-4 h-4" />
           </div>
         </div>
 
+        <div className="bg-white p-4 rounded-2xl border border-indigo-200/70 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider">Aceptadas</p>
+            <p className="text-2xl font-black tabular-nums text-indigo-800 mt-0.5">{stats.aprobadas}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <Check className="w-4 h-4" />
+          </div>
+        </div>
+
         <div className="bg-white p-4 rounded-2xl border border-orange-200/70 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[11px] font-semibold text-orange-700 uppercase tracking-wider">Observadas</p>
-            <p className="text-2xl font-black text-orange-800 mt-0.5">{stats.observadas}</p>
+            <p className="text-2xl font-black tabular-nums text-orange-800 mt-0.5">{stats.observadas}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center">
             <AlertTriangle className="w-4 h-4" />
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-emerald-200/70 shadow-xs flex items-center justify-between">
+        <div className="bg-white p-4 rounded-2xl border border-emerald-200/70 shadow-xs flex items-center justify-between col-span-2 lg:col-span-1">
           <div>
-            <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Completadas</p>
-            <p className="text-2xl font-black text-emerald-800 mt-0.5">{stats.completadas}</p>
+            <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Completados</p>
+            <p className="text-2xl font-black tabular-nums text-emerald-800 mt-0.5">{stats.completadas}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <CheckCircle2 className="w-4 h-4" />
@@ -1073,10 +1439,44 @@ export default function SolicitudesCarnetTab() {
                               handleOpenDetail(rec);
                             }}
                             className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
-                            title="Ver detalle y fotografía"
+                            title="Ver detalle y evaluación de fotografía"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+
+                          {canEdit && hasAnyPhoto && (
+                            <button
+                              type="button"
+                              disabled={savingQuickActionId === rec.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenDirectCrop(rec);
+                              }}
+                              className="p-2 rounded-xl text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 transition-colors cursor-pointer disabled:opacity-50"
+                              title="Recortar fotografía, analizar calidad o reemplazar fondo"
+                            >
+                              <Crop className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {canEdit &&
+                            !isAcceptedCarnetEstado(rec.estado_solicitud) &&
+                            !isCompletedCarnetEstado(rec.estado_solicitud) && (
+                              <button
+                                type="button"
+                                disabled={savingQuickActionId === rec.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleQuickAccept(rec);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                                title="Aceptar solicitud para habilitarla en Generar Carnet"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                {savingQuickActionId === rec.id ? '...' : 'Aceptar'}
+                              </button>
+                            )}
+
                           {canEdit && (
                             <button
                               type="button"
@@ -1084,7 +1484,7 @@ export default function SolicitudesCarnetTab() {
                                 e.stopPropagation();
                                 handleOpenEdit(rec);
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-xs font-semibold transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                               title="Gestionar estado, fotografía u observaciones"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
@@ -1171,6 +1571,29 @@ export default function SolicitudesCarnetTab() {
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getEstadoBadge(detailRecord.estado_solicitud)}`}>
                       {detailRecord.estado_solicitud}
                     </span>
+                    {canEdit && (detailRecord.foto_url || detailRecord.socorrista_foto_actual) && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDirectCrop(detailRecord)}
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 cursor-pointer"
+                      >
+                        <Crop className="w-3 h-3" />
+                        Recortar / Fondo
+                      </button>
+                    )}
+                    {canEdit &&
+                      !isAcceptedCarnetEstado(detailRecord.estado_solicitud) &&
+                      !isCompletedCarnetEstado(detailRecord.estado_solicitud) && (
+                        <button
+                          type="button"
+                          disabled={savingQuickActionId === detailRecord.id}
+                          onClick={() => handleQuickAccept(detailRecord)}
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 cursor-pointer"
+                        >
+                          <Check className="w-3 h-3" />
+                          Aceptar
+                        </button>
+                      )}
                     {canEdit && (
                       <button
                         type="button"
@@ -1188,6 +1611,57 @@ export default function SolicitudesCarnetTab() {
                   </div>
                 </div>
               </div>
+
+              {/* Evaluación automática local de la fotografía */}
+              {(analyzingDetail || detailAnalysis) && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <ScanFace className="w-3.5 h-3.5 text-emerald-700" />
+                      Análisis de Fotografía
+                    </span>
+                    {detailAnalysis && (
+                      <span
+                        className={`text-xs font-bold tabular-nums ${
+                          detailAnalysis.status === 'aceptable'
+                            ? 'text-emerald-700'
+                            : detailAnalysis.status === 'observaciones'
+                            ? 'text-amber-700'
+                            : 'text-rose-700'
+                        }`}
+                      >
+                        {detailAnalysis.status === 'aceptable'
+                          ? 'Aceptable'
+                          : detailAnalysis.status === 'observaciones'
+                          ? 'Con observaciones'
+                          : 'No recomendable'}{' '}
+                        · {detailAnalysis.score}%
+                      </span>
+                    )}
+                  </div>
+                  {analyzingDetail ? (
+                    <p className="text-[11px] text-slate-500">Evaluando lineamientos de carnet...</p>
+                  ) : detailAnalysis ? (
+                    <>
+                      <p className="text-[11px] text-slate-600">{detailAnalysis.summary}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                        {detailAnalysis.checks.map((chk) => (
+                          <div key={chk.id} className="flex items-start gap-1.5 text-[11px]">
+                            {chk.status === 'pass' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                            ) : chk.status === 'warn' ? (
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                            )}
+                            <span className="text-slate-700 leading-tight">{chk.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              )}
 
               {detailRecord.detalles_motivo && (
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
@@ -1296,14 +1770,32 @@ export default function SolicitudesCarnetTab() {
                       ? 'Fotografía actual en perfil'
                       : 'Sin fotografía válida'}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowReplacePhotoModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-bold shadow-2xs cursor-pointer transition-colors"
-                  >
-                    <ImagePlus className="w-3.5 h-3.5 text-emerald-700" />
-                    {editRecord.foto_url || editReplacementPreview ? 'Reemplazar Fotografía' : 'Subir Fotografía'}
-                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(editReplacementPreview || editRecord.foto_url || editRecord.socorrista_foto_actual) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoModalMode('crop-edit');
+                          setShowReplacePhotoModal(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold shadow-2xs cursor-pointer transition-colors"
+                      >
+                        <Crop className="w-3.5 h-3.5" />
+                        Recortar / Fondo
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPhotoModalMode('new');
+                        setShowReplacePhotoModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-bold shadow-2xs cursor-pointer transition-colors"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5 text-emerald-700" />
+                      {editRecord.foto_url || editReplacementPreview ? 'Subir / Tomar Nueva' : 'Subir Fotografía'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1321,21 +1813,36 @@ export default function SolicitudesCarnetTab() {
                   ))}
                 </select>
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {(['Pendiente', 'Observada', 'Completada'] as const).map((quick) => (
+                  {(
+                    [
+                      { value: 'Pendiente', label: 'Pendiente' },
+                      { value: 'Observada', label: 'Observada' },
+                      { value: 'Aprobada', label: 'Aceptar (Generar Carnet)' },
+                      { value: 'Completado', label: 'Completado' },
+                      { value: 'Rechazada', label: 'Rechazada' },
+                    ] as const
+                  ).map((quick) => (
                     <button
-                      key={quick}
+                      key={quick.value}
                       type="button"
-                      onClick={() => setEditEstado(quick)}
+                      onClick={() => setEditEstado(quick.value)}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
-                        editEstado === quick
-                          ? 'bg-slate-900 text-white border-slate-900'
+                        editEstado === quick.value
+                          ? quick.value === 'Aprobada'
+                            ? 'bg-indigo-700 text-white border-indigo-700'
+                            : 'bg-slate-900 text-white border-slate-900'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      {quick}
+                      {quick.label}
                     </button>
                   ))}
                 </div>
+                {isAcceptedCarnetEstado(editEstado) && (
+                  <p className="text-[11px] text-indigo-700 font-medium mt-1.5">
+                    Al guardar como Aprobada, esta solicitud quedará habilitada en Generar Carnet.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1428,11 +1935,30 @@ export default function SolicitudesCarnetTab() {
 
       <CarnetPhotoCaptureModal
         isOpen={showReplacePhotoModal}
-        onClose={() => setShowReplacePhotoModal(false)}
+        onClose={() => {
+          setShowReplacePhotoModal(false);
+          setQuickCropRecord(null);
+        }}
         onPhotoReady={handleReplacementPhotoReady}
+        initialImageSrc={
+          photoModalMode === 'crop-direct'
+            ? quickCropRecord?.foto_url || quickCropRecord?.socorrista_foto_actual || null
+            : photoModalMode === 'crop-edit'
+            ? editReplacementPreview || editRecord?.foto_url || editRecord?.socorrista_foto_actual || null
+            : null
+        }
+        initialFallbackSrc={
+          photoModalMode === 'crop-direct'
+            ? quickCropRecord?.socorrista_foto_actual || null
+            : photoModalMode === 'crop-edit'
+            ? editRecord?.socorrista_foto_actual || null
+            : null
+        }
         title={
-          editRecord
-            ? `Actualizar Fotografía — ${editRecord.socorrista_nombre}`
+          photoModalMode === 'crop-direct' && quickCropRecord
+            ? `Recortar y Editar Fotografía — ${quickCropRecord.socorrista_nombre}`
+            : editRecord
+            ? `Fotografía de Solicitud — ${editRecord.socorrista_nombre}`
             : 'Actualizar Fotografía de Solicitud'
         }
       />

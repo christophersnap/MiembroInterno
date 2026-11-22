@@ -52,12 +52,14 @@ export const BLOCKING_CARNET_STATES = [
   'Pendiente',
   'En revisión',
   'Aprobada',
+  'Aceptada',
   'En impresión',
   'Lista para entrega',
 ] as const;
 
 export const UNBLOCKED_CARNET_STATES = [
   'Observada',
+  'Completado',
   'Completada',
   'Finalizada',
   'Rechazada',

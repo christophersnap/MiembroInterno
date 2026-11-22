@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye, Sliders, Shield, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { Search, Upload, Save, Image as ImageIcon, Settings, Trash2, CheckCircle2, Plus, Type as TypeIcon, XCircle, Eye, Sliders, Shield, ChevronDown, ChevronUp, Check, Crop, AlertCircle, X } from 'lucide-react';
 import * as QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
@@ -9,8 +9,11 @@ import { getApiUrl } from '../lib/api';
 
 import WatermarkImage from '../components/WatermarkImage';
 import SmartStorageImage from '../components/common/SmartStorageImage';
+import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
+import { uploadCarnetPhotoWithFallback } from '../utils/solicitudesCarnet';
+import { loadImageSafelyAsDataUrl } from '../utils/carnetPhotoAnalyzer';
 
 export const VERIFICATION_FIELD_DEFINITIONS = [
   { id: 'foto', label: 'Fotografía Oficial' },
@@ -155,7 +158,10 @@ export default function GenerarCarnet() {
   const [presets, setPresets] = useState<any[]>([]);
   const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
   const [templatesExpanded, setTemplatesExpanded] = useState<boolean>(true);
-  const [previewSolicitudPhoto, setPreviewSolicitudPhoto] = useState<boolean>(false);
+  const [previewSolicitudPhoto, setPreviewSolicitudPhoto] = useState<boolean>(true);
+  const [showPhotoEditModal, setShowPhotoEditModal] = useState<boolean>(false);
+  const [updatingPhoto, setUpdatingPhoto] = useState<boolean>(false);
+  const [saveFeedback, setSaveFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [approvingPhoto, setApprovingPhoto] = useState<boolean>(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | number | null>(null);
   const [savedFonts, setSavedFonts] = useState<any[]>([]);
@@ -167,35 +173,36 @@ export default function GenerarCarnet() {
   useEffect(() => {
     fetchData();
     loadSupabaseData();
+    const onSolicitudesUpdated = () => {
+      fetchData();
+    };
+    window.addEventListener('solicitudes_updated', onSolicitudesUpdated);
+    return () => window.removeEventListener('solicitudes_updated', onSolicitudesUpdated);
   }, []);
 
   const fetchData = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('socorristas')
-        .select('*, seccionales(nombre)')
-        .eq('estado', 'Activo');
-      
-      if (error) throw error;
-
-      let solicitudesMap: Record<number, any> = {};
+      // 1. Consultar EXCLUSIVAMENTE solicitudes ACEPTADAS ('Aprobada' / 'Aceptada')
+      const solicitudesMap: Record<number, any> = {};
       try {
         const { data: solData } = await supabase
           .from('solicitudes_carnet')
-          .select('socorrista_id, fecha_solicitud, estado_solicitud, tipo_solicitud, foto_url, motivo')
-          .eq('estado_solicitud', 'Pendiente')
+          .select('id, socorrista_id, fecha_solicitud, estado_solicitud, tipo_solicitud, foto_url, motivo, observaciones, revisado_por, fecha_revision')
+          .in('estado_solicitud', ['Aprobada', 'Aceptada'])
           .order('fecha_solicitud', { ascending: false });
-        
+
         if (solData) {
-          solData.forEach(sol => {
-            if (!solicitudesMap[sol.socorrista_id]) {
-              solicitudesMap[sol.socorrista_id] = sol; // Get latest pendiente
+          solData.forEach((sol) => {
+            const sid = Number(sol.socorrista_id);
+            if (sid && !solicitudesMap[sid]) {
+              solicitudesMap[sid] = sol;
             }
           });
         }
-      } catch(e) {}
+      } catch (e) {}
 
-      // Fallback: consultar solicitudes guardadas en configuracion
+      // Fallback: consultar solicitudes aceptadas guardadas en configuracion
       try {
         const { data: backupSols } = await supabase
           .from('configuracion')
@@ -203,26 +210,46 @@ export default function GenerarCarnet() {
           .like('clave', 'solicitud_carnet_%');
 
         if (backupSols) {
-          backupSols.forEach(row => {
+          backupSols.forEach((row) => {
             try {
               const sol = JSON.parse(row.valor);
-              if (sol && sol.socorrista_id && sol.estado_solicitud === 'Pendiente' && !solicitudesMap[sol.socorrista_id]) {
-                solicitudesMap[sol.socorrista_id] = { ...sol, backup_key: row.clave };
+              const sid = Number(sol?.socorrista_id || 0);
+              const isAccepted = sol?.estado_solicitud === 'Aprobada' || sol?.estado_solicitud === 'Aceptada';
+              if (sid && isAccepted && !solicitudesMap[sid]) {
+                solicitudesMap[sid] = { ...sol, backup_key: row.clave };
               }
             } catch (err) {}
           });
         }
       } catch (backupErr) {}
-      
-      // Consultar cargos secundarios de respaldo en configuracion
+
+      const acceptedSocorristaIds = Object.keys(solicitudesMap)
+        .map((idStr) => Number(idStr))
+        .filter((id) => !Number.isNaN(id) && id > 0);
+
+      // Si no hay solicitudes aceptadas, no mostrar socorristas en Generar Carnet
+      if (acceptedSocorristaIds.length === 0) {
+        setSocorristas([]);
+        setSelectedSocorrista(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('socorristas')
+        .select('*, seccionales(nombre)')
+        .in('id', acceptedSocorristaIds);
+
+      if (error) throw error;
+
+      // Consultar cargos secundarios de respaldo en configuracion solo para los aceptados
       const cargosBackupMap: Record<number, string[]> = {};
       try {
         const { data: cargosBackupRows } = await supabase
           .from('configuracion')
           .select('clave, valor')
-          .like('clave', 'socorrista_cargos_%');
+          .in('clave', acceptedSocorristaIds.map((id) => `socorrista_cargos_${id}`));
         if (cargosBackupRows) {
-          cargosBackupRows.forEach(row => {
+          cargosBackupRows.forEach((row) => {
             const idStr = row.clave.replace('socorrista_cargos_', '');
             const idNum = Number(idStr);
             if (!Number.isNaN(idNum) && row.valor) {
@@ -232,73 +259,37 @@ export default function GenerarCarnet() {
         }
       } catch (e) {}
 
-      const mappedData = (data || []).map(s => {
-        let seccional_nombre = 'N/A';
-        if (s.seccionales) {
-          if (Array.isArray(s.seccionales)) {
-            seccional_nombre = s.seccionales[0]?.nombre || 'N/A';
-          } else {
-            seccional_nombre = (s.seccionales as any).nombre || 'N/A';
+      const mappedData = (data || [])
+        .filter((s) => Boolean(solicitudesMap[Number(s.id)]))
+        .map((s) => {
+          let seccional_nombre = 'N/A';
+          if (s.seccionales) {
+            if (Array.isArray(s.seccionales)) {
+              seccional_nombre = s.seccionales[0]?.nombre || 'N/A';
+            } else {
+              seccional_nombre = (s.seccionales as any).nombre || 'N/A';
+            }
           }
-        }
-        const directSecundarios = parseCargosSecundarios(s.cargos_secundarios);
-        return {
-          ...s,
-          seccional_nombre,
-          cargos_secundarios: directSecundarios.length > 0 ? directSecundarios : (cargosBackupMap[s.id] || []),
-          solicitud: solicitudesMap[s.id] || null
-        };
-      });
+          const directSecundarios = parseCargosSecundarios(s.cargos_secundarios);
+          const acceptedSol = solicitudesMap[Number(s.id)];
+          return {
+            ...s,
+            seccional_nombre,
+            cargos_secundarios: directSecundarios.length > 0 ? directSecundarios : (cargosBackupMap[s.id] || []),
+            foto_url: s.foto_url || acceptedSol?.foto_url || null,
+            solicitud: acceptedSol,
+          };
+        });
 
-      // Si algún socorrista no tiene foto_url en Supabase, verificar si SQLite la tiene
-      try {
-        const apiRes = await fetch(getApiUrl('/api/socorristas'));
-        if (apiRes.ok) {
-          const apiSocorristas = await apiRes.json();
-          if (Array.isArray(apiSocorristas)) {
-            const apiMap = new Map(apiSocorristas.map((as: any) => [as.id, as]));
-            mappedData.forEach(s => {
-              const match: any = apiMap.get(s.id);
-              if (match && !s.foto_url && match.foto_url) {
-                s.foto_url = match.foto_url;
-              }
-            });
-          }
-        }
-      } catch (apiErr) {}
-      
-      // Check if carnet_generado_url is missing from the first record (meaning column doesn't exist)
-      if (mappedData.length > 0 && mappedData[0].carnet_generado_url === undefined) {
-        try {
-          const { data: logsData } = await supabase
-            .from('activity_logs')
-            .select('entity_id, details')
-            .eq('entity_type', 'Socorrista')
-            .eq('action', 'Generó carnet');
-            
-          if (logsData) {
-            // Map logs to socorristas
-            const generatedMap = new Map();
-            logsData.forEach(log => {
-              if (log.details && log.details.url) {
-                generatedMap.set(log.entity_id, log.details.url);
-              }
-            });
-            
-            mappedData.forEach(s => {
-              if (generatedMap.has(String(s.id))) {
-                s.carnet_generado_url = generatedMap.get(String(s.id));
-              }
-            });
-          }
-        } catch (logErr) {
-          console.error('Error fetching fallback logs:', logErr);
-        }
-      }
-      
       setSocorristas(mappedData);
+      setSelectedSocorrista((prev: any) => {
+        if (!prev) return null;
+        return mappedData.find((item) => item.id === prev.id) || null;
+      });
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -924,20 +915,31 @@ export default function GenerarCarnet() {
     // Draw background
     ctx.drawImage(templateImage, 0, 0);
 
-    // Draw photo: Usar estrictamente la foto oficial del perfil del socorrista.
-    // Solo si el administrador activó expresamente la vista previa de la foto solicitada, se previsualiza esa en el carnet.
+    // Draw photo: usar la fotografía aprobada de la solicitud (o la de perfil si se alternó o no trae otra)
     const effectivePhotoUrl = (previewSolicitudPhoto && selectedSocorrista.solicitud?.foto_url)
       ? selectedSocorrista.solicitud.foto_url
-      : (selectedSocorrista.foto_url || null);
+      : (selectedSocorrista.foto_url || selectedSocorrista.solicitud?.foto_url || null);
     if (effectivePhotoUrl) {
       try {
         const photo = new Image();
         photo.crossOrigin = "anonymous";
-        await new Promise((resolve, reject) => {
-          photo.onload = resolve;
-          photo.onerror = reject;
-          photo.src = effectivePhotoUrl;
-        });
+        const loadImg = (src: string) =>
+          new Promise<void>((resolve, reject) => {
+            photo.onload = () => resolve();
+            photo.onerror = reject;
+            photo.src = src;
+          });
+
+        try {
+          await loadImg(effectivePhotoUrl);
+        } catch {
+          const safeDataUrl = await loadImageSafelyAsDataUrl(
+            effectivePhotoUrl,
+            selectedSocorrista.foto_url
+          );
+          if (!safeDataUrl) throw new Error('Could not load photo safely');
+          await loadImg(safeDataUrl);
+        }
 
         // Draw circular photo
         const centerX = canvas.width * (posPhotoX / 100);
@@ -1290,13 +1292,24 @@ export default function GenerarCarnet() {
         .from('socorristas')
         .getPublicUrl(filePath);
 
+      // Actualizar foto_url oficial del socorrista si se usó la fotografía aprobada de la solicitud
+      const approvedPhotoUrl =
+        (previewSolicitudPhoto && selectedSocorrista.solicitud?.foto_url) ||
+        selectedSocorrista.foto_url ||
+        null;
+
       // Update socorrista record
+      const socUpdatePayload: any = {
+        carnet_generado_url: publicUrl,
+        fecha_generacion_carnet: new Date().toISOString(),
+      };
+      if (approvedPhotoUrl && approvedPhotoUrl !== selectedSocorrista.foto_url) {
+        socUpdatePayload.foto_url = approvedPhotoUrl;
+      }
+
       const { error: updateError } = await supabase
         .from('socorristas')
-        .update({ 
-          carnet_generado_url: publicUrl,
-          fecha_generacion_carnet: new Date().toISOString()
-        })
+        .update(socUpdatePayload)
         .eq('id', selectedSocorrista.id);
 
       // If it fails, try without fecha_generacion_carnet
@@ -1304,26 +1317,24 @@ export default function GenerarCarnet() {
         console.warn('Failed to update with fecha_generacion_carnet, trying fallback:', updateError);
         const { error: fallbackError } = await supabase
           .from('socorristas')
-          .update({ 
-            carnet_generado_url: publicUrl
+          .update({
+            carnet_generado_url: publicUrl,
+            ...(approvedPhotoUrl ? { foto_url: approvedPhotoUrl } : {}),
           })
           .eq('id', selectedSocorrista.id);
-        
+
         if (fallbackError) {
           console.warn('Failed to update carnet_generado_url, column might be missing:', fallbackError);
-          // Don't throw here, just continue so the history is saved and the user gets a success message
-          // even if the profile won't show the carnet URL.
         }
       }
 
       // Add to history
-      // Fetch max ID to avoid sequence out of sync errors
       const { data: maxIdData } = await supabase
         .from('historial_carnet')
         .select('id')
         .order('id', { ascending: false })
         .limit(1);
-        
+
       let nextId = undefined;
       if (maxIdData && maxIdData.length > 0 && typeof maxIdData[0].id === 'number') {
         nextId = maxIdData[0].id + 1;
@@ -1335,37 +1346,83 @@ export default function GenerarCarnet() {
           ...(nextId ? { id: nextId } : {}),
           socorrista_id: selectedSocorrista.id,
           carnet_nuevo: selectedSocorrista.carnet,
-          motivo: 'Generación de Carnet'
+          motivo: 'Generación de Carnet',
         });
-      
+
       if (historyError) {
         console.error('Error saving to historial_carnet:', historyError);
       }
-      
+
+      // Marcar la solicitud de carnet aceptada como 'Completado' (con respaldo seguro a 'Completada' si falta Migración 53)
+      const nowIso = new Date().toISOString();
+      const completedBy = userName || 'Administración';
       try {
-        await supabase
-          .from('solicitudes_carnet')
-          .update({
+        const buildTargetQuery = (payload: Record<string, any>) => {
+          const base = supabase.from('solicitudes_carnet').update(payload);
+          if (selectedSocorrista.solicitud?.id && !selectedSocorrista.solicitud?.backup_key) {
+            return base.eq('id', selectedSocorrista.solicitud.id);
+          }
+          return base
+            .eq('socorrista_id', selectedSocorrista.id)
+            .in('estado_solicitud', ['Aprobada', 'Aceptada', 'En impresión', 'Lista para entrega']);
+        };
+
+        let { error: solErr } = await buildTargetQuery({
+          estado_solicitud: 'Completado',
+          revisado_por: completedBy,
+          fecha_revision: nowIso,
+          fecha_completado: nowIso,
+          completado_por: completedBy,
+          updated_at: nowIso,
+        });
+
+        if (solErr) {
+          const retry1 = await buildTargetQuery({
+            estado_solicitud: 'Completado',
+            revisado_por: completedBy,
+            fecha_revision: nowIso,
+          });
+          solErr = retry1.error;
+        }
+
+        if (solErr) {
+          // Si la restricción CHECK previa en BD aún no incluye 'Completado', usar 'Completada'
+          await buildTargetQuery({
             estado_solicitud: 'Completada',
-            revisado_por: userName || 'Administración',
-            fecha_revision: new Date().toISOString(),
-          })
-          .eq('socorrista_id', selectedSocorrista.id)
-          .in('estado_solicitud', ['Pendiente', 'En revisión', 'Aprobada', 'En impresión', 'Lista para entrega']);
+            revisado_por: completedBy,
+            fecha_revision: nowIso,
+          });
+        }
       } catch (e) {
-        console.warn('Could not update solicitud', e);
+        console.warn('Could not update solicitud to Completado', e);
       }
 
       if (selectedSocorrista.solicitud?.backup_key) {
         try {
-          await supabase
+          const { data: existingCfg } = await supabase
             .from('configuracion')
-            .delete()
-            .eq('clave', selectedSocorrista.solicitud.backup_key);
+            .select('valor')
+            .eq('clave', selectedSocorrista.solicitud.backup_key)
+            .maybeSingle();
+          if (existingCfg?.valor) {
+            const parsedCfg = JSON.parse(existingCfg.valor);
+            await supabase
+              .from('configuracion')
+              .update({
+                valor: JSON.stringify({
+                  ...parsedCfg,
+                  estado_solicitud: 'Completado',
+                  revisado_por: completedBy,
+                  fecha_revision: nowIso,
+                  fecha_completado: nowIso,
+                }),
+              })
+              .eq('clave', selectedSocorrista.solicitud.backup_key);
+          }
         } catch (e) {}
       }
 
-      // Guardar todos los ajustes específicos para este socorrista (para recargarlos al volver a seleccionarlo)
+      // Guardar todos los ajustes específicos para este socorrista
       const carnetAjustes = {
         templateUrl: currentTemplateUrl,
         customFontName,
@@ -1406,14 +1463,23 @@ export default function GenerarCarnet() {
       await logActivity('Generó carnet', 'Socorrista', selectedSocorrista.id, {
         nombre: `${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido}`,
         carnet: selectedSocorrista.carnet,
-        url: publicUrl
+        url: publicUrl,
+        solicitud_estado: 'Completado',
       });
 
-      alert('Carnet guardado exitosamente en el perfil del socorrista.');
-      fetchData(); // Refresh list
+      window.dispatchEvent(new Event('solicitudes_updated'));
+      setSaveFeedback({
+        type: 'success',
+        text: `Carnet de ${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido} generado y solicitud marcada como Completado.`,
+      });
+      setSelectedSocorrista(null);
+      fetchData(); // Refresh accepted queue
     } catch (error: any) {
       console.error('Error saving carnet:', error);
-      alert('Error al guardar el carnet: ' + (error.message || 'Error desconocido'));
+      setSaveFeedback({
+        type: 'error',
+        text: 'Error al guardar el carnet: ' + (error.message || 'Error desconocido'),
+      });
     } finally {
       // Redraw with watermark again
       try {
@@ -1422,6 +1488,54 @@ export default function GenerarCarnet() {
         console.error('Error redrawing carnet:', e);
       }
       setSaving(false);
+    }
+  };
+
+  const handleCarnetPhotoCropped = async (file: File) => {
+    if (!selectedSocorrista) return;
+    setUpdatingPhoto(true);
+    setSaveFeedback(null);
+    try {
+      const uploadedUrl = await uploadCarnetPhotoWithFallback(
+        file,
+        `${selectedSocorrista.carnet || `SOC_${selectedSocorrista.id}`}_carnet`
+      );
+
+      // Actualizar foto en solicitud aceptada y en perfil del socorrista
+      if (selectedSocorrista.solicitud?.id && !selectedSocorrista.solicitud?.backup_key) {
+        await supabase
+          .from('solicitudes_carnet')
+          .update({ foto_url: uploadedUrl, updated_at: new Date().toISOString() })
+          .eq('id', selectedSocorrista.solicitud.id);
+      }
+      await supabase
+        .from('socorristas')
+        .update({ foto_url: uploadedUrl })
+        .eq('id', selectedSocorrista.id);
+
+      const updatedSoc = {
+        ...selectedSocorrista,
+        foto_url: uploadedUrl,
+        solicitud: selectedSocorrista.solicitud
+          ? { ...selectedSocorrista.solicitud, foto_url: uploadedUrl }
+          : null,
+      };
+      setSelectedSocorrista(updatedSoc);
+      setSocorristas((prev) => prev.map((s) => (s.id === updatedSoc.id ? updatedSoc : s)));
+      setPreviewSolicitudPhoto(true);
+      window.dispatchEvent(new Event('solicitudes_updated'));
+      setSaveFeedback({
+        type: 'success',
+        text: 'Fotografía recortada y actualizada para este carnet.',
+      });
+    } catch (err: any) {
+      console.error('Error updating cropped photo in GenerarCarnet:', err);
+      setSaveFeedback({
+        type: 'error',
+        text: 'No se pudo actualizar la fotografía recortada: ' + (err?.message || 'Error de red'),
+      });
+    } finally {
+      setUpdatingPhoto(false);
     }
   };
 
@@ -1434,13 +1548,11 @@ export default function GenerarCarnet() {
     
     const matchesSeccional = filterSeccional === 'Todas' || s.seccional_nombre === filterSeccional;
     
+    const hasEffectivePhoto = Boolean(s.solicitud?.foto_url || s.foto_url);
     const matchesPhoto = filterHasPhoto === 'Todos' || 
-      (filterHasPhoto === 'Con Foto' ? !!s.foto_url : !s.foto_url);
+      (filterHasPhoto === 'Con Foto' ? hasEffectivePhoto : !hasEffectivePhoto);
 
-    const matchesSolicitud = filterSolicitud === 'Todos' ||
-      (filterSolicitud === 'Con Solicitud' ? !!s.solicitud : !s.solicitud);
-
-    return matchesSearch && matchesSeccional && matchesPhoto && matchesSolicitud;
+    return matchesSearch && matchesSeccional && matchesPhoto;
   }).sort((a, b) => {
     if (sortOrder === 'alphabetical') {
       return (a.primer_nombre + a.primer_apellido).localeCompare(b.primer_nombre + b.primer_apellido);
@@ -1451,9 +1563,43 @@ export default function GenerarCarnet() {
 
   return (
     <div className="space-y-6 w-full mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900">Generador de Carnet</h1>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Generador de Carnet</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Solo se muestran socorristas con solicitud de carnet aceptada. Al generar el carnet, la solicitud pasa automáticamente a Completado.
+          </p>
+        </div>
+        <div className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl tabular-nums">
+          {socorristas.length} {socorristas.length === 1 ? 'solicitud aceptada lista' : 'solicitudes aceptadas listas'}
+        </div>
       </div>
+
+      {saveFeedback && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 ${
+            saveFeedback.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {saveFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{saveFeedback.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveFeedback(null)}
+            className="text-slate-500 hover:text-slate-900 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Controles con scroll independiente */}
@@ -1570,7 +1716,12 @@ export default function GenerarCarnet() {
           </div>
 
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">2. Seleccionar Socorrista</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-gray-900">2. Solicitudes Aceptadas</h2>
+              <span className="text-xs font-semibold text-slate-500 tabular-nums">
+                {filteredSocorristas.length} de {socorristas.length}
+              </span>
+            </div>
             <div className="relative mb-4">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-gray-400" />
@@ -1584,7 +1735,7 @@ export default function GenerarCarnet() {
               />
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Seccional</label>
                 <select
@@ -1610,19 +1761,7 @@ export default function GenerarCarnet() {
                   <option value="Sin Foto">Sin Foto</option>
                 </select>
               </div>
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Solicitud</label>
-                <select
-                  value={filterSolicitud}
-                  onChange={(e) => setFilterSolicitud(e.target.value)}
-                  className="block w-full pl-2 pr-8 py-1.5 text-xs border-gray-300 focus:outline-none focus:ring-primary focus:border-primary rounded-md border"
-                >
-                  <option value="Todos">Todos</option>
-                  <option value="Con Solicitud">Con Solicitud</option>
-                  <option value="Sin Solicitud">Sin Solicitud</option>
-                </select>
-              </div>
-              <div className="col-span-2 sm:col-span-1">
+              <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Orden</label>
                 <select
                   value={sortOrder}
@@ -1635,167 +1774,137 @@ export default function GenerarCarnet() {
               </div>
             </div>
             
-            <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md">
-              {filteredSocorristas.length > 0 ? (
+            <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-md">
+              {loading ? (
+                <p className="p-6 text-sm text-gray-500 text-center">Cargando solicitudes aceptadas...</p>
+              ) : filteredSocorristas.length > 0 ? (
                 <ul className="divide-y divide-gray-200">
-                  {filteredSocorristas.map((socorrista) => (
-                    <li 
-                      key={socorrista.id} 
-                      className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center space-x-3 transition-colors ${selectedSocorrista?.id === socorrista.id ? 'bg-blue-50 border-l-4 border-primary' : ''}`}
-                      onClick={() => handleSelectSocorrista(socorrista)}
-                    >
-                      <div className="flex-shrink-0 h-10 w-10">
-                        {socorrista.foto_url ? (
-                          <WatermarkImage src={socorrista.foto_url} alt="" className="h-10 w-10 border border-gray-200" isRounded={true} />
-                        ) : (
-                          <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold">
-                            {(socorrista.primer_nombre?.[0] || '') + (socorrista.primer_apellido?.[0] || '')}
+                  {filteredSocorristas.map((socorrista) => {
+                    const thumbSrc = socorrista.solicitud?.foto_url || socorrista.foto_url;
+                    return (
+                      <li 
+                        key={socorrista.id} 
+                        className={`p-3 hover:bg-gray-50 cursor-pointer flex items-center space-x-3 transition-colors ${selectedSocorrista?.id === socorrista.id ? 'bg-emerald-50/70' : ''}`}
+                        onClick={() => {
+                          setPreviewSolicitudPhoto(true);
+                          handleSelectSocorrista(socorrista);
+                        }}
+                      >
+                        <div className="flex-shrink-0 h-10 w-10">
+                          {thumbSrc ? (
+                            <WatermarkImage src={thumbSrc} alt="" className="h-10 w-10 border border-gray-200" isRounded={true} />
+                          ) : (
+                            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold">
+                              {(socorrista.primer_nombre?.[0] || '') + (socorrista.primer_apellido?.[0] || '')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {socorrista.primer_nombre} {socorrista.primer_apellido}
+                            </p>
+                            <span className="text-[11px] font-semibold text-indigo-700 shrink-0">
+                              Aceptada
+                            </span>
                           </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {socorrista.primer_nombre} {socorrista.primer_apellido}
-                          </p>
-                          {socorrista.solicitud && socorrista.solicitud.estado_solicitud === 'Pendiente' && (
-                            <span className="px-1.5 py-0.5 rounded flex items-center text-[10px] font-medium bg-yellow-100 text-yellow-800" title={`Solicitud de ${socorrista.solicitud.tipo_solicitud}`}>
-                              Req: {new Date(socorrista.solicitud.fecha_solicitud).toLocaleDateString()}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+                            <span className="font-mono tabular-nums">{socorrista.carnet}</span>
+                            <span>·</span>
+                            <span className="truncate">{socorrista.solicitud?.tipo_solicitud || 'Carnet'}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-2 mt-0.5">
-                          <p className="text-xs text-gray-500 truncate">{socorrista.carnet}</p>
-                          {loadedSocorristaAjustes && selectedSocorrista?.id === socorrista.id && (
-                            <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800">
-                              ✓ Ajustes restaurados
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {socorrista.carnet_generado_url && (
-                        <div className="flex-shrink-0" title="Carnet ya generado">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                        </div>
-                      )}
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
-                <p className="p-4 text-sm text-gray-500 text-center">No se encontraron resultados</p>
+                <div className="p-6 text-center space-y-1.5">
+                  <p className="text-sm font-semibold text-gray-700">
+                    {socorristas.length === 0
+                      ? 'No hay solicitudes aceptadas pendientes de emisión'
+                      : 'No se encontraron resultados con estos filtros'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {socorristas.length === 0
+                      ? 'Acepta una solicitud en Solicitudes → Carnet para habilitar la generación del carnet aquí.'
+                      : 'Prueba limpiando la búsqueda o seleccionando otra seccional.'}
+                  </p>
+                </div>
               )}
             </div>
           </div>
 
-          {selectedSocorrista?.solicitud && selectedSocorrista.solicitud.estado_solicitud === 'Pendiente' && (
-            <div className="bg-amber-50/90 border-2 border-amber-300 p-4 shadow-sm rounded-2xl">
-              <div className="flex items-center justify-between pb-2 border-b border-amber-200/80 mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wide">
-                    Solicitud de Carnet: {selectedSocorrista.solicitud.tipo_solicitud}
+          {selectedSocorrista?.solicitud && (
+            <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-emerald-200/70">
+                <div>
+                  <h3 className="text-xs font-bold text-emerald-950">
+                    Solicitud Aceptada · {selectedSocorrista.solicitud.tipo_solicitud || 'Carnet'}
                   </h3>
+                  <p className="text-[11px] text-emerald-800/80">
+                    Aprobada {selectedSocorrista.solicitud.revisado_por ? `por ${selectedSocorrista.solicitud.revisado_por}` : ''} · Al guardar el carnet cambiará a Completado
+                  </p>
                 </div>
-                <span className="text-3xs text-amber-700 font-mono bg-amber-100/70 px-2 py-0.5 rounded">
-                  {new Date(selectedSocorrista.solicitud.fecha_solicitud).toLocaleDateString()}
+                <span className="text-[11px] text-emerald-800 font-mono tabular-nums">
+                  {new Date(selectedSocorrista.solicitud.fecha_solicitud).toLocaleDateString('es-SV')}
                 </span>
               </div>
 
               {selectedSocorrista.solicitud.motivo && (
-                <p className="text-xs text-amber-800 mb-3 bg-white/80 p-2.5 rounded-xl border border-amber-200">
-                  <strong className="font-semibold text-amber-900">Motivo:</strong> {selectedSocorrista.solicitud.motivo}
+                <p className="text-xs text-slate-700 bg-white/80 p-2.5 rounded-xl border border-emerald-200/70">
+                  <strong className="font-semibold text-slate-900">Motivo:</strong> {selectedSocorrista.solicitud.motivo}
                 </p>
               )}
 
-              {selectedSocorrista.solicitud.foto_url ? (
-                <div className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-gray-900 block">Fotografía Solicitada</span>
-                      <span className="text-3xs text-gray-500">Revisa la foto antes de aprobarla o asignarla</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewSolicitudPhoto(!previewSolicitudPhoto)}
-                      className={`text-2xs font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+              <div className="bg-white p-3 rounded-xl border border-emerald-200/70 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full overflow-hidden border border-emerald-300 bg-slate-100 shrink-0">
+                    <SmartStorageImage
+                      src={
                         previewSolicitudPhoto
-                          ? 'bg-amber-500 text-white shadow-2xs'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      {previewSolicitudPhoto ? 'Viendo Solicitada en Carnet' : 'Ver Solicitada en Carnet'}
-                    </button>
+                          ? selectedSocorrista.solicitud.foto_url || selectedSocorrista.foto_url
+                          : selectedSocorrista.foto_url || selectedSocorrista.solicitud.foto_url
+                      }
+                      alt={selectedSocorrista.primer_nombre}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-center">
-                    <div className={`p-2.5 rounded-xl border flex flex-col items-center transition-all ${
-                      !previewSolicitudPhoto ? 'bg-emerald-50/50 border-emerald-300 ring-2 ring-emerald-500/20' : 'bg-gray-50 border-gray-200'
-                    }`}>
-                      <span className="text-3xs font-bold uppercase text-gray-600 mb-1.5">Foto Actual de Perfil</span>
-                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-emerald-500 shadow-xs bg-gray-100 flex items-center justify-center">
-                        <SmartStorageImage
-                          src={selectedSocorrista.foto_url}
-                          alt="Foto actual oficial"
-                          className="w-full h-full object-cover"
-                          fallback={<span className="text-gray-400 text-3xs font-bold">Sin foto</span>}
-                        />
-                      </div>
-                      <span className="text-3xs text-emerald-700 font-semibold mt-1">
-                        {!previewSolicitudPhoto ? '● En uso oficial' : 'Oficial'}
-                      </span>
-                    </div>
-
-                    <div className={`p-2.5 rounded-xl border flex flex-col items-center transition-all ${
-                      previewSolicitudPhoto ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-500/20' : 'bg-gray-50 border-gray-200'
-                    }`}>
-                      <span className="text-3xs font-bold uppercase text-amber-800 mb-1.5">Nueva Foto Solicitada</span>
-                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-amber-500 shadow-xs bg-gray-100 flex items-center justify-center">
-                        <SmartStorageImage
-                          src={selectedSocorrista.solicitud.foto_url}
-                          fallbackSrc={selectedSocorrista.foto_url}
-                          alt="Nueva foto solicitada"
-                          className="w-full h-full object-cover"
-                          fallback={<span className="text-amber-700 text-3xs font-bold">Sin foto</span>}
-                        />
-                      </div>
-                      <span className="text-3xs text-amber-700 font-semibold mt-1">
-                        {previewSolicitudPhoto ? '● Previsualizando' : 'Pendiente de aprobar'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={approvingPhoto}
-                      onClick={handleAprobarFotoSolicitud}
-                      className="flex-1 inline-flex items-center justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                    >
-                      <Check className="w-3.5 h-3.5 mr-1.5" />
-                      {approvingPhoto ? 'Aprobando...' : 'Aprobar Foto y Asignar'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRechazarSolicitudFoto}
-                      className="px-3 py-2 bg-white hover:bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      Rechazar
-                    </button>
+                  <div className="text-xs">
+                    <p className="font-bold text-slate-900">Fotografía para emisión</p>
+                    <p className="text-[11px] text-slate-500">
+                      {previewSolicitudPhoto && selectedSocorrista.solicitud.foto_url
+                        ? 'Usando foto aprobada de la solicitud'
+                        : 'Usando foto de perfil del elemento'}
+                    </p>
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs text-amber-800">Solicitud sin nueva fotografía</span>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {selectedSocorrista.solicitud.foto_url &&
+                    selectedSocorrista.foto_url &&
+                    selectedSocorrista.solicitud.foto_url !== selectedSocorrista.foto_url && (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewSolicitudPhoto((v) => !v)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        {previewSolicitudPhoto ? 'Usar foto perfil' : 'Usar foto solicitud'}
+                      </button>
+                    )}
+
                   <button
                     type="button"
-                    onClick={handleRechazarSolicitudFoto}
-                    className="text-xs text-red-600 hover:underline font-semibold"
+                    disabled={updatingPhoto}
+                    onClick={() => setShowPhotoEditModal(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
                   >
-                    Marcar como procesada
+                    <Crop className="w-3.5 h-3.5" />
+                    {updatingPhoto ? 'Guardando...' : 'Recortar / Fondo'}
                   </button>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -2571,6 +2680,23 @@ export default function GenerarCarnet() {
           </div>
         </div>
       )}
+
+      <CarnetPhotoCaptureModal
+        isOpen={showPhotoEditModal}
+        onClose={() => setShowPhotoEditModal(false)}
+        onPhotoReady={(file) => {
+          handleCarnetPhotoCropped(file);
+        }}
+        initialImageSrc={
+          selectedSocorrista?.solicitud?.foto_url || selectedSocorrista?.foto_url || null
+        }
+        initialFallbackSrc={selectedSocorrista?.foto_url || null}
+        title={
+          selectedSocorrista
+            ? `Recortar / Editar Fotografía — ${selectedSocorrista.primer_nombre} ${selectedSocorrista.primer_apellido}`
+            : 'Recortar Fotografía para Carnet'
+        }
+      />
     </div>
   );
 }

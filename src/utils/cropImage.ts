@@ -23,7 +23,8 @@ export async function getCroppedImgResult(
   imageSrc: string,
   pixelCrop: { x: number; y: number; width: number; height: number },
   rotation = 0,
-  maxOutputSize = 900
+  maxOutputSize = 900,
+  preserveTransparency = false
 ): Promise<CroppedImgResult | null> {
   const image = await createImage(imageSrc);
   const srcW = image.naturalWidth || image.width;
@@ -47,9 +48,13 @@ export async function getCroppedImgResult(
   croppedCanvas.width = outW;
   croppedCanvas.height = outH;
 
-  // Fondo blanco por si el archivo origen es PNG/WebP con transparencia
-  croppedCtx.fillStyle = '#ffffff';
-  croppedCtx.fillRect(0, 0, outW, outH);
+  if (!preserveTransparency) {
+    // Fondo blanco por si el archivo origen es PNG/WebP con transparencia
+    croppedCtx.fillStyle = '#ffffff';
+    croppedCtx.fillRect(0, 0, outW, outH);
+  } else {
+    croppedCtx.clearRect(0, 0, outW, outH);
+  }
 
   if (rotation === 0) {
     // Recorte directo sin crear un canvas gigante intermedio (evita lienzos en blanco en fotos HD)
@@ -72,8 +77,10 @@ export async function getCroppedImgResult(
     canvas.width = Math.round(bBoxWidth);
     canvas.height = Math.round(bBoxHeight);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!preserveTransparency) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate(rotRad);
     ctx.translate(-srcW / 2, -srcH / 2);
@@ -82,7 +89,9 @@ export async function getCroppedImgResult(
     croppedCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
   }
 
-  const dataUrl = croppedCanvas.toDataURL('image/jpeg', 0.9);
+  const mimeType = preserveTransparency ? 'image/png' : 'image/jpeg';
+  const quality = preserveTransparency ? undefined : 0.92;
+  const dataUrl = croppedCanvas.toDataURL(mimeType, quality);
 
   return new Promise((resolve) => {
     croppedCanvas.toBlob(
@@ -97,8 +106,8 @@ export async function getCroppedImgResult(
           resolve(null);
         }
       },
-      'image/jpeg',
-      0.9
+      mimeType,
+      quality
     );
   });
 }
