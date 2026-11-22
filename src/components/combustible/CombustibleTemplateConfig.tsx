@@ -16,6 +16,7 @@ import ImageUploadConfigCard from '../common/ImageUploadConfigCard';
 import { supabase } from '../../lib/supabase';
 import { getApiUrl } from '../../lib/api';
 import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
+import { getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface CombustibleTemplateConfigProps {
   config: CombustibleConfig;
@@ -247,7 +248,7 @@ export default function CombustibleTemplateConfig({
     telefono_solicitante: '7023-4567',
     entrego_liquidacion_anterior: true,
     estado: 'Aprobada',
-    fecha_solicitud: new Date().toISOString().split('T')[0],
+    fecha_solicitud: getElSalvadorDateString(),
     hora_solicitud: '09:45 AM'
   };
 

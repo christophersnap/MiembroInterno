@@ -3,6 +3,7 @@ import { X, Mail, CheckCircle2, Copy, Send, RefreshCw, Check, FileText, ShieldAl
 import { SolicitudCombustible, CombustibleConfig } from '../../types/combustible';
 import { generarHtmlCorreoCombustible } from '../../lib/emailNotification';
 import { sendEmailNotification } from '../../lib/api';
+import { getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface CombustibleEmailModalProps {
   solicitud: SolicitudCombustible;
@@ -26,7 +27,7 @@ export default function CombustibleEmailModal({
   const asuntoParsed = config.asuntoPlantilla
     .replace('[SOLICITANTE]', solicitud.nombre_solicitante)
     .replace('[SECCIONAL]', solicitud.seccional_nombre)
-    .replace('[FECHA]', solicitud.fecha_solicitud || new Date().toISOString().split('T')[0])
+    .replace('[FECHA]', solicitud.fecha_solicitud || getElSalvadorDateString())
     .replace('[DIRECTOR]', solicitud.director_nombre)
     .replace('[FOLIO]', solicitud.folio);
 
@@ -34,7 +35,7 @@ export default function CombustibleEmailModal({
   const [cc, setCc] = useState(config.correoCcDefault);
   const [asunto, setAsunto] = useState(asuntoParsed);
 
-  const fechaEnvioFormateada = solicitud.fecha_envio_completa || `${solicitud.fecha_solicitud || new Date().toISOString().split('T')[0]} ${solicitud.hora_solicitud || '12:00:00'}`;
+  const fechaEnvioFormateada = solicitud.fecha_envio_completa || `${solicitud.fecha_solicitud || getElSalvadorDateString()} ${solicitud.hora_solicitud || '12:00:00'}`;
 
   const handleCopyText = () => {
     const rawText = `¡Confirmamos de recibido tu solicitud de Combustible!

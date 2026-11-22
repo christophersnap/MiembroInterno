@@ -7,6 +7,7 @@ import {
   NoticiaCountdown,
   NoticiasCountdownConfig,
 } from '../../lib/noticiasCountdown';
+import { formatFechaSV, formatHoraSV } from '../../utils/dateUtils';
 
 interface CountdownBannerSectionProps {
   countdowns: NoticiaCountdown[];
@@ -97,7 +98,7 @@ function CountdownCard({
   const hasValidDate = !isNaN(targetDateObj.getTime());
 
   const dateFormatted = hasValidDate
-    ? targetDateObj.toLocaleDateString('es-SV', {
+    ? formatFechaSV(targetDateObj, {
         weekday: 'short',
         day: 'numeric',
         month: 'long',
@@ -105,7 +106,7 @@ function CountdownCard({
       })
     : '';
   const timeFormatted = hasValidDate
-    ? targetDateObj.toLocaleTimeString('es-SV', {
+    ? formatHoraSV(targetDateObj, {
         hour: '2-digit',
         minute: '2-digit',
       })

@@ -8,6 +8,7 @@ import { logActivity } from '../../lib/logger';
 import { generarTextoCorreoAprobacion } from '../../lib/emailNotification';
 import { sendEmailNotification, getApiUrl } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
+import { formatFechaSV, getElSalvadorIsoTimestamp } from '../../utils/dateUtils';
 
 interface Solicitud {
   id: string;
@@ -102,7 +103,7 @@ export default function SolicitudesRegistroTab({
     // 1. Actualización optimista inmediata: desaparece al instante de la lista de pendientes
     setLocalSolicitudes(prev => prev.map(s => {
       if (s.id === solId || (s.email && s.email.toLowerCase() === solEmail.toLowerCase())) {
-        return { ...s, estado: 'aprobado' as const, fecha_revision: new Date().toISOString() };
+        return { ...s, estado: 'aprobado' as const, fecha_revision: getElSalvadorIsoTimestamp() };
       }
       return s;
     }));
@@ -202,7 +203,7 @@ export default function SolicitudesRegistroTab({
           .from('solicitudes_registro')
           .update({
             estado: 'aprobado',
-            fecha_revision: new Date().toISOString(),
+            fecha_revision: getElSalvadorIsoTimestamp(),
             notas_admin: adminNotes || 'Aprobado por el Administrador',
             auth_user_id: targetAuthId || null,
           })
@@ -223,7 +224,7 @@ export default function SolicitudesRegistroTab({
           if (Array.isArray(list)) {
             list = list.map(item => {
               if (item.id === solId || (item.email && item.email.toLowerCase() === solEmail.toLowerCase())) {
-                return { ...item, estado: 'aprobado', fecha_revision: new Date().toISOString(), notas_admin: adminNotes || 'Aprobado' };
+                return { ...item, estado: 'aprobado', fecha_revision: getElSalvadorIsoTimestamp(), notas_admin: adminNotes || 'Aprobado' };
               }
               return item;
             });
@@ -309,7 +310,7 @@ export default function SolicitudesRegistroTab({
     // Actualización optimista inmediata
     setLocalSolicitudes(prev => prev.map(s => {
       if (s.id === solId || (s.email && s.email.toLowerCase() === solEmail.toLowerCase())) {
-        return { ...s, estado: 'rechazado' as const, fecha_revision: new Date().toISOString() };
+        return { ...s, estado: 'rechazado' as const, fecha_revision: getElSalvadorIsoTimestamp() };
       }
       return s;
     }));
@@ -324,7 +325,7 @@ export default function SolicitudesRegistroTab({
           .from('solicitudes_registro')
           .update({
             estado: 'rechazado',
-            fecha_revision: new Date().toISOString(),
+            fecha_revision: getElSalvadorIsoTimestamp(),
             notas_admin: motivo,
           })
           .or(`id.eq.${solId},email.ilike.${solEmail}`);
@@ -342,7 +343,7 @@ export default function SolicitudesRegistroTab({
           if (Array.isArray(list)) {
             list = list.map(item => {
               if (item.id === solId || (item.email && item.email.toLowerCase() === solEmail.toLowerCase())) {
-                return { ...item, estado: 'rechazado', fecha_revision: new Date().toISOString(), notas_admin: motivo };
+                return { ...item, estado: 'rechazado', fecha_revision: getElSalvadorIsoTimestamp(), notas_admin: motivo };
               }
               return item;
             });
@@ -596,7 +597,7 @@ export default function SolicitudesRegistroTab({
                       )}
                     </td>
                     <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">
-                      {sol.fecha_solicitud ? new Date(sol.fecha_solicitud).toLocaleDateString() : 'N/A'}
+                      {sol.fecha_solicitud ? formatFechaSV(sol.fecha_solicitud) : 'N/A'}
                     </td>
                     <td className="px-5 py-3.5 whitespace-nowrap">
                       {sol.estado === 'pendiente' && (
@@ -640,7 +641,7 @@ export default function SolicitudesRegistroTab({
                       ) : (
                         <div className="flex items-center justify-end space-x-2">
                           <span className="text-2xs text-gray-400">
-                            Revisado {sol.fecha_revision ? new Date(sol.fecha_revision).toLocaleDateString() : ''}
+                            Revisado {sol.fecha_revision ? formatFechaSV(sol.fecha_revision) : ''}
                           </span>
                           <button
                             onClick={() => handleDeleteSolicitud(sol)}

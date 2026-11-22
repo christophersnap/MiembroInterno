@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { useSettings } from '../contexts/SettingsContext';
 import { getApiUrl } from '../lib/api';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 interface SeccionalOption {
   id: number;
@@ -237,7 +238,7 @@ export default function Registro() {
         tipo_usuario: 'socorrista',
         motivo: motivo.trim() || 'Solicitud de acceso al sistema institucional',
         estado: 'pendiente',
-        fecha_solicitud: new Date().toISOString()
+        fecha_solicitud: getElSalvadorIsoTimestamp()
       };
 
       // 3. Registrar la solicitud en la API backend y en Supabase (Garantía absoluta)

@@ -18,6 +18,7 @@ import {
   Layers,
   RefreshCw,
   ImagePlus,
+  ExternalLink,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,7 +34,9 @@ import {
   formatCarnetRequestDate,
   isBlockingCarnetState,
   uploadCarnetPhotoWithFallback,
+  validateSocorristaNameForCarnet,
 } from '../utils/solicitudesCarnet';
+import { getElSalvadorDateTime, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 interface StagedPhoto {
   file: File;
@@ -67,7 +70,9 @@ export default function SolicitudCarnetLote() {
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSeccional, setFilterSeccional] = useState('Todas');
-  const [filterEstado, setFilterEstado] = useState<'Todos' | 'Disponibles' | 'SinFoto' | 'Bloqueados' | 'Observados'>('Todos');
+  const [filterEstado, setFilterEstado] = useState<
+    'Todos' | 'Disponibles' | 'SinFoto' | 'NombreInvalido' | 'Bloqueados' | 'Observados'
+  >('Todos');
 
   // Selection & Staged Photos
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -214,6 +219,7 @@ export default function SolicitudCarnetLote() {
 
       const mapped = (socData || []).map((s: any) => {
         const secObj = Array.isArray(s.seccionales) ? s.seccionales[0] : s.seccionales;
+        const nameValidation = validateSocorristaNameForCarnet(s);
         return {
           ...s,
           seccional_nombre: secObj?.nombre || 'N/A',
@@ -221,6 +227,7 @@ export default function SolicitudCarnetLote() {
             .replace(/\s+/g, ' ')
             .trim()
             .toUpperCase(),
+          nameValidation,
         };
       });
 
@@ -260,10 +267,12 @@ export default function SolicitudCarnetLote() {
       const blocked = Boolean(req && isBlockingCarnetState(req.estado_solicitud));
       const observed = req?.estado_solicitud === 'Observada';
       const hasPhoto = Boolean(stagedPhotos[s.id]?.previewUrl || s.foto_url);
+      const hasValidName = s.nameValidation ? s.nameValidation.isValid : true;
 
       let matchesStatus = true;
-      if (filterEstado === 'Disponibles') matchesStatus = !blocked;
+      if (filterEstado === 'Disponibles') matchesStatus = !blocked && hasValidName;
       else if (filterEstado === 'SinFoto') matchesStatus = !blocked && !hasPhoto;
+      else if (filterEstado === 'NombreInvalido') matchesStatus = !hasValidName;
       else if (filterEstado === 'Bloqueados') matchesStatus = blocked;
       else if (filterEstado === 'Observados') matchesStatus = observed;
 
@@ -276,23 +285,30 @@ export default function SolicitudCarnetLote() {
     let bloqueados = 0;
     let sinFoto = 0;
     let observados = 0;
+    let nombreInvalido = 0;
     socorristas.forEach((s) => {
       const req = requestsMap[s.id];
       const blocked = Boolean(req && isBlockingCarnetState(req.estado_solicitud));
       const hasPhoto = Boolean(stagedPhotos[s.id]?.previewUrl || s.foto_url);
+      const hasValidName = s.nameValidation ? s.nameValidation.isValid : true;
+      if (!hasValidName) nombreInvalido += 1;
       if (blocked) bloqueados += 1;
       else {
-        disponibles += 1;
+        if (hasValidName) disponibles += 1;
         if (!hasPhoto) sinFoto += 1;
       }
       if (req?.estado_solicitud === 'Observada') observados += 1;
     });
-    return { total: socorristas.length, disponibles, bloqueados, sinFoto, observados };
+    return { total: socorristas.length, disponibles, bloqueados, sinFoto, observados, nombreInvalido };
   }, [socorristas, requestsMap, stagedPhotos]);
 
   const handleToggleRow = (s: any) => {
     const req = requestsMap[s.id];
     if (req && isBlockingCarnetState(req.estado_solicitud)) return;
+    if (s.nameValidation && !s.nameValidation.isValid) {
+      setSubmitError(s.nameValidation.message);
+      return;
+    }
 
     const hasPhoto = Boolean(stagedPhotos[s.id]?.previewUrl || s.foto_url);
     if (!hasPhoto) {
@@ -314,7 +330,8 @@ export default function SolicitudCarnetLote() {
         const req = requestsMap[s.id];
         const blocked = Boolean(req && isBlockingCarnetState(req.estado_solicitud));
         const hasPhoto = Boolean(stagedPhotos[s.id]?.previewUrl || s.foto_url);
-        return !blocked && hasPhoto;
+        const hasValidName = s.nameValidation ? s.nameValidation.isValid : true;
+        return !blocked && hasPhoto && hasValidName;
       })
       .map((s) => s.id);
 
@@ -371,6 +388,11 @@ export default function SolicitudCarnetLote() {
     }
 
     const targets = socorristas.filter((s) => selectedIds.has(s.id));
+    const invalidNameTarget = targets.find((s) => s.nameValidation && !s.nameValidation.isValid);
+    if (invalidNameTarget) {
+      setSubmitError(invalidNameTarget.nameValidation.message);
+      return;
+    }
     const missingPhoto = targets.find((s) => !stagedPhotos[s.id]?.file && !s.foto_url);
     if (missingPhoto) {
       setSubmitError(`El elemento ${missingPhoto.nombre_completo} requiere fotografía antes de incluirse en el lote.`);
@@ -448,7 +470,7 @@ export default function SolicitudCarnetLote() {
 
         setBatchSuccessInfo({
           loteId,
-          fecha: formatCarnetRequestDate(new Date().toISOString()),
+          fecha: formatCarnetRequestDate(getElSalvadorIsoTimestamp()),
           elementos: submittedResults,
         });
         setSelectedIds(new Set());
@@ -566,7 +588,7 @@ export default function SolicitudCarnetLote() {
         )}
 
         {/* Stats Strip */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-2 ${stats.nombreInvalido > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3`}>
           <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs flex items-center justify-between">
             <div>
               <p className="text-[11px] font-bold text-slate-400 uppercase">Accesibles</p>
@@ -588,6 +610,19 @@ export default function SolicitudCarnetLote() {
             </div>
             <Camera className="w-6 h-6 text-amber-500" />
           </div>
+          {stats.nombreInvalido > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterEstado('NombreInvalido')}
+              className="bg-rose-50/70 hover:bg-rose-50 rounded-2xl border border-rose-300 p-4 shadow-2xs flex items-center justify-between text-left transition-colors cursor-pointer"
+            >
+              <div>
+                <p className="text-[11px] font-bold text-rose-700 uppercase">Nombre Inválido</p>
+                <p className="text-2xl font-black text-rose-800">{stats.nombreInvalido}</p>
+              </div>
+              <AlertTriangle className="w-6 h-6 text-rose-500" />
+            </button>
+          )}
           <div className="bg-white rounded-2xl border border-rose-200/80 p-4 shadow-2xs flex items-center justify-between">
             <div>
               <p className="text-[11px] font-bold text-rose-700 uppercase">Con Sol. Activa</p>
@@ -636,6 +671,7 @@ export default function SolicitudCarnetLote() {
               <option value="Todos">Todos los estados</option>
               <option value="Disponibles">Disponibles para solicitar</option>
               <option value="SinFoto">Disponibles sin fotografía</option>
+              <option value="NombreInvalido">Con símbolos inválidos en el nombre</option>
               <option value="Bloqueados">Con solicitud activa (bloqueados)</option>
               <option value="Observados">Con observación (requieren corrección)</option>
             </select>
@@ -704,13 +740,17 @@ export default function SolicitudCarnetLote() {
                     const staged = stagedPhotos[s.id];
                     const effectivePhoto = staged?.previewUrl || s.foto_url || null;
                     const hasPhoto = Boolean(effectivePhoto);
+                    const hasValidName = s.nameValidation ? s.nameValidation.isValid : true;
+                    const rowBlocked = blocked || !hasValidName;
                     const isSelected = selectedIds.has(s.id);
 
                     return (
                       <tr
                         key={s.id}
                         className={`transition-colors ${
-                          blocked
+                          !hasValidName
+                            ? 'bg-rose-50/40'
+                            : blocked
                             ? 'bg-slate-50/60 opacity-85'
                             : isSelected
                             ? 'bg-emerald-50/50'
@@ -721,10 +761,12 @@ export default function SolicitudCarnetLote() {
                         <td className="px-4 py-3.5 align-middle">
                           <button
                             type="button"
-                            disabled={blocked}
+                            disabled={rowBlocked}
                             onClick={() => handleToggleRow(s)}
                             title={
-                              blocked
+                              !hasValidName
+                                ? s.nameValidation.message
+                                : blocked
                                 ? 'Elemento bloqueado hasta que finalice su solicitud activa o reciba observación'
                                 : !hasPhoto
                                 ? 'Subir o tomar fotografía antes de seleccionar'
@@ -733,7 +775,7 @@ export default function SolicitudCarnetLote() {
                                 : 'Incluir en el lote'
                             }
                             className={`p-1 rounded-lg transition-colors ${
-                              blocked
+                              rowBlocked
                                 ? 'text-slate-300 cursor-not-allowed'
                                 : isSelected
                                 ? 'text-emerald-600 hover:bg-emerald-100 cursor-pointer'
@@ -812,7 +854,7 @@ export default function SolicitudCarnetLote() {
                         {/* Name & Carnet */}
                         <td className="px-4 py-3.5 align-middle">
                           <p className="text-xs font-bold text-slate-900">{s.nombre_completo}</p>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="inline-flex px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold">
                               {s.carnet || 'Sin Carnet'}
                             </span>
@@ -820,6 +862,25 @@ export default function SolicitudCarnetLote() {
                               <span className="text-[11px] text-slate-400">DUI: {s.dui}</span>
                             )}
                           </div>
+                          {!hasValidName && s.nameValidation && (
+                            <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 space-y-1 max-w-xs">
+                              <p className="text-[11px] font-bold text-rose-800 flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>
+                                  {s.nameValidation.invalidSymbols.length > 0
+                                    ? `Símbolo no válido en nombre: ${s.nameValidation.invalidSymbols.map((sym: string) => `"${sym}"`).join(', ')}`
+                                    : 'Nombre incompleto en perfil'}
+                                </span>
+                              </p>
+                              <Link
+                                to={`/socorristas/${s.id}`}
+                                className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 hover:text-rose-900 underline"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Corregir nombre en perfil
+                              </Link>
+                            </div>
+                          )}
                         </td>
 
                         {/* Seccional & Cargo */}
@@ -1067,7 +1128,7 @@ export default function SolicitudCarnetLote() {
 
       <footer className="bg-white border-t border-slate-200 py-6 mt-8">
         <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
-          &copy; {new Date().getFullYear()} Cruz Verde Salvadoreña
+          &copy; {getElSalvadorDateTime().year} Cruz Verde Salvadoreña
         </div>
       </footer>
     </div>

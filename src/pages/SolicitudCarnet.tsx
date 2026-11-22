@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
@@ -15,6 +15,7 @@ import {
   Clock,
   Layers,
   AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModal';
@@ -28,7 +29,9 @@ import {
   isBlockingCarnetState,
   resubmitCarnetSolicitudSafe,
   uploadCarnetPhotoWithFallback,
+  validateSocorristaNameForCarnet,
 } from '../utils/solicitudesCarnet';
+import { getElSalvadorDateTime } from '../utils/dateUtils';
 
 export default function SolicitudCarnet() {
   const { user, userName } = useAuth();
@@ -63,6 +66,11 @@ export default function SolicitudCarnet() {
   const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const nameValidation = useMemo(
+    () => (socorrista ? validateSocorristaNameForCarnet(socorrista) : null),
+    [socorrista]
+  );
 
   // Auto-format carnet: CVS-1234-AB
   const handleCarnetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +178,11 @@ export default function SolicitudCarnet() {
     setSubmitError('');
 
     if (!socorrista) return;
+    const currentNameCheck = validateSocorristaNameForCarnet(socorrista);
+    if (!currentNameCheck.isValid) {
+      setSubmitError(currentNameCheck.message);
+      return;
+    }
     if (['Cambio', 'Reposición'].includes(tipoSolicitud) && !motivo) {
       setSubmitError("Por favor seleccione el motivo de la reposición/cambio.");
       return;
@@ -234,7 +247,14 @@ export default function SolicitudCarnet() {
       const secObj = Array.isArray(socorrista.seccionales) ? socorrista.seccionales[0] : socorrista.seccionales;
       const seccionalIdResolved = socorrista.seccional_id || secObj?.id || null;
       const seccionalNombreResolved = secObj?.nombre || null;
-      const nombreElemento = `${socorrista.primer_nombre} ${socorrista.primer_apellido}`.trim();
+      const nombreElemento = [
+        socorrista.primer_nombre,
+        socorrista.segundo_nombre,
+        socorrista.primer_apellido,
+        socorrista.segundo_apellido,
+      ]
+        .filter((p) => Boolean(p && String(p).trim()))
+        .join(' ');
 
       const commonInput = {
         socorrista_id: socorrista.id,
@@ -562,9 +582,60 @@ export default function SolicitudCarnet() {
                       <strong>Cargo:</strong> {socorrista.cargo_institucional || 'Socorrista'}
                     </p>
                   </div>
-                  <CheckCircle className="h-8 w-8 text-green-500" />
+                  {nameValidation && !nameValidation.isValid ? (
+                    <AlertTriangle className="h-8 w-8 text-rose-500 shrink-0" />
+                  ) : (
+                    <CheckCircle className="h-8 w-8 text-green-500 shrink-0" />
+                  )}
                 </div>
               </div>
+
+              {nameValidation && !nameValidation.isValid && (
+                <div className="rounded-xl bg-rose-50 border border-rose-300 p-4 space-y-2.5">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-rose-950">
+                        Nombre con caracteres no permitidos para carnet
+                      </h4>
+                      <p className="text-xs text-rose-900 leading-relaxed">
+                        {nameValidation.message}
+                      </p>
+                      {nameValidation.invalidFields.length > 0 && (
+                        <div className="bg-white/90 rounded-lg border border-rose-200 p-2.5 space-y-1 text-xs text-rose-900">
+                          {nameValidation.invalidFields.map((field) => (
+                            <p key={field.field}>
+                              <strong>{field.label}:</strong>{' '}
+                              <span className="font-mono bg-rose-100 px-1.5 py-0.5 rounded text-rose-950">
+                                {field.value}
+                              </span>{' '}
+                              <span className="text-rose-700">
+                                (Símbolo{field.symbols.length === 1 ? '' : 's'}:{' '}
+                                {field.symbols.map((s) => `"${s}"`).join(', ')})
+                              </span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="pt-1 flex flex-wrap items-center gap-2">
+                        {user ? (
+                          <Link
+                            to={`/socorristas/${socorrista.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Corregir nombre en perfil del elemento
+                          </Link>
+                        ) : (
+                          <p className="text-[11px] font-semibold text-rose-800">
+                            Solicita a tu Director o Administrador corregir el nombre del elemento en el sistema antes de tramitar el carnet.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">Tipo de Solicitud</label>
@@ -778,7 +849,13 @@ export default function SolicitudCarnet() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loadingSubmit || !confirmInformation || !confirmValidation || !confirmTime}
+                  disabled={
+                    loadingSubmit ||
+                    !confirmInformation ||
+                    !confirmValidation ||
+                    !confirmTime ||
+                    Boolean(nameValidation && !nameValidation.isValid)
+                  }
                   className="flex-[2] flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-hover focus:outline-none disabled:opacity-50"
                 >
                   {loadingSubmit ? (
@@ -855,7 +932,7 @@ export default function SolicitudCarnet() {
       <footer className="bg-white border-t border-gray-200 py-8 mt-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center text-sm text-gray-500">
-            <p>&copy; {new Date().getFullYear()} Cruz Verde Salvadoreña</p>
+            <p>&copy; {getElSalvadorDateTime().year} Cruz Verde Salvadoreña</p>
           </div>
         </div>
       </footer>

@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { Merito, SocorristaAsignadoMerito, MeritoEnlace, CATEGORIAS_MERITO } from '../types/merito';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import { getElSalvadorDateString, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export default function Meritos() {
   const { role, userName, permissions } = useAuth();
@@ -29,7 +30,7 @@ export default function Meritos() {
   const [titulo, setTitulo] = useState('');
   const [categoria, setCategoria] = useState<Merito['categoria']>('Misión Humanitaria');
   const [institucion, setInstitucion] = useState('Cruz Verde Salvadoreña');
-  const [fechaMerito, setFechaMerito] = useState(new Date().toISOString().split('T')[0]);
+  const [fechaMerito, setFechaMerito] = useState(getElSalvadorDateString());
   const [descripcion, setDescripcion] = useState('');
   const [socorristasAsignados, setSocorristasAsignados] = useState<SocorristaAsignadoMerito[]>([]);
 
@@ -42,7 +43,7 @@ export default function Meritos() {
   const [allSocorristas, setAllSocorristas] = useState<any[]>([]);
   const [socorristaSearch, setSocorristaSearch] = useState('');
   const [selectedSocorrista, setSelectedSocorrista] = useState<any | null>(null);
-  const [fechaAsignacionIndividual, setFechaAsignacionIndividual] = useState(new Date().toISOString().split('T')[0]);
+  const [fechaAsignacionIndividual, setFechaAsignacionIndividual] = useState(getElSalvadorDateString());
   const [notaIndividual, setNotaIndividual] = useState('');
   const [showSocorristaDropdown, setShowSocorristaDropdown] = useState(false);
 
@@ -127,7 +128,7 @@ export default function Meritos() {
     setTitulo('');
     setCategoria('Misión Humanitaria');
     setInstitucion('Cruz Verde Salvadoreña');
-    setFechaMerito(new Date().toISOString().split('T')[0]);
+    setFechaMerito(getElSalvadorDateString());
     setDescripcion('');
     setSocorristasAsignados([]);
     setEnlaces([]);
@@ -146,7 +147,7 @@ export default function Meritos() {
     setTitulo(merito.titulo);
     setCategoria(merito.categoria);
     setInstitucion(merito.institucion_otorgante || 'Cruz Verde Salvadoreña');
-    setFechaMerito(merito.fecha_merito || new Date().toISOString().split('T')[0]);
+    setFechaMerito(merito.fecha_merito || getElSalvadorDateString());
     setDescripcion(merito.descripcion || '');
     setSocorristasAsignados(merito.socorristas_asignados || []);
     setEnlaces(merito.enlaces || []);
@@ -237,7 +238,7 @@ export default function Meritos() {
       descripcion: descripcion.trim(),
       socorristas_asignados: socorristasAsignados,
       enlaces,
-      updated_at: new Date().toISOString()
+      updated_at: getElSalvadorIsoTimestamp()
     };
 
     try {
@@ -254,7 +255,7 @@ export default function Meritos() {
         } else {
           const { data: insData } = await supabase
             .from('meritos')
-            .insert([{ ...payload, created_at: new Date().toISOString() }])
+            .insert([{ ...payload, created_at: getElSalvadorIsoTimestamp() }])
             .select('id')
             .single();
           if (insData?.id) savedId = insData.id;
@@ -271,7 +272,7 @@ export default function Meritos() {
         const newMerito: Merito = {
           ...payload,
           id: savedId || `merito_${Date.now()}`,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
         updatedList = [newMerito, ...meritos];
       }

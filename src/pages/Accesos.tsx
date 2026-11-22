@@ -23,6 +23,7 @@ import { SQL_MIGRATION_47_TEXT } from '../utils/imageOptimizer';
 import { SQL_MIGRATION_48_TEXT, SQL_MIGRATION_49_TEXT } from '../utils/conoceSocorrista';
 import { SQL_MIGRATION_50_TEXT } from '../lib/soporte';
 import { SQL_MIGRATION_51_TEXT } from '../utils/activityFormatter';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export default function Accesos() {
   const { refreshSettings } = useSettings();
@@ -379,7 +380,7 @@ export default function Accesos() {
           seccionales: u.socorristas?.seccionales,
           tipo_usuario: 'socorrista',
           estado: 'pendiente' as const,
-          fecha_solicitud: new Date().toISOString(),
+          fecha_solicitud: getElSalvadorIsoTimestamp(),
         }));
 
       pendingUsers.forEach(pu => {
@@ -420,7 +421,7 @@ export default function Accesos() {
       }
       return prev.map(s => {
         if (s.id === solId || (s.email && email && s.email.toLowerCase() === email.toLowerCase())) {
-          return { ...s, estado: nuevoEstado, fecha_revision: new Date().toISOString() };
+          return { ...s, estado: nuevoEstado, fecha_revision: getElSalvadorIsoTimestamp() };
         }
         return s;
       });

@@ -11,6 +11,7 @@ import PhoneInputWithCountry from '../components/formularios/PhoneInputWithCount
 import { applyDuiMask } from '../utils/phoneMasks';
 import { supabase } from '../lib/supabase';
 import { getApiUrl } from '../lib/api';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export default function PublicFormulario() {
   const { slug } = useParams<{ slug: string }>();
@@ -179,7 +180,7 @@ export default function PublicFormulario() {
         usuario_nombre: userName || values['nombre'] || values['nombres'] || 'Público / Externo',
         usuario_email: user?.email || values['email'] || values['correo'] || null,
         respuestas: values,
-        created_at: new Date().toISOString()
+        created_at: getElSalvadorIsoTimestamp()
       };
 
       // 1. Guardar en Supabase en la nube (sin select para permitir inserciones públicas anónimas)

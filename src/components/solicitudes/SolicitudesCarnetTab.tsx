@@ -29,7 +29,16 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/logger';
 import SmartStorageImage from '../common/SmartStorageImage';
 import CarnetPhotoCaptureModal, { CarnetPhotoReadyMeta } from '../common/CarnetPhotoCaptureModal';
-import { uploadCarnetPhotoWithFallback } from '../../utils/solicitudesCarnet';
+import {
+  uploadCarnetPhotoWithFallback,
+  validateSocorristaNameForCarnet,
+} from '../../utils/solicitudesCarnet';
+import {
+  formatFechaHoraSV,
+  formatFechaSV,
+  getElSalvadorIsoTimestamp,
+  getElSalvadorMonthString,
+} from '../../utils/dateUtils';
 import {
   useSolicitudReadTracker,
   publishModuleUnreadCount,
@@ -143,7 +152,7 @@ export default function SolicitudesCarnetTab() {
   const [filterSeccional, setFilterSeccional] = useState('Todas');
   const [filterUsuario, setFilterUsuario] = useState('Todos');
   const [periodMode, setPeriodMode] = useState<'todos' | 'mes' | 'semana'>('todos');
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(() => getElSalvadorMonthString());
   const [selectedWeek, setSelectedWeek] = useState(() => {
     const now = new Date();
     const jan4 = new Date(now.getFullYear(), 0, 4);
@@ -284,7 +293,7 @@ export default function SolicitudesCarnetTab() {
               revisado_por: row.revisado_por || null,
               fecha_revision: row.fecha_revision || null,
               estado_solicitud: row.estado_solicitud || 'Pendiente',
-              fecha_solicitud: row.fecha_solicitud || row.created_at || new Date().toISOString(),
+              fecha_solicitud: row.fecha_solicitud || row.created_at || getElSalvadorIsoTimestamp(),
               lote_id: row.lote_id || null,
               es_lote: Boolean(row.es_lote || row.lote_id),
               source: 'db',
@@ -331,7 +340,7 @@ export default function SolicitudesCarnetTab() {
                   revisado_por: parsed.revisado_por || null,
                   fecha_revision: parsed.fecha_revision || null,
                   estado_solicitud: parsed.estado_solicitud || 'Pendiente',
-                  fecha_solicitud: parsed.fecha_solicitud || new Date().toISOString(),
+                  fecha_solicitud: parsed.fecha_solicitud || getElSalvadorIsoTimestamp(),
                   lote_id: parsed.lote_id || null,
                   es_lote: Boolean(parsed.es_lote || parsed.lote_id),
                   source: 'config' as const,
@@ -473,7 +482,7 @@ export default function SolicitudesCarnetTab() {
       if (periodMode === 'mes' && selectedMonth) {
         const d = new Date(r.fecha_solicitud);
         if (!isNaN(d.getTime())) {
-          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          const ym = getElSalvadorMonthString(d);
           matchesPeriod = ym === selectedMonth;
         }
       } else if (periodMode === 'semana' && weekRange) {
@@ -556,7 +565,7 @@ export default function SolicitudesCarnetTab() {
     setFeedbackSuccess(null);
     try {
       const revisadoPor = userName || user?.email || 'Administración';
-      const fechaRev = new Date().toISOString();
+      const fechaRev = getElSalvadorIsoTimestamp();
 
       if (rec.source === 'db') {
         const { error } = await supabase
@@ -663,7 +672,7 @@ export default function SolicitudesCarnetTab() {
           file,
           `${target.carnet || `SOC_${target.socorrista_id}`}_recorte`
         );
-        const nowIso = new Date().toISOString();
+        const nowIso = getElSalvadorIsoTimestamp();
         const revisadoPor = userName || user?.email || 'Administración';
 
         if (target.source === 'db') {
@@ -777,7 +786,7 @@ export default function SolicitudesCarnetTab() {
     setFeedbackSuccess(null);
     try {
       const revisadoPor = userName || user?.email || 'Administración';
-      const fechaRev = new Date().toISOString();
+      const fechaRev = getElSalvadorIsoTimestamp();
 
       let updatedFotoUrl = editRecord.foto_url;
       if (editReplacementFile) {
@@ -943,7 +952,7 @@ export default function SolicitudesCarnetTab() {
       const XLSX = await import('xlsx');
       const rows = filteredRecords.map((r) => ({
         'ID Solicitud': String(r.id),
-        'Fecha Solicitud': new Date(r.fecha_solicitud).toLocaleDateString('es-SV'),
+        'Fecha Solicitud': formatFechaSV(r.fecha_solicitud),
         Carnet: r.carnet,
         Socorrista: r.socorrista_nombre,
         Seccional: r.seccional_nombre,
@@ -955,7 +964,7 @@ export default function SolicitudesCarnetTab() {
         Observaciones: r.observaciones || '',
         'Solicitado Por': r.solicitado_por,
         'Correo Solicitante': r.solicitado_por_email || '',
-        'Fecha Revisión': r.fecha_revision ? new Date(r.fecha_revision).toLocaleDateString('es-SV') : '',
+        'Fecha Revisión': r.fecha_revision ? formatFechaSV(r.fecha_revision) : '',
         'Fotografía Adjunta': r.foto_url || r.socorrista_foto_actual ? 'Sí' : 'No',
       }));
 
@@ -1386,7 +1395,7 @@ export default function SolicitudesCarnetTab() {
                             )}
                           </div>
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <p className={`text-xs ${rowUnread ? 'font-black text-slate-950' : 'font-bold text-slate-900'}`}>
                                 {rec.socorrista_nombre}
                               </p>
@@ -1399,6 +1408,18 @@ export default function SolicitudesCarnetTab() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold mt-0.5">
                               {rec.carnet}
                             </span>
+                            {(() => {
+                              const nameCheck = validateSocorristaNameForCarnet({ nombre_completo: rec.socorrista_nombre });
+                              if (nameCheck.isValid) return null;
+                              return (
+                                <p className="text-[10px] font-semibold text-rose-700 flex items-center gap-1 mt-1">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  <span>
+                                    Nombre con símbolos ({nameCheck.invalidSymbols.map((s) => `"${s}"`).join(', ')})
+                                  </span>
+                                </p>
+                              );
+                            })()}
                           </div>
                         </div>
                       </td>
@@ -1435,7 +1456,7 @@ export default function SolicitudesCarnetTab() {
                       </td>
 
                       <td className={`px-4 py-3.5 whitespace-nowrap text-xs ${rowUnread ? 'font-semibold text-slate-800' : 'text-slate-600'}`}>
-                        {new Date(rec.fecha_solicitud).toLocaleDateString('es-SV', {
+                        {formatFechaSV(rec.fecha_solicitud, {
                           day: '2-digit',
                           month: 'short',
                           year: 'numeric',
@@ -1707,14 +1728,14 @@ export default function SolicitudesCarnetTab() {
                 <div>
                   <span className="text-slate-400 block">Fecha solicitud</span>
                   <span className="font-semibold text-slate-800">
-                    {new Date(detailRecord.fecha_solicitud).toLocaleString('es-SV')}
+                    {formatFechaHoraSV(detailRecord.fecha_solicitud)}
                   </span>
                 </div>
                 {detailRecord.fecha_revision && (
                   <div className="col-span-2">
                     <span className="text-slate-400 block">Última actualización de estado</span>
                     <span className="font-semibold text-slate-800">
-                      {new Date(detailRecord.fecha_revision).toLocaleString('es-SV')}
+                      {formatFechaHoraSV(detailRecord.fecha_revision)}
                     </span>
                   </div>
                 )}

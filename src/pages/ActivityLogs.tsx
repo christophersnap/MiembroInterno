@@ -26,6 +26,13 @@ import {
   formatActivityHuman,
   HumanActivityResult,
 } from '../utils/activityFormatter';
+import {
+  formatFechaHoraSV,
+  getElSalvadorDateTimeInput,
+  getElSalvadorDayStartIso,
+  getElSalvadorIsoTimestamp,
+  parseElSalvadorDateTimeInputToIso,
+} from '../utils/dateUtils';
 
 type ActivityCategoryFilter = 'todas' | HumanActivityResult['category'];
 type TimeWindowPreset = '3h' | '6h' | '12h' | 'today' | 'custom';
@@ -55,43 +62,6 @@ const TIME_WINDOWS: { id: TimeWindowPreset; label: string }[] = [
 
 const MAX_ACTIVITY_ROWS = 300;
 
-/** Convierte una fecha a formato YYYY-MM-DDTHH:mm en hora de El Salvador (UTC-6) para inputs datetime-local */
-function toSvDateTimeInput(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/El_Salvador',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || '00';
-  const hour = get('hour') === '24' ? '00' : get('hour');
-  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`;
-}
-
-/** Inicio del día actual (00:00:00) en El Salvador (UTC-6 sin cambio de horario) como ISO UTC */
-function getStartOfTodaySvIso(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/El_Salvador',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value || '2026';
-  const m = parts.find((p) => p.type === 'month')?.value || '01';
-  const d = parts.find((p) => p.type === 'day')?.value || '01';
-  return new Date(`${y}-${m}-${d}T00:00:00-06:00`).toISOString();
-}
-
-/** Convierte un valor datetime-local (interpretado en hora El Salvador UTC-6) a ISO UTC */
-function svInputToIso(val: string): string | null {
-  if (!val) return null;
-  const parsed = new Date(`${val}:00-06:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
 export default function ActivityLogs() {
   const [logs, setLogs] = useState<EnrichedActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,9 +76,9 @@ export default function ActivityLogs() {
   const [timeWindow, setTimeWindow] = useState<TimeWindowPreset>('today');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return toSvDateTimeInput(yesterday);
+    return getElSalvadorDateTimeInput(yesterday);
   });
-  const [customTo, setCustomTo] = useState<string>(() => toSvDateTimeInput(new Date()));
+  const [customTo, setCustomTo] = useState<string>(() => getElSalvadorDateTimeInput(new Date()));
 
   // Caché en memoria de nombres resueltos para no escanear tablas completas en cada consulta
   const nameCacheRef = useRef<Record<string, string>>({});
@@ -126,16 +96,16 @@ export default function ActivityLogs() {
         const nowMs = Date.now();
 
         if (activeWindow === '3h') {
-          startIso = new Date(nowMs - 3 * 60 * 60 * 1000).toISOString();
+          startIso = getElSalvadorIsoTimestamp(new Date(nowMs - 3 * 60 * 60 * 1000));
         } else if (activeWindow === '6h') {
-          startIso = new Date(nowMs - 6 * 60 * 60 * 1000).toISOString();
+          startIso = getElSalvadorIsoTimestamp(new Date(nowMs - 6 * 60 * 60 * 1000));
         } else if (activeWindow === '12h') {
-          startIso = new Date(nowMs - 12 * 60 * 60 * 1000).toISOString();
+          startIso = getElSalvadorIsoTimestamp(new Date(nowMs - 12 * 60 * 60 * 1000));
         } else if (activeWindow === 'today') {
-          startIso = getStartOfTodaySvIso();
+          startIso = getElSalvadorDayStartIso();
         } else {
-          startIso = svInputToIso(fromVal);
-          endIso = svInputToIso(toVal);
+          startIso = parseElSalvadorDateTimeInputToIso(fromVal);
+          endIso = parseElSalvadorDateTimeInputToIso(toVal);
         }
 
         let query = supabase
@@ -254,7 +224,7 @@ export default function ActivityLogs() {
     let toDate: Date;
 
     if (onlyYesterday) {
-      const todayStart = new Date(getStartOfTodaySvIso());
+      const todayStart = new Date(getElSalvadorDayStartIso());
       fromDate = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
       toDate = new Date(todayStart.getTime() - 60 * 1000);
     } else {
@@ -262,8 +232,8 @@ export default function ActivityLogs() {
       toDate = now;
     }
 
-    const fromStr = toSvDateTimeInput(fromDate);
-    const toStr = toSvDateTimeInput(toDate);
+    const fromStr = getElSalvadorDateTimeInput(fromDate);
+    const toStr = getElSalvadorDateTimeInput(toDate);
     setCustomFrom(fromStr);
     setCustomTo(toStr);
     setTimeWindow('custom');
@@ -271,21 +241,15 @@ export default function ActivityLogs() {
   };
 
   const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return new Intl.DateTimeFormat('es-SV', {
-        timeZone: 'America/El_Salvador',
-        year: 'numeric',
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      }).format(date);
-    } catch {
-      return dateString;
-    }
+    return formatFechaHoraSV(dateString, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
   };
 
   const getInitials = (nombre: string) => {

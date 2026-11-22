@@ -6,6 +6,7 @@ import { generateSecureQrToken, isSecureQrToken } from '../utils/qrSecurity';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
 import { getApiUrl } from '../lib/api';
 import { toTelHref } from '../utils/phoneMask';
+import { formatFechaSV } from '../utils/dateUtils';
 
 export default function VerificacionCarnet() {
   const { carnetId } = useParams<{ carnetId: string }>();
@@ -434,7 +435,7 @@ export default function VerificacionCarnet() {
                 <div className="py-3 flex justify-between">
                   <dt className="text-sm font-medium text-gray-500">Fecha de Ingreso</dt>
                   <dd className="text-sm text-gray-900">
-                    {socorrista.fecha_ingreso ? new Date(socorrista.fecha_ingreso).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}
+                    {socorrista.fecha_ingreso ? formatFechaSV(socorrista.fecha_ingreso) : '-'}
                   </dd>
                 </div>
               )}
@@ -442,7 +443,7 @@ export default function VerificacionCarnet() {
                 <div className="py-3 flex justify-between">
                   <dt className="text-sm font-medium text-gray-500">Cumpleaños / Fecha Nac.</dt>
                   <dd className="text-sm text-gray-900">
-                    {socorrista.fecha_nacimiento ? new Date(socorrista.fecha_nacimiento).toLocaleDateString('es-SV', { timeZone: 'UTC' }) : '-'}
+                    {socorrista.fecha_nacimiento ? formatFechaSV(socorrista.fecha_nacimiento) : '-'}
                   </dd>
                 </div>
               )}

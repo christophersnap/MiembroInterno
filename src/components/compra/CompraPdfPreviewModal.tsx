@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { X, Printer, Download, Eye, Sparkles, Check } from 'lucide-react';
 import { CompraConfig } from '../../types/compra';
 import { SolicitudCompra } from '../../pages/SolicitudesCompra';
+import { getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface CompraPdfPreviewModalProps {
   solicitud?: SolicitudCompra;
@@ -35,7 +36,7 @@ export default function CompraPdfPreviewModal({
     proveedor_sugerido: 'Auto Repuestos El Salvador S.A.',
     prioridad: 'Urgente',
     lugar_fecha: 'San Salvador, 15 de agosto de 2026',
-    fecha_solicitud: new Date().toISOString().split('T')[0],
+    fecha_solicitud: getElSalvadorDateString(),
     hora_solicitud: '10:30:00',
     estado: 'Aprobada',
     autorizado_por: 'Jefatura de Operaciones / Compras'

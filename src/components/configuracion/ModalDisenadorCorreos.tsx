@@ -18,6 +18,7 @@ import {
 import { getApiUrl, sendEmailNotification } from '../../lib/api';
 import { getOfficialLoginUrl } from '../../utils/appUrl';
 import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
+import { formatFechaSV } from '../../utils/dateUtils';
 
 interface ModalDisenadorCorreosProps {
   isOpen: boolean;
@@ -301,7 +302,7 @@ export default function ModalDisenadorCorreos({
         seccionalNombre: 'Seccional Santa Anita',
       }, {
         numeroSolicitud: 'SC-2026-0042',
-        fecha: new Date().toLocaleDateString('es-SV', { year: 'numeric', month: 'long', day: 'numeric' }),
+        fecha: formatFechaSV(new Date(), { year: 'numeric', month: 'long', day: 'numeric' }),
         seccional: 'Seccional Santa Anita (San Salvador)',
         solicitante: 'Lic. Roberto Gómez',
         director: 'Lic. Roberto Gómez (Director Seccional)',
@@ -329,7 +330,7 @@ export default function ModalDisenadorCorreos({
       seccionalNombre: 'Seccional Santa Ana',
     }, {
       codigoSolicitud: 'COMB-2026-0089',
-      fecha: new Date().toLocaleDateString('es-SV', { year: 'numeric', month: 'long', day: 'numeric' }),
+      fecha: formatFechaSV(new Date(), { year: 'numeric', month: 'long', day: 'numeric' }),
       seccional: 'Seccional Santa Ana',
       solicitante: 'Carlos Alvarado (Motorista de Turno)',
       vehiculo: 'Unidad de Rescate R-3',

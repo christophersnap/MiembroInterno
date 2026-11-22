@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
+import { getElSalvadorDateString, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export interface Vehiculo {
   id: number;
@@ -176,7 +177,7 @@ export default function Vehiculos() {
   const [savingMaint, setSavingMaint] = useState(false);
   const [maintForm, setMaintForm] = useState({
     tipo: 'Mantenimiento Preventivo',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: getElSalvadorDateString(),
     fecha_entrega: '',
     millaje: '',
     taller: '',
@@ -251,7 +252,7 @@ export default function Vehiculos() {
                 millaje_actual: 34500,
                 unidad_distancia: 'km',
                 numero_tarjeta_circulacion: 'TC-2024-99881',
-                fecha_vencimiento_tarjeta: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 15 días: Por vencer
+                fecha_vencimiento_tarjeta: getElSalvadorDateString(new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)), // 15 días: Por vencer
                 estado: 'Disponible',
                 notas: 'Unidad de soporte vital avanzado equipada para rescate y traslado.'
               },
@@ -274,7 +275,7 @@ export default function Vehiculos() {
                 millaje_actual: 89200,
                 unidad_distancia: 'km',
                 numero_tarjeta_circulacion: 'TC-2023-45123',
-                fecha_vencimiento_tarjeta: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Vencida hace 5 días
+                fecha_vencimiento_tarjeta: getElSalvadorDateString(new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)), // Vencida hace 5 días
                 estado: 'En mantenimiento',
                 notas: 'En cambio preventivo de frenos y amortiguadores.'
               },
@@ -299,7 +300,7 @@ export default function Vehiculos() {
                 millaje_actual: 450,
                 unidad_distancia: 'km',
                 numero_tarjeta_circulacion: 'AMP-MAT-2022-88',
-                fecha_vencimiento_tarjeta: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Vigente
+                fecha_vencimiento_tarjeta: getElSalvadorDateString(new Date(Date.now() + 120 * 24 * 60 * 60 * 1000)), // Vigente
                 estado: 'Disponible',
                 notas: 'Embarcación equipada con motor fuera de borda 150HP y camillas flotantes.'
               }
@@ -629,7 +630,7 @@ export default function Vehiculos() {
         foto_vehiculo_url: fotoUrl || null,
         estado: vehiculoForm.estado,
         notas: vehiculoForm.notas.trim() || null,
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (dbTableMissing) {
@@ -648,7 +649,7 @@ export default function Vehiculos() {
             id: newId,
             ...payload,
             seccional_nombre: seccionales.find(s => s.id === payload.seccional_id)?.nombre || 'Sin Seccional',
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           };
           const updated = [newObj, ...vehiculos];
           setVehiculos(updated);
@@ -732,7 +733,7 @@ export default function Vehiculos() {
               id: 1,
               vehiculo_id: veh.id,
               tipo: 'Mantenimiento Preventivo',
-              fecha: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              fecha: getElSalvadorDateString(new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)),
               millaje: (veh.millaje_actual || 1000) - 2500,
               taller: 'Taller Central de Emergencias Cruz Verde',
               descripcion: 'Cambio de aceite sintético 15W40, filtro de aceite, filtro de aire y engrase general de suspensión.',
@@ -765,7 +766,7 @@ export default function Vehiculos() {
     if (!selectedVehiculoForMaint) return;
     setMaintForm({
       tipo: 'Mantenimiento Preventivo',
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getElSalvadorDateString(),
       fecha_entrega: '',
       millaje: String(selectedVehiculoForMaint.millaje_actual || ''),
       taller: '',
@@ -839,7 +840,7 @@ export default function Vehiculos() {
         const newM: Mantenimiento = {
           id: Date.now(),
           ...maintPayload,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
         const updatedList = [newM, ...mantenimientos];
         setMantenimientos(updatedList);
@@ -872,7 +873,7 @@ export default function Vehiculos() {
           .update({
             millaje_actual: nuevoMillajeActual,
             estado: nuevoEstadoVehiculo,
-            updated_at: new Date().toISOString()
+            updated_at: getElSalvadorIsoTimestamp()
           })
           .eq('id', selectedVehiculoForMaint.id);
 

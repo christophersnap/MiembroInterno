@@ -6,6 +6,13 @@ import { getCroppedImgResult } from '../utils/cropImage';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
+import {
+  formatFechaHoraSV,
+  getElSalvadorDateString,
+  getElSalvadorDateTime,
+  getElSalvadorIsoTimestamp,
+  parseSafeDateSV,
+} from '../utils/dateUtils';
 import WatermarkImage from '../components/WatermarkImage';
 import DateInput from '../components/DateInput';
 import DocumentosSocorristaCard from '../components/socorristas/DocumentosSocorristaCard';
@@ -234,8 +241,8 @@ export default function SocorristaProfile() {
 
   const [newCurso, setNewCurso] = useState({
     curso_id: '',
-    anio: new Date().getFullYear(),
-    fecha_certificacion: new Date().toISOString().split('T')[0],
+    anio: getElSalvadorDateTime().year,
+    fecha_certificacion: getElSalvadorDateString(),
     fecha_vencimiento: '',
   });
 
@@ -715,7 +722,7 @@ export default function SocorristaProfile() {
           contacto_emergencia_telefono: composedEm1 || '',
           contacto_emergencia_nombre_2: editForm.contacto_emergencia_nombre_2 || '',
           contacto_emergencia_telefono_2: composedEm2 || '',
-          updated_at: new Date().toISOString()
+          updated_at: getElSalvadorIsoTimestamp()
         };
         const { data: existingConf } = await supabase
           .from('configuracion')
@@ -870,12 +877,12 @@ export default function SocorristaProfile() {
     const cursoId = e.target.value;
     const curso = availableCursos.find(c => c.id.toString() === cursoId);
     if (curso) {
-      const certDate = new Date(newCurso.fecha_certificacion);
+      const certDate = parseSafeDateSV(newCurso.fecha_certificacion) || new Date();
       certDate.setMonth(certDate.getMonth() + curso.vigencia_meses);
       setNewCurso({
         ...newCurso,
         curso_id: cursoId,
-        fecha_vencimiento: certDate.toISOString().split('T')[0]
+        fecha_vencimiento: getElSalvadorDateString(certDate)
       });
     } else {
       setNewCurso({ ...newCurso, curso_id: cursoId });
@@ -1799,7 +1806,7 @@ export default function SocorristaProfile() {
                     )}
                     {fechaGeneracion && (
                       <p className="mt-2 text-xs text-gray-500">
-                        Generado el: {new Date(fechaGeneracion).toLocaleString('es-SV')}
+                        Generado el: {formatFechaHoraSV(fechaGeneracion)}
                       </p>
                     )}
                     <div className="mt-2 flex space-x-4">

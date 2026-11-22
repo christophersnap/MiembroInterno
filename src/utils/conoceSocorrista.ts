@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { getElSalvadorIsoTimestamp } from './dateUtils';
 
 export interface DependienteItem {
   nombre: string;
@@ -362,7 +363,7 @@ export async function saveSocorristaKycData(
   extra: ConoceSocorristaExtraData,
   optionalBaseUpdates?: { email?: string; direccion?: string }
 ): Promise<{ savedInTable: boolean }> {
-  const nowIso = new Date().toISOString();
+  const nowIso = getElSalvadorIsoTimestamp();
   const cleanDetalle = (extra.dependientes_detalle || [])
     .map((d) => ({
       nombre: String(d?.nombre || '').trim(),

@@ -10,6 +10,12 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
+import {
+  formatFechaSV,
+  getElSalvadorDateTimeInput,
+  getElSalvadorIsoTimestamp,
+  parseElSalvadorDateTimeInputToIso,
+} from '../utils/dateUtils';
 
 export interface AnuncioItem {
   id: string;
@@ -146,8 +152,10 @@ export default function Anuncios() {
     else if (preset === '7d') now.setDate(now.getDate() + 7);
     else if (preset === '15d') now.setDate(now.getDate() + 15);
     else if (preset === '30d') now.setDate(now.getDate() + 30);
-    else if (preset === 'custom' && formFechaExp) return new Date(formFechaExp).toISOString();
-    return now.toISOString();
+    else if (preset === 'custom' && formFechaExp) {
+      return parseElSalvadorDateTimeInputToIso(formFechaExp);
+    }
+    return getElSalvadorIsoTimestamp(now);
   };
 
   const handleOpenCreateModal = () => {
@@ -184,10 +192,9 @@ export default function Anuncios() {
     
     if (anuncio.fecha_expiracion) {
       setFormExpPreset('custom');
-      // format for datetime-local
+      // format for datetime-local in El Salvador timezone
       const d = new Date(anuncio.fecha_expiracion);
-      const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-      setFormFechaExp(iso);
+      setFormFechaExp(getElSalvadorDateTimeInput(d));
     } else {
       setFormExpPreset('nunca');
       setFormFechaExp('');
@@ -365,7 +372,7 @@ export default function Anuncios() {
         archivo_tamano: finalArchivoTamano.trim() || null,
         autor_id: user?.id,
         autor_nombre: 'Cruz Verde Salvadoreña',
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (editingAnuncio) {
@@ -400,7 +407,7 @@ export default function Anuncios() {
           ...anuncioData as any,
           id: newId,
           vistas_count: 0,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
 
         const { error: sbError } = await supabase
@@ -810,7 +817,7 @@ CREATE POLICY "Admin y autorizados pueden insertar anuncios" ON public.anuncios 
                       ) : anuncio.fecha_expiracion ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
                           <Clock className="w-3 h-3 mr-1" />
-                          Vence: {new Date(anuncio.fecha_expiracion).toLocaleDateString()}
+                          Vence: {formatFechaSV(anuncio.fecha_expiracion)}
                         </span>
                       ) : (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-medium text-gray-500">
@@ -955,7 +962,7 @@ CREATE POLICY "Admin y autorizados pueden insertar anuncios" ON public.anuncios 
 
                     <div className="text-2xs text-gray-400 flex items-center space-x-1 font-medium">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      <span>Publicado: {new Date(anuncio.created_at || Date.now()).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                      <span>Publicado: {formatFechaSV(anuncio.created_at || new Date(), { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                     </div>
                   </div>
                 </div>

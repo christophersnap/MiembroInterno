@@ -21,6 +21,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { logActivity } from '../../lib/logger';
+import { formatFechaSV } from '../../utils/dateUtils';
 import {
   DEFAULT_IMAGE_OPT_CONFIG,
   ImageOptimizationConfig,
@@ -911,7 +912,7 @@ export default function ConfiguracionImagenes({ onSaved }: ConfiguracionImagenes
                           </td>
                           <td className="py-2 px-3.5 text-2xs text-gray-500 whitespace-nowrap">
                             {img.created_at
-                              ? new Date(img.created_at).toLocaleDateString('es-SV', {
+                              ? formatFechaSV(img.created_at, {
                                   day: '2-digit',
                                   month: 'short',
                                   year: 'numeric',

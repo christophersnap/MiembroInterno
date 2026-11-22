@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { HelpCircle, Send, CheckCircle2, AlertCircle, Lock } from 'lucide-react';
 import { SolicitudCombustible } from '../../types/combustible';
+import { getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface CombustibleFormProps {
   seccionales: { id: number; nombre: string; director?: string; correo?: string }[];
@@ -142,7 +143,7 @@ export default function CombustibleForm({
       nombre_solicitante: nombreSolicitante.trim(),
       telefono_solicitante: telefonoSolicitante.trim(),
       observaciones: observaciones.trim(),
-      fecha_solicitud: new Date().toISOString().split('T')[0]
+      fecha_solicitud: getElSalvadorDateString()
     };
 
     await onSubmit(payload);

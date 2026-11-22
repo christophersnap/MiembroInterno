@@ -1,6 +1,153 @@
 import { supabase } from '../lib/supabase';
 import { fileToCompactDataUrl } from './cropImage';
 import { optimizeImageForUpload, getExtensionFromFile } from './imageOptimizer';
+import { formatFechaHoraSV, getElSalvadorIsoTimestamp } from './dateUtils';
+
+export interface InvalidNameFieldDetail {
+  field: 'primer_nombre' | 'segundo_nombre' | 'primer_apellido' | 'segundo_apellido' | 'nombre_completo';
+  label: string;
+  value: string;
+  symbols: string[];
+}
+
+export interface SocorristaNameValidationResult {
+  isValid: boolean;
+  missingRequired: boolean;
+  invalidSymbols: string[];
+  invalidFields: InvalidNameFieldDetail[];
+  fullName: string;
+  message: string;
+}
+
+const VALID_NAME_CHAR_REGEX = /^[\p{L}\s]+$/u;
+const INVALID_NAME_CHAR_GLOBAL_REGEX = /[^\p{L}\s]/gu;
+
+function extractInvalidNameSymbols(text: string): string[] {
+  const matches = text.match(INVALID_NAME_CHAR_GLOBAL_REGEX);
+  if (!matches) return [];
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const ch of matches) {
+    if (!seen.has(ch)) {
+      seen.add(ch);
+      unique.push(ch);
+    }
+  }
+  return unique;
+}
+
+/**
+ * Valida que el nombre de un socorrista no contenga números ni símbolos impropios
+ * de un nombre antes de solicitar o emitir un carnet institucional.
+ * Únicamente permite letras (incluyendo tildes, diéresis y ñ/Ñ) y espacios.
+ */
+export function validateSocorristaNameForCarnet(socorrista?: {
+  primer_nombre?: string | null;
+  segundo_nombre?: string | null;
+  primer_apellido?: string | null;
+  segundo_apellido?: string | null;
+  nombre_completo?: string | null;
+} | null): SocorristaNameValidationResult {
+  if (!socorrista) {
+    return {
+      isValid: false,
+      missingRequired: true,
+      invalidSymbols: [],
+      invalidFields: [],
+      fullName: '',
+      message: 'No se encontró el nombre del elemento para validar.',
+    };
+  }
+
+  const hasStructuredFields =
+    socorrista.primer_nombre !== undefined ||
+    socorrista.segundo_nombre !== undefined ||
+    socorrista.primer_apellido !== undefined ||
+    socorrista.segundo_apellido !== undefined;
+
+  const invalidFields: InvalidNameFieldDetail[] = [];
+  const allSymbolsSet = new Set<string>();
+  let missingRequired = false;
+
+  if (hasStructuredFields) {
+    const fields: Array<{
+      field: InvalidNameFieldDetail['field'];
+      label: string;
+      value: string;
+      required: boolean;
+    }> = [
+      { field: 'primer_nombre', label: 'Primer nombre', value: String(socorrista.primer_nombre || '').trim(), required: true },
+      { field: 'segundo_nombre', label: 'Segundo nombre', value: String(socorrista.segundo_nombre || '').trim(), required: false },
+      { field: 'primer_apellido', label: 'Primer apellido', value: String(socorrista.primer_apellido || '').trim(), required: true },
+      { field: 'segundo_apellido', label: 'Segundo apellido', value: String(socorrista.segundo_apellido || '').trim(), required: false },
+    ];
+
+    for (const item of fields) {
+      if (item.required && !item.value) {
+        missingRequired = true;
+      }
+      if (item.value && !VALID_NAME_CHAR_REGEX.test(item.value)) {
+        const symbols = extractInvalidNameSymbols(item.value);
+        symbols.forEach((s) => allSymbolsSet.add(s));
+        invalidFields.push({
+          field: item.field,
+          label: item.label,
+          value: item.value,
+          symbols,
+        });
+      }
+    }
+  } else {
+    const full = String(socorrista.nombre_completo || '').trim();
+    if (!full) {
+      missingRequired = true;
+    } else if (!VALID_NAME_CHAR_REGEX.test(full)) {
+      const symbols = extractInvalidNameSymbols(full);
+      symbols.forEach((s) => allSymbolsSet.add(s));
+      invalidFields.push({
+        field: 'nombre_completo',
+        label: 'Nombre completo',
+        value: full,
+        symbols,
+      });
+    }
+  }
+
+  const fullName = hasStructuredFields
+    ? [
+        socorrista.primer_nombre,
+        socorrista.segundo_nombre,
+        socorrista.primer_apellido,
+        socorrista.segundo_apellido,
+      ]
+        .filter((part) => Boolean(part && String(part).trim()))
+        .join(' ')
+    : String(socorrista.nombre_completo || '').trim();
+
+  const invalidSymbols = Array.from(allSymbolsSet);
+  const isValid = !missingRequired && invalidFields.length === 0;
+
+  let message = '';
+  if (missingRequired && invalidSymbols.length > 0) {
+    message = `El nombre del elemento está incompleto y contiene símbolos no permitidos (${invalidSymbols.map((s) => `"${s}"`).join(', ')}). Corrige el nombre en el perfil antes de solicitar el carnet.`;
+  } else if (missingRequired) {
+    message = 'El elemento no tiene registrados su primer nombre y primer apellido completos. Corrige el perfil antes de solicitar el carnet.';
+  } else if (invalidSymbols.length > 0) {
+    const fieldsSummary = invalidFields
+      .map((f) => `${f.label}: "${f.value}"`)
+      .join(' · ');
+    message = `El nombre del elemento contiene caracteres o símbolos que no corresponden a un nombre (${invalidSymbols.map((s) => `"${s}"`).join(', ')}). Detectado en ${fieldsSummary}. Debe corregirse en el perfil del socorrista antes de solicitar el carnet.`;
+  }
+
+  return {
+    isValid,
+    missingRequired,
+    invalidSymbols,
+    invalidFields,
+    fullName,
+    message,
+  };
+}
 
 export async function uploadCarnetPhotoWithFallback(
   rawFile: File,
@@ -89,15 +236,16 @@ export function isBlockingCarnetState(estado?: string | null): boolean {
 
 export function formatCarnetRequestDate(isoDate?: string | null): string {
   if (!isoDate) return 'Fecha no disponible';
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return 'Fecha no disponible';
-  return d.toLocaleString('es-SV', {
+  const formatted = formatFechaHoraSV(isoDate, {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    second: undefined,
+    hour12: true,
   });
+  return formatted === '-' ? 'Fecha no disponible' : formatted;
 }
 
 export async function fetchLatestCarnetRequestsMap(
@@ -138,7 +286,7 @@ export async function fetchLatestCarnetRequestsMap(
           id: row.id,
           socorrista_id: Number(row.socorrista_id),
           estado_solicitud: row.estado_solicitud || 'Pendiente',
-          fecha_solicitud: row.fecha_solicitud || row.created_at || new Date().toISOString(),
+          fecha_solicitud: row.fecha_solicitud || row.created_at || getElSalvadorIsoTimestamp(),
           tipo_solicitud: row.tipo_solicitud || 'Nuevo',
           motivo: row.motivo || null,
           detalles_motivo: row.detalles_motivo || null,
@@ -174,7 +322,7 @@ export async function fetchLatestCarnetRequestsMap(
             id: row.clave,
             socorrista_id: socId,
             estado_solicitud: parsed.estado_solicitud || 'Pendiente',
-            fecha_solicitud: parsed.fecha_solicitud || new Date().toISOString(),
+            fecha_solicitud: parsed.fecha_solicitud || getElSalvadorIsoTimestamp(),
             tipo_solicitud: parsed.tipo_solicitud || 'Nuevo',
             motivo: parsed.motivo || null,
             detalles_motivo: parsed.detalles_motivo || null,
@@ -217,7 +365,14 @@ export interface CreateCarnetSolicitudInput {
 export async function createCarnetSolicitudSafe(
   input: CreateCarnetSolicitudInput
 ): Promise<{ ok: boolean; via: 'db' | 'config'; error?: string }> {
-  const nowIso = new Date().toISOString();
+  if (input.nombre_completo && input.nombre_completo.trim()) {
+    const nameCheck = validateSocorristaNameForCarnet({ nombre_completo: input.nombre_completo });
+    if (!nameCheck.isValid) {
+      return { ok: false, via: 'db', error: nameCheck.message };
+    }
+  }
+
+  const nowIso = getElSalvadorIsoTimestamp();
 
   const corePayload = {
     socorrista_id: input.socorrista_id,
@@ -226,6 +381,7 @@ export async function createCarnetSolicitudSafe(
     detalles_motivo: input.detalles_motivo || null,
     foto_url: input.foto_url || null,
     estado_solicitud: 'Pendiente',
+    fecha_solicitud: nowIso,
   };
 
   const extendedPayload = {
@@ -295,7 +451,14 @@ export interface ResubmitCarnetSolicitudInput extends CreateCarnetSolicitudInput
 export async function resubmitCarnetSolicitudSafe(
   input: ResubmitCarnetSolicitudInput
 ): Promise<{ ok: boolean; via: 'db' | 'config'; error?: string }> {
-  const nowIso = new Date().toISOString();
+  if (input.nombre_completo && input.nombre_completo.trim()) {
+    const nameCheck = validateSocorristaNameForCarnet({ nombre_completo: input.nombre_completo });
+    if (!nameCheck.isValid) {
+      return { ok: false, via: 'db', error: nameCheck.message };
+    }
+  }
+
+  const nowIso = getElSalvadorIsoTimestamp();
   const prev = input.previousRequest;
 
   const updateFields = {

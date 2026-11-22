@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { SolicitudCombustible, CombustibleConfig } from '../../types/combustible';
+import { formatFechaSV, getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface CombustiblePdfModalProps {
   solicitud: SolicitudCombustible;
@@ -15,7 +16,7 @@ export default function CombustiblePdfModal({
 }: CombustiblePdfModalProps) {
   const printAreaRef = useRef<HTMLDivElement>(null);
 
-  const fechaEnvioFormateada = solicitud.fecha_envio_completa || `${solicitud.fecha_solicitud || new Date().toISOString().split('T')[0]} ${solicitud.hora_solicitud || '12:00:00'}`;
+  const fechaEnvioFormateada = solicitud.fecha_envio_completa || `${solicitud.fecha_solicitud || getElSalvadorDateString()} ${solicitud.hora_solicitud || '12:00:00'}`;
 
   // Tipografía dinámica
   const getFontFamilyClass = () => {
@@ -320,7 +321,7 @@ export default function CombustiblePdfModal({
                   <strong>{config.pdfLabelAutoriza}</strong> {solicitud.autorizado_por || 'Área Administrativa Central'}
                 </p>
                 <p>
-                  <strong>{config.pdfLabelFechaAuto}</strong> {solicitud.fecha_autorizacion ? new Date(solicitud.fecha_autorizacion).toLocaleDateString('es-SV') : 'Pendiente de autorización'}
+                  <strong>{config.pdfLabelFechaAuto}</strong> {solicitud.fecha_autorizacion ? formatFechaSV(solicitud.fecha_autorizacion) : 'Pendiente de autorización'}
                 </p>
               </div>
             </div>

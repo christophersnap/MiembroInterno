@@ -28,6 +28,7 @@ import { logActivity } from '../lib/logger';
 import WatermarkImage from '../components/WatermarkImage';
 import { useAuth } from '../contexts/AuthContext';
 import { parseCargosSecundarios } from '../utils/cargosCatalog';
+import { getElSalvadorDateString } from '../utils/dateUtils';
 import SocorristasExcelModal, { ExcelExportPreset } from '../components/socorristas/SocorristasExcelModal';
 import {
   ConoceSocorristaExtraData,
@@ -445,7 +446,7 @@ export default function Socorristas() {
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Socorristas');
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getElSalvadorDateString();
       XLSX.writeFile(wb, `socorristas_${preset}_${todayStr}.xlsx`);
 
       await logActivity('Exportó Excel de Socorristas', 'Socorrista', undefined, {

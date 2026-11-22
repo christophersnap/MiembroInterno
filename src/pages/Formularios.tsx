@@ -13,6 +13,7 @@ import { getApiUrl } from '../lib/api';
 import { generateSlug } from '../utils/slugify';
 import { getOfficialFormUrl } from '../utils/appUrl';
 import { logActivity } from '../lib/logger';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export default function Formularios() {
   const { user, userName, role, permissions, directorSeccionalId, userSeccionalId, userSeccionalNombre, getModuleScope, getModuleSeccionalIds } = useAuth();
@@ -165,7 +166,7 @@ export default function Formularios() {
       try {
         await supabase
           .from('formularios')
-          .update({ activo: updatedActivo, updated_at: new Date().toISOString() })
+          .update({ activo: updatedActivo, updated_at: getElSalvadorIsoTimestamp() })
           .eq('id', form.id);
       } catch (e) {}
 
@@ -231,7 +232,7 @@ export default function Formularios() {
             .update({
               ...formData,
               slug: targetSlug,
-              updated_at: new Date().toISOString()
+              updated_at: getElSalvadorIsoTimestamp()
             })
             .eq('id', editingForm.id);
         } catch (supaErr) {
@@ -248,8 +249,8 @@ export default function Formularios() {
           slug: targetSlug,
           creado_por: user?.id || null,
           creado_por_nombre: userName || user?.email || 'Administración Cruz Verde',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp(),
+          updated_at: getElSalvadorIsoTimestamp()
         };
 
         let savedLocally = false;

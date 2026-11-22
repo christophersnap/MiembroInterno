@@ -19,6 +19,12 @@ import CompraForm, { ArchivoCotizacion } from '../components/compra/CompraForm';
 import { generarHtmlCorreoCompra } from '../lib/emailNotification';
 import { sendEmailNotification, getApiUrl } from '../lib/api';
 import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
+import {
+  formatFechaSV,
+  getElSalvadorDateString,
+  getElSalvadorDateTime,
+  getElSalvadorIsoTimestamp,
+} from '../utils/dateUtils';
 
 export interface SolicitudCompra {
   id: number;
@@ -260,25 +266,12 @@ export default function SolicitudesCompra() {
 
   // Fecha y hora formateada oficial de El Salvador (UTC-6)
   const getFechaHoraElSalvador = () => {
-    const ahora = new Date();
-    // Opciones para El Salvador
-    const fechaStr = ahora.toLocaleDateString('es-SV', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      timeZone: 'America/El_Salvador'
-    });
-    const horaStr = ahora.toLocaleTimeString('es-SV', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/El_Salvador'
-    });
+    const sv = getElSalvadorDateTime();
     return {
-      completo: `San Salvador, ${fechaStr} (${horaStr})`,
-      fechaTexto: fechaStr,
-      horaTexto: horaStr,
-      fechaIso: ahora.toISOString().split('T')[0]
+      completo: `San Salvador, ${sv.fechaTexto} (${sv.hora12})`,
+      fechaTexto: sv.fechaTexto,
+      horaTexto: sv.hora12,
+      fechaIso: sv.fechaISO
     };
   };
 
@@ -466,7 +459,7 @@ export default function SolicitudesCompra() {
               estado: 'Pendiente',
               correo_enviado: true,
               correos_notificados: 'administracion@cruzverdesv.org, presidencia@cruzverdesv.org',
-              created_at: new Date(Date.now() - 86400000).toISOString()
+              created_at: getElSalvadorIsoTimestamp(new Date(Date.now() - 86400000))
             }
           ];
           setSolicitudes(demoSol);
@@ -819,7 +812,7 @@ NOTIFY pgrst, 'reload schema';`;
         const newRecord: SolicitudCompra = {
           id: Date.now(),
           ...payload,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
         const updatedList = [newRecord, ...solicitudes];
         setSolicitudes(updatedList);
@@ -835,7 +828,7 @@ NOTIFY pgrst, 'reload schema';`;
           const newRecord: SolicitudCompra = {
             id: Date.now(),
             ...payload,
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           };
           const updatedList = [newRecord, ...solicitudes];
           setSolicitudes(updatedList);
@@ -934,7 +927,7 @@ NOTIFY pgrst, 'reload schema';`;
       const lugarFechaStr = `San Salvador, ${infoFecha.fechaTexto} (${infoFecha.horaTexto})`;
 
       // Generar Folio institucional
-      const year = new Date().getFullYear();
+      const year = getElSalvadorDateTime().year;
       const randomNum = Math.floor(1000 + Math.random() * 9000);
       const folioGenerado = `SC-${year}-${randomNum}`;
 
@@ -975,7 +968,7 @@ NOTIFY pgrst, 'reload schema';`;
         const newRecord: SolicitudCompra = {
           id: Date.now(),
           ...payload,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
         const updatedList = [newRecord, ...solicitudes];
         setSolicitudes(updatedList);
@@ -999,7 +992,7 @@ NOTIFY pgrst, 'reload schema';`;
           const newRecord: SolicitudCompra = {
             id: Date.now(),
             ...payload,
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           };
           const updatedList = [newRecord, ...solicitudes];
           setSolicitudes(updatedList);
@@ -1131,7 +1124,7 @@ Cruz Verde Salvadoreña`;
         numeroSolicitud: selectedSolicitud.folio
       }, {
         numeroSolicitud: selectedSolicitud.folio,
-        fecha: selectedSolicitud.fecha_solicitud || selectedSolicitud.lugar_fecha || new Date().toLocaleDateString('es-SV'),
+        fecha: selectedSolicitud.fecha_solicitud || selectedSolicitud.lugar_fecha || formatFechaSV(new Date()),
         seccional: selectedSolicitud.seccional_nombre,
         solicitante: selectedSolicitud.solicitado_por,
         director: selectedSolicitud.solicitado_por,
@@ -1190,7 +1183,7 @@ Cruz Verde Salvadoreña`;
           .update({
             correo_enviado: true,
             correos_notificados: updatedNotificados,
-            updated_at: new Date().toISOString()
+            updated_at: getElSalvadorIsoTimestamp()
           })
           .eq('id', selectedSolicitud.id);
         
@@ -1223,12 +1216,12 @@ Cruz Verde Salvadoreña`;
     try {
       const payload: any = {
         estado: newStatus,
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (newStatus === 'Aprobada') {
         payload.autorizado_por = userName || user?.email || 'Departamento Administrativo';
-        payload.fecha_autorizacion = new Date().toISOString();
+        payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (newStatus === 'Rechazada') {
         payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';
@@ -2211,12 +2204,12 @@ Cruz Verde Salvadoreña`;
             proveedor_sugerido: 'Repuestos Los Andes / Taller Central',
             prioridad: 'Urgente',
             lugar_fecha: 'San Salvador, 15 de agosto de 2026 (10:30 AM)',
-            fecha_solicitud: new Date().toISOString().split('T')[0],
+            fecha_solicitud: getElSalvadorDateString(),
             hora_solicitud: '10:30 AM',
             estado: 'Pendiente',
             correo_enviado: true,
             correos_notificados: 'administracion@cruzverdesv.org',
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           }}
           config={compraConfig}
           onClose={() => {

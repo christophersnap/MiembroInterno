@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 import { getApiUrl } from './api';
 
 export type CountdownPosition = 'izquierda' | 'centro' | 'derecha';
@@ -253,7 +254,7 @@ function normalizeCountdown(row: any): NoticiaCountdown {
     nombre_evento: row.nombre_evento || 'Evento Institucional',
     etiqueta_superior: row.etiqueta_superior ?? 'Próximo Evento',
     subtitulo: row.subtitulo || null,
-    fecha_objetivo: row.fecha_objetivo || new Date(Date.now() + 7 * 86400000).toISOString(),
+    fecha_objetivo: row.fecha_objetivo || getElSalvadorIsoTimestamp(new Date(Date.now() + 7 * 86400000)),
     texto_finalizado: row.texto_finalizado || '¡El evento ha comenzado!',
     mostrar_meses: row.mostrar_meses === undefined ? true : Boolean(row.mostrar_meses),
     imagen_url: row.imagen_url || null,

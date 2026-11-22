@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { getElSalvadorIsoTimestamp } from './dateUtils';
 
 export type SolicitudModulo = 'carnet' | 'combustible' | 'compra' | 'soporte';
 
@@ -316,7 +317,7 @@ export async function markSolicitudAsRead(
         user_id: userId,
         modulo,
         solicitud_key: keyStr,
-        leido_at: new Date().toISOString(),
+        leido_at: getElSalvadorIsoTimestamp(),
       },
       { onConflict: 'user_id,modulo,solicitud_key' }
     );
@@ -342,7 +343,7 @@ export async function markMultipleSolicitudesAsRead(
 
   const currentSet = getLocalReadSet(userId);
   const toUpsert: { user_id: string; modulo: SolicitudModulo; solicitud_key: string; leido_at: string }[] = [];
-  const nowIso = new Date().toISOString();
+  const nowIso = getElSalvadorIsoTimestamp();
   let changed = false;
 
   items.forEach(({ modulo, solicitudKey }) => {

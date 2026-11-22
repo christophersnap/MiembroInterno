@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { DocumentoSocorrista, TIPOS_DOCUMENTOS } from '../../types/socorrista';
 import { useAuth } from '../../contexts/AuthContext';
 import { optimizeImageForUpload } from '../../utils/imageOptimizer';
+import { formatFechaSV, getElSalvadorIsoTimestamp } from '../../utils/dateUtils';
 
 interface DocumentosSocorristaCardProps {
   socorristaId: number;
@@ -136,7 +137,7 @@ export default function DocumentosSocorristaCard({
         version: nextVersion,
         es_vigente: true,
         tamanio_bytes: file.size,
-        fecha_subida: new Date().toISOString(),
+        fecha_subida: getElSalvadorIsoTimestamp(),
         subido_por: userName || 'Sistema'
       };
 
@@ -300,7 +301,7 @@ export default function DocumentosSocorristaCard({
                             Versión Vigente (v{activeDoc.version})
                           </span>
                           <span className="text-3xs text-gray-400">
-                            {new Date(activeDoc.fecha_subida).toLocaleDateString('es-SV', {
+                            {formatFechaSV(activeDoc.fecha_subida, {
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric'
@@ -376,7 +377,7 @@ export default function DocumentosSocorristaCard({
                               <div className="truncate mr-2">
                                 <span className="font-bold text-gray-700 mr-1.5">v{prevDoc.version}</span>
                                 <span className="text-gray-400">
-                                  ({new Date(prevDoc.fecha_subida).toLocaleDateString('es-SV')})
+                                  ({formatFechaSV(prevDoc.fecha_subida)})
                                 </span>
                                 <span className="text-gray-500 ml-1 truncate">{prevDoc.nombre_archivo}</span>
                               </div>

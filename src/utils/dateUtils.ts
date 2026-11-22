@@ -1,15 +1,23 @@
 /**
- * Utilidades oficiales de Fecha y Hora para El Salvador (America/El_Salvador / UTC-6)
- * Garantiza que días, meses, años y horas se calculen siempre con el huso horario oficial salvadoreño.
+ * Utilidades oficiales de Fecha y Hora para El Salvador (America/El_Salvador / UTC-06:00).
+ * El Salvador no usa horario de verano (DST), por lo que su desplazamiento es siempre UTC-06:00.
+ * Garantiza que todos los registros, actualizaciones, filtros y formatos visuales usen
+ * exclusivamente la hora oficial de El Salvador.
  */
 
 export const EL_SALVADOR_TZ = 'America/El_Salvador';
+export const EL_SALVADOR_OFFSET = '-06:00';
+export const EL_SALVADOR_LOCALE = 'es-SV';
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const DATETIME_LOCAL_NO_TZ_REGEX = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/;
 
 /**
- * Obtiene los componentes de fecha y hora actuales en El Salvador
+ * Extrae partes numéricas de fecha y hora en zona horaria de El Salvador.
  */
-export function getElSalvadorDateTime(baseDate: Date = new Date()) {
-  const dtf = new Intl.DateTimeFormat('es-SV', {
+function extractSvParts(baseDate: Date = new Date()) {
+  const safeDate = Number.isNaN(baseDate.getTime()) ? new Date() : baseDate;
+  const dtf = new Intl.DateTimeFormat('en-CA', {
     timeZone: EL_SALVADOR_TZ,
     year: 'numeric',
     month: '2-digit',
@@ -17,49 +25,145 @@ export function getElSalvadorDateTime(baseDate: Date = new Date()) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false
+    hour12: false,
   });
 
-  const parts = dtf.formatToParts(baseDate);
+  const parts = dtf.formatToParts(safeDate);
   const partMap: Record<string, string> = {};
-  parts.forEach(p => { partMap[p.type] = p.value; });
+  parts.forEach((p) => {
+    partMap[p.type] = p.value;
+  });
 
-  const year = partMap['year'] || String(baseDate.getFullYear());
-  const month = partMap['month'] || String(baseDate.getMonth() + 1).padStart(2, '0');
-  const day = partMap['day'] || String(baseDate.getDate()).padStart(2, '0');
-  const hour = partMap['hour'] || '00';
+  const year = partMap['year'] || String(safeDate.getUTCFullYear());
+  const month = partMap['month'] || String(safeDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = partMap['day'] || String(safeDate.getUTCDate()).padStart(2, '0');
+  const rawHour = partMap['hour'] || '00';
+  const hour = rawHour === '24' ? '00' : rawHour;
   const minute = partMap['minute'] || '00';
   const second = partMap['second'] || '00';
+  const ms = String(safeDate.getMilliseconds()).padStart(3, '0');
 
-  // Fecha formato estándar salvadoreño DD/MM/YYYY
+  return { safeDate, year, month, day, hour, minute, second, ms };
+}
+
+/**
+ * Parsea de forma segura cualquier fecha o timestamp evitando corrimientos de día
+ * en cadenas de solo fecha (YYYY-MM-DD) o inputs sin zona horaria (interpretados en El Salvador).
+ */
+export function parseSafeDateSV(dateInput?: string | Date | number | null): Date | null {
+  if (dateInput === undefined || dateInput === null || dateInput === '') return null;
+  if (dateInput instanceof Date) {
+    return Number.isNaN(dateInput.getTime()) ? null : dateInput;
+  }
+  if (typeof dateInput === 'number') {
+    const d = new Date(dateInput);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const trimmed = String(dateInput).trim();
+  if (!trimmed) return null;
+
+  // Fecha sin hora (YYYY-MM-DD): fijar al mediodía hora El Salvador para evitar retroceso de día
+  if (DATE_ONLY_REGEX.test(trimmed)) {
+    const d = new Date(`${trimmed}T12:00:00${EL_SALVADOR_OFFSET}`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Fecha y hora local sin zona (ej. input datetime-local "2026-05-12T14:30")
+  if (DATETIME_LOCAL_NO_TZ_REGEX.test(trimmed)) {
+    const normalized = trimmed.replace(' ', 'T');
+    const withSeconds = normalized.length === 16 ? `${normalized}:00` : normalized;
+    const d = new Date(`${withSeconds}${EL_SALVADOR_OFFSET}`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const d = new Date(trimmed);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Retorna marca de tiempo ISO-8601 con desplazamiento oficial de El Salvador (-06:00).
+ * Ejemplo: "2026-05-12T14:35:08.123-06:00"
+ * Compatible con columnas TIMESTAMPTZ, TIMESTAMP y TEXT en Supabase/PostgreSQL.
+ */
+export function getElSalvadorIsoTimestamp(baseDate: Date = new Date()): string {
+  const { year, month, day, hour, minute, second, ms } = extractSvParts(baseDate);
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}${EL_SALVADOR_OFFSET}`;
+}
+
+/**
+ * Retorna la fecha actual (o de una Date) en formato YYYY-MM-DD según El Salvador.
+ * Reemplaza a new Date().toISOString().split('T')[0] que adelantaba el día después de las 6:00 p. m.
+ */
+export function getElSalvadorDateString(baseDate: Date = new Date()): string {
+  const { year, month, day } = extractSvParts(baseDate);
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Retorna el mes actual (o de una Date) en formato YYYY-MM según El Salvador.
+ */
+export function getElSalvadorMonthString(baseDate: Date = new Date()): string {
+  const { year, month } = extractSvParts(baseDate);
+  return `${year}-${month}`;
+}
+
+/**
+ * Retorna valor YYYY-MM-DDTHH:mm en hora de El Salvador para inputs <input type="datetime-local">.
+ */
+export function getElSalvadorDateTimeInput(baseDate: Date | string | null | undefined = new Date()): string {
+  const parsed = baseDate ? parseSafeDateSV(baseDate) : new Date();
+  if (!parsed) return '';
+  const { year, month, day, hour, minute } = extractSvParts(parsed);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+/**
+ * Convierte el valor de un input datetime-local (interpretado como hora de El Salvador)
+ * a marca ISO con offset -06:00.
+ */
+export function parseElSalvadorDateTimeInputToIso(val: string): string | null {
+  if (!val) return null;
+  const parsed = parseSafeDateSV(val);
+  if (!parsed) return null;
+  return getElSalvadorIsoTimestamp(parsed);
+}
+
+/**
+ * Retorna el inicio del día (00:00:00.000) en El Salvador como ISO-8601 con offset -06:00.
+ */
+export function getElSalvadorDayStartIso(baseDate: Date = new Date()): string {
+  const { year, month, day } = extractSvParts(baseDate);
+  return `${year}-${month}-${day}T00:00:00.000${EL_SALVADOR_OFFSET}`;
+}
+
+/**
+ * Obtiene los componentes de fecha y hora actuales en El Salvador.
+ */
+export function getElSalvadorDateTime(baseDate: Date = new Date()) {
+  const { safeDate, year, month, day, hour, minute, second } = extractSvParts(baseDate);
+
   const fechaSV = `${day}/${month}/${year}`;
-
-  // Fecha formato ISO seguro para inputs o bases de datos YYYY-MM-DD
   const fechaISO = `${year}-${month}-${day}`;
-
-  // Hora formato 24h
   const hora24 = `${hour}:${minute}:${second}`;
 
-  // Hora formato 12h salvadoreño (ej: 05:37:00 p.m.)
-  const dtf12 = new Intl.DateTimeFormat('es-SV', {
+  const dtf12 = new Intl.DateTimeFormat(EL_SALVADOR_LOCALE, {
     timeZone: EL_SALVADOR_TZ,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: true
+    hour12: true,
   });
-  const hora12 = dtf12.format(baseDate);
+  const hora12 = dtf12.format(safeDate);
 
-  // Fecha en texto largo (ej: 18 de octubre de 2026)
-  const dtfTexto = new Intl.DateTimeFormat('es-SV', {
+  const dtfTexto = new Intl.DateTimeFormat(EL_SALVADOR_LOCALE, {
     timeZone: EL_SALVADOR_TZ,
     day: 'numeric',
     month: 'long',
-    year: 'numeric'
+    year: 'numeric',
   });
-  const fechaTexto = dtfTexto.format(baseDate);
+  const fechaTexto = dtfTexto.format(safeDate);
 
-  // Fecha y hora completa salvadoreña
   const fechaCompletaSV = `${fechaSV} ${hora12}`;
 
   return {
@@ -71,48 +175,81 @@ export function getElSalvadorDateTime(baseDate: Date = new Date()) {
     fechaTexto,
     hora12,
     hora24,
-    fechaCompletaSV
+    fechaCompletaSV,
+    isoTimestamp: getElSalvadorIsoTimestamp(safeDate),
   };
 }
 
 /**
- * Formatea cualquier fecha existente al estilo salvadoreño DD/MM/YYYY
+ * Formatea cualquier fecha existente al estilo salvadoreño (por defecto DD/MM/YYYY)
+ * siempre en zona horaria America/El_Salvador.
  */
-export function formatFechaSV(dateInput?: string | Date | null): string {
-  if (!dateInput) return '-';
+export function formatFechaSV(
+  dateInput?: string | Date | number | null,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (dateInput === undefined || dateInput === null || dateInput === '') return '-';
   try {
-    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-    if (isNaN(d.getTime())) return String(dateInput);
-    return new Intl.DateTimeFormat('es-SV', {
-      timeZone: EL_SALVADOR_TZ,
+    const d = parseSafeDateSV(dateInput);
+    if (!d) return String(dateInput);
+    return new Intl.DateTimeFormat(EL_SALVADOR_LOCALE, {
       day: '2-digit',
       month: '2-digit',
-      year: 'numeric'
+      year: 'numeric',
+      ...options,
+      timeZone: EL_SALVADOR_TZ,
     }).format(d);
-  } catch (e) {
+  } catch {
     return String(dateInput);
   }
 }
 
 /**
- * Formatea fecha y hora completa en El Salvador (DD/MM/YYYY hh:mm a)
+ * Formatea fecha y hora completa en El Salvador (DD/MM/YYYY hh:mm:ss a. m./p. m.).
  */
-export function formatFechaHoraSV(dateInput?: string | Date | null): string {
-  if (!dateInput) return '-';
+export function formatFechaHoraSV(
+  dateInput?: string | Date | number | null,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (dateInput === undefined || dateInput === null || dateInput === '') return '-';
   try {
-    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-    if (isNaN(d.getTime())) return String(dateInput);
-    return new Intl.DateTimeFormat('es-SV', {
-      timeZone: EL_SALVADOR_TZ,
+    const d = parseSafeDateSV(dateInput);
+    if (!d) return String(dateInput);
+    return new Intl.DateTimeFormat(EL_SALVADOR_LOCALE, {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: true
+      hour12: true,
+      ...options,
+      timeZone: EL_SALVADOR_TZ,
     }).format(d);
-  } catch (e) {
+  } catch {
+    return String(dateInput);
+  }
+}
+
+/**
+ * Formatea únicamente la hora en zona horaria de El Salvador.
+ */
+export function formatHoraSV(
+  dateInput?: string | Date | number | null,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (dateInput === undefined || dateInput === null || dateInput === '') return '-';
+  try {
+    const d = parseSafeDateSV(dateInput);
+    if (!d) return String(dateInput);
+    return new Intl.DateTimeFormat(EL_SALVADOR_LOCALE, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      ...options,
+      timeZone: EL_SALVADOR_TZ,
+    }).format(d);
+  } catch {
     return String(dateInput);
   }
 }

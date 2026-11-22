@@ -9,6 +9,7 @@ import { logActivity } from '../../lib/logger';
 import { useSettings } from '../../contexts/SettingsContext';
 import { getApiUrl } from '../../lib/api';
 import ModalDisenadorCorreos from './ModalDisenadorCorreos';
+import { formatFechaSV } from '../../utils/dateUtils';
 
 interface SeccionalInfo {
   id: number;
@@ -271,7 +272,7 @@ export default function ConfiguracionCorreos() {
     .replace('[SECCIONAL]', currentSecNombre)
     .replace('[DIRECTOR]', currentDirectorNombre)
     .replace('[SOLICITANTE]', 'Carlos Mendoza (Encargado)')
-    .replace('[FECHA]', new Date().toLocaleDateString('es-SV', { day: '2-digit', month: '2-digit', year: 'numeric' }))
+    .replace('[FECHA]', formatFechaSV(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' }))
     .replace('[FOLIO]', activeFormTab === 'compra' ? 'CVS-SOL-2026-0045' : 'CVS-COMB-2026-0012')
     .replace('[PLACA]', 'CVS-014');
 
@@ -882,7 +883,7 @@ ${currentConfig.footer}
                   <div className="bg-gray-100/90 px-3.5 py-2 flex items-center justify-between">
                     <span className="font-bold text-gray-700">Fecha de Registro:</span>
                     <span className="font-semibold text-gray-900">
-                      {new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'long', year: 'numeric' })}
+                      {formatFechaSV(new Date(), { day: '2-digit', month: 'long', year: 'numeric' })}
                     </span>
                   </div>
 

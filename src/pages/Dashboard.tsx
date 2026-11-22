@@ -29,6 +29,7 @@ import {
   NoticiaCountdown,
   NoticiasCountdownConfig,
 } from '../lib/noticiasCountdown';
+import { formatFechaSV } from '../utils/dateUtils';
 
 function DashboardPersonAvatar({
   fotoUrl,
@@ -623,7 +624,7 @@ export default function Dashboard() {
           {/* Fecha Oficial Estilo iOS */}
           <div className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-full bg-white/90 border border-gray-200/80 text-gray-700 text-xs font-semibold shadow-2xs">
             <Calendar className="w-3.5 h-3.5 text-gray-400" />
-            <span className="capitalize">{new Date().toLocaleDateString('es-SV', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            <span className="capitalize">{formatFechaSV(new Date(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
           </div>
         </div>
       </div>
@@ -713,7 +714,7 @@ export default function Dashboard() {
 
                 <span className="text-2xs text-gray-500 font-medium flex items-center">
                   <Calendar className="w-3 h-3 mr-1 text-gray-400" />
-                  {new Date(currentBoxAnuncio.created_at || Date.now()).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  {formatFechaSV(currentBoxAnuncio.created_at || new Date(), { day: '2-digit', month: 'short', year: 'numeric' })}
                 </span>
 
                 {activeBoxAnuncios.length > 1 && (
@@ -1467,7 +1468,7 @@ export default function Dashboard() {
               <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-2xs text-gray-400">
                 <span className="flex items-center">
                   <Calendar className="w-3.5 h-3.5 mr-1 text-gray-400" />
-                  Publicado: {new Date(selectedAnuncioModal.created_at || Date.now()).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  Publicado: {formatFechaSV(selectedAnuncioModal.created_at || new Date(), { day: '2-digit', month: 'short', year: 'numeric' })}
                 </span>
                 <span className="font-semibold text-primary">Cruz Verde Salvadoreña</span>
               </div>

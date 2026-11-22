@@ -21,6 +21,7 @@ import {
   getCountryMask,
 } from '../utils/phoneMask';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
+import { getElSalvadorDateString, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 import { FileCheck2, Clock } from 'lucide-react';
 import ConoceSocorristaFormFields from '../components/socorristas/ConoceSocorristaFormFields';
 import {
@@ -58,7 +59,7 @@ export default function NewSocorrista() {
   const [incluirFichaKycAhora, setIncluirFichaKycAhora] = useState(false);
   const [extraKycData, setExtraKycData] = useState<ConoceSocorristaExtraData>({
     ...EMPTY_CONOCE_SOCORRISTA_DATA,
-    fecha_inicio_relacion_laboral: new Date().toISOString().split('T')[0],
+    fecha_inicio_relacion_laboral: getElSalvadorDateString(),
   });
   const [formData, setFormData] = useState({
     primer_nombre: '',
@@ -74,7 +75,7 @@ export default function NewSocorrista() {
     contacto_emergencia_telefono_2: '',
     seccional_id: directorSeccionalId ? directorSeccionalId.toString() : '',
     sexo: 'Masculino',
-    fecha_ingreso: new Date().toISOString().split('T')[0],
+    fecha_ingreso: getElSalvadorDateString(),
     cargo_institucional: '',
     cargo_administrativo: '',
     segundo_cargo_administrativo: '',
@@ -771,7 +772,7 @@ export default function NewSocorrista() {
             contacto_emergencia_telefono: cleanEmergenciaTel1,
             contacto_emergencia_nombre_2: formData.contacto_emergencia_nombre_2 || '',
             contacto_emergencia_telefono_2: cleanEmergenciaTel2,
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           };
           await supabase
             .from('configuracion')

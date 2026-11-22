@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowUpRight, Newspaper } from 'lucide-react';
 import { NoticiaBannerSlide, NoticiasBannerConfig } from '../../lib/noticiasBanner';
+import { formatFechaSV } from '../../utils/dateUtils';
 
 interface NoticiasBannerSliderProps {
   slides: NoticiaBannerSlide[];
@@ -132,7 +133,7 @@ export default function NoticiasBannerSlider({
           const bannerSrc = slide.imagen_banner_url || slide.imagen_url;
           const imgFailed = failedImages[slide.id] || !bannerSrc;
           const formattedDate = slide.created_at
-            ? new Date(slide.created_at).toLocaleDateString('es-SV', {
+            ? formatFechaSV(slide.created_at, {
                 day: 'numeric',
                 month: 'short',
                 year: 'numeric',

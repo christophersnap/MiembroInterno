@@ -21,7 +21,12 @@ import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
 import { sendEmailNotification, getApiUrl } from '../lib/api';
 import { generarHtmlCorreoCombustible } from '../lib/emailNotification';
-import { getElSalvadorDateTime, formatFechaSV, formatFechaHoraSV } from '../utils/dateUtils';
+import {
+  getElSalvadorDateTime,
+  formatFechaSV,
+  formatFechaHoraSV,
+  getElSalvadorIsoTimestamp,
+} from '../utils/dateUtils';
 import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
 
 export default function SolicitudesCombustible() {
@@ -379,7 +384,7 @@ NOTIFY pgrst, 'reload schema';`;
         newRecord = {
           id: Date.now(),
           ...payload,
-          created_at: new Date().toISOString()
+          created_at: getElSalvadorIsoTimestamp()
         };
         const updatedList = [newRecord, ...solicitudes];
         setSolicitudes(updatedList);
@@ -397,7 +402,7 @@ NOTIFY pgrst, 'reload schema';`;
           newRecord = {
             id: Date.now(),
             ...payload,
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           };
           const updatedList = [newRecord, ...solicitudes];
           setSolicitudes(updatedList);
@@ -572,12 +577,12 @@ NOTIFY pgrst, 'reload schema';`;
     try {
       const payload: any = {
         estado: newStatus,
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (newStatus === 'Aprobada') {
         payload.autorizado_por = userName || user?.email || 'Administración Central';
-        payload.fecha_autorizacion = new Date().toISOString();
+        payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (newStatus === 'Rechazada') {
         payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';

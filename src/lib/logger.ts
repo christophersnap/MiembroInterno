@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getElSalvadorDateTime, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export const logActivity = async (
   action: string,
@@ -51,9 +52,11 @@ export const logActivity = async (
       } catch {}
     }
 
+    const svNow = getElSalvadorDateTime();
     const enrichedDetails = {
       ...(details && typeof details === 'object' ? details : details ? { descripcion: String(details) } : {}),
       user_nombre: userNombre || user.email?.split('@')[0] || 'Usuario',
+      fecha_hora_sv: svNow.fechaCompletaSV,
     };
 
     const basePayload = {
@@ -63,6 +66,7 @@ export const logActivity = async (
       entity_type: entityType,
       entity_id: entityId !== undefined && entityId !== null ? String(entityId) : null,
       details: enrichedDetails,
+      created_at: getElSalvadorIsoTimestamp(),
     };
 
     // Intento 1: inserción directa permitiendo que la secuencia / UUID asigne ID

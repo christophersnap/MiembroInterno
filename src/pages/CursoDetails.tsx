@@ -4,6 +4,7 @@ import { ArrowLeft, Search, Plus, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
+import { formatFechaSV, getElSalvadorDateString } from '../utils/dateUtils';
 
 export default function CursoDetails() {
   const { id } = useParams<{ id: string }>();
@@ -184,7 +185,7 @@ export default function CursoDetails() {
           .insert({
             curso_id: id,
             socorrista_id: parseInt(selectedSocorrista),
-            fecha_certificacion: new Date().toISOString().split('T')[0]
+            fecha_certificacion: getElSalvadorDateString()
           });
 
         if (error) throw error;
@@ -314,7 +315,7 @@ export default function CursoDetails() {
                     </div>
                     <div className="mt-2 flex text-sm text-gray-500 gap-4">
                       <span>Seccional: {s.seccionales?.nombre || 'N/A'}</span>
-                      <span>Fecha: {new Date(s.fecha_asignacion).toLocaleDateString()}</span>
+                      <span>Fecha: {formatFechaSV(s.fecha_asignacion)}</span>
                       <span>Estado: <span className={`px-2 py-0.5 rounded text-xs ${s.estado === 'Activo' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{s.estado}</span></span>
                     </div>
                   </div>
@@ -366,7 +367,7 @@ export default function CursoDetails() {
                     </div>
                     <div className="mt-2 flex text-sm text-gray-500 gap-4">
                       <span>Seccional: {s.seccionales?.nombre || 'N/A'}</span>
-                      <span>Fecha: {new Date(s.fecha_asignacion).toLocaleDateString()}</span>
+                      <span>Fecha: {formatFechaSV(s.fecha_asignacion)}</span>
                     </div>
                   </div>
                   {(role === 'admin' || role === 'instructor') && (

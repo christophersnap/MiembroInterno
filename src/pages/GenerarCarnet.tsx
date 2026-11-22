@@ -14,6 +14,7 @@ import { parseCargosSecundarios } from '../utils/cargosCatalog';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
 import { uploadCarnetPhotoWithFallback } from '../utils/solicitudesCarnet';
 import { loadImageSafelyAsDataUrl } from '../utils/carnetPhotoAnalyzer';
+import { formatFechaSV, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export const VERIFICATION_FIELD_DEFINITIONS = [
   { id: 'foto', label: 'Fotografía Oficial' },
@@ -1301,7 +1302,7 @@ export default function GenerarCarnet() {
       // Update socorrista record
       const socUpdatePayload: any = {
         carnet_generado_url: publicUrl,
-        fecha_generacion_carnet: new Date().toISOString(),
+        fecha_generacion_carnet: getElSalvadorIsoTimestamp(),
       };
       if (approvedPhotoUrl && approvedPhotoUrl !== selectedSocorrista.foto_url) {
         socUpdatePayload.foto_url = approvedPhotoUrl;
@@ -1354,7 +1355,7 @@ export default function GenerarCarnet() {
       }
 
       // Marcar la solicitud de carnet aceptada como 'Completado' (con respaldo seguro a 'Completada' si falta Migración 53)
-      const nowIso = new Date().toISOString();
+      const nowIso = getElSalvadorIsoTimestamp();
       const completedBy = userName || 'Administración';
       try {
         const buildTargetQuery = (payload: Record<string, any>) => {
@@ -1505,7 +1506,7 @@ export default function GenerarCarnet() {
       if (selectedSocorrista.solicitud?.id && !selectedSocorrista.solicitud?.backup_key) {
         await supabase
           .from('solicitudes_carnet')
-          .update({ foto_url: uploadedUrl, updated_at: new Date().toISOString() })
+          .update({ foto_url: uploadedUrl, updated_at: getElSalvadorIsoTimestamp() })
           .eq('id', selectedSocorrista.solicitud.id);
       }
       await supabase
@@ -1847,7 +1848,7 @@ export default function GenerarCarnet() {
                   </p>
                 </div>
                 <span className="text-[11px] text-emerald-800 font-mono tabular-nums">
-                  {new Date(selectedSocorrista.solicitud.fecha_solicitud).toLocaleDateString('es-SV')}
+                  {formatFechaSV(selectedSocorrista.solicitud.fecha_solicitud)}
                 </span>
               </div>
 

@@ -3,6 +3,7 @@
  * Soporta personalización de colores de header, footer, fuentes, logos y remitente No-Reply.
  */
 import { getOfficialLoginUrl, getOfficialSolicitudPdfUrl } from '../utils/appUrl';
+import { formatFechaHoraSV } from '../utils/dateUtils';
 
 export interface EmailDesignConfig {
   headerColor?: string;
@@ -446,7 +447,7 @@ export function generarTextoCorreoCambioPassword(params: {
   fechaCambio?: string;
 }): string {
   const loginUrl = params.loginUrl || getOfficialLoginUrl();
-  const fecha = params.fechaCambio || new Date().toLocaleString('es-SV');
+  const fecha = params.fechaCambio || formatFechaHoraSV(new Date());
   const lines: string[] = [
     'CRUZ VERDE SALVADORENA - SISTEMA INSTITUCIONAL',
     'CONFIRMACION DE CAMBIO DE CONTRASENA',

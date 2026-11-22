@@ -10,6 +10,7 @@ import { getApiUrl } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
+import { formatFechaSV, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -394,7 +395,7 @@ export default function Archivos() {
 
       const savedItem: ArchivoItem = (insertedSupabase as ArchivoItem) || {
         ...(supabasePayload as ArchivoItem),
-        created_at: new Date().toISOString(),
+        created_at: getElSalvadorIsoTimestamp(),
       };
 
       // Sincronizar en segundo plano con API local sin bloquear la respuesta de la UI
@@ -926,7 +927,7 @@ NOTIFY pgrst, 'reload schema';`;
 
                 <div className="text-3xs text-gray-400 flex items-center justify-between">
                   <span>Subido por: <strong className="text-gray-600">{archivo.subido_por_nombre || 'Admin'}</strong></span>
-                  <span>{archivo.created_at ? new Date(archivo.created_at).toLocaleDateString() : ''}</span>
+                  <span>{archivo.created_at ? formatFechaSV(archivo.created_at) : ''}</span>
                 </div>
               </div>
 

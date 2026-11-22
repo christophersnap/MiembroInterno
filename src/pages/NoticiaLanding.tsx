@@ -18,6 +18,7 @@ import {
   parseVideoEmbedUrl,
   sanitizeRichHtml,
 } from '../lib/noticiasBanner';
+import { formatFechaSV } from '../utils/dateUtils';
 
 export default function NoticiaLanding() {
   const { id } = useParams<{ id: string }>();
@@ -102,7 +103,7 @@ export default function NoticiaLanding() {
   }
 
   const formattedDate = slide.created_at
-    ? new Date(slide.created_at).toLocaleDateString('es-SV', {
+    ? formatFechaSV(slide.created_at, {
         day: 'numeric',
         month: 'long',
         year: 'numeric',

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { getApiUrl } from './api';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export type TipoCasoSoporte =
   | 'Sistema'
@@ -131,8 +132,8 @@ const normalizeTicket = (row: any): SoporteTicket => ({
   atendido_por_id: row.atendido_por_id || null,
   atendido_por_nombre: row.atendido_por_nombre || null,
   fecha_finalizacion: row.fecha_finalizacion || null,
-  created_at: row.created_at || new Date().toISOString(),
-  updated_at: row.updated_at || row.created_at || new Date().toISOString(),
+  created_at: row.created_at || getElSalvadorIsoTimestamp(),
+  updated_at: row.updated_at || row.created_at || getElSalvadorIsoTimestamp(),
 });
 
 export async function uploadSoporteImage(rawFile: File): Promise<SoporteImagen> {
@@ -716,7 +717,7 @@ export async function createSoporteTicket(input: {
 }): Promise<{ ticket: SoporteTicket; savedInSupabase: boolean; warning?: string }> {
   const id = generateSoporteUuid();
   const folio = generateSoporteFolio();
-  const now = new Date().toISOString();
+  const now = getElSalvadorIsoTimestamp();
 
   const validUserId = input.usuario_id && UUID_REGEX.test(input.usuario_id) ? input.usuario_id : null;
 
@@ -789,7 +790,7 @@ export async function updateSoporteTicketEstado(input: {
   atendido_por_id?: string | null;
   atendido_por_nombre: string;
 }): Promise<{ ticket?: SoporteTicket; error?: string }> {
-  const now = new Date().toISOString();
+  const now = getElSalvadorIsoTimestamp();
   const validAdminId =
     input.atendido_por_id && UUID_REGEX.test(input.atendido_por_id) ? input.atendido_por_id : null;
 

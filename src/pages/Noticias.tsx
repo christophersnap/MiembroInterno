@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 import {
   Newspaper,
   Plus,
@@ -512,7 +513,7 @@ export default function Noticias() {
         orden: editingSlide ? editingSlide.orden : slides.length,
         autor_id: user?.id || null,
         autor_nombre: userName || 'Cruz Verde Salvadoreña',
-        updated_at: new Date().toISOString(),
+        updated_at: getElSalvadorIsoTimestamp(),
       };
 
       const { imagen_banner_url: _ib, archivos_adjuntos: _aa, ...legacyPayload } = payload;
@@ -564,7 +565,7 @@ export default function Noticias() {
         const newRecord: NoticiaBannerSlide = {
           ...payload,
           id: newId,
-          created_at: new Date().toISOString(),
+          created_at: getElSalvadorIsoTimestamp(),
         };
 
         const { imagen_banner_url: _ib2, archivos_adjuntos: _aa2, ...legacyRecord } = newRecord;
@@ -613,7 +614,7 @@ export default function Noticias() {
     const nextVal = !slide.activo;
     const { error: sbErr } = await supabase
       .from('noticias_banner')
-      .update({ activo: nextVal, updated_at: new Date().toISOString() })
+      .update({ activo: nextVal, updated_at: getElSalvadorIsoTimestamp() })
       .eq('id', slide.id);
 
     if (sbErr) {

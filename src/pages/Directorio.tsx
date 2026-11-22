@@ -3,6 +3,7 @@ import { Plus, Edit, Trash2, Phone, Building2, MapPin, Search } from 'lucide-rea
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
+import { getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 const TIPOS_ENTIDAD = [
   'Emergencia',
@@ -64,7 +65,7 @@ export default function Directorio() {
           .from('directorio_telefonico')
           .update({
             ...formData,
-            updated_at: new Date().toISOString()
+            updated_at: getElSalvadorIsoTimestamp()
           })
           .eq('id', editingId);
         

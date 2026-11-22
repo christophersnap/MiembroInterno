@@ -6,6 +6,7 @@ import {
 import { Formulario, FormularioRespuesta } from '../../types/formulario';
 import { supabase } from '../../lib/supabase';
 import { getApiUrl } from '../../lib/api';
+import { formatFechaHoraSV, getElSalvadorDateString } from '../../utils/dateUtils';
 
 interface FormResponsesModalProps {
   form: Formulario | null;
@@ -102,7 +103,7 @@ export default function FormResponsesModal({
     respuestas.forEach(r => {
       const row = [
         String(r.id),
-        new Date(r.created_at).toLocaleString('es-SV'),
+        formatFechaHoraSV(r.created_at),
         r.usuario_nombre || 'Público / Anónimo',
         r.usuario_email || '',
         r.ip_origen || ''
@@ -127,7 +128,7 @@ export default function FormResponsesModal({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `respuestas_${form.slug}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `respuestas_${form.slug}_${getElSalvadorDateString()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -248,7 +249,7 @@ export default function FormResponsesModal({
                         {idx + 1}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-gray-600">
-                        {new Date(r.created_at).toLocaleString('es-SV', {
+                        {formatFechaHoraSV(r.created_at, {
                           day: '2-digit',
                           month: 'short',
                           year: 'numeric',
@@ -311,7 +312,7 @@ export default function FormResponsesModal({
                   </span>
                   <h4 className="text-base font-bold text-gray-900 mt-1">{form.titulo}</h4>
                   <p className="text-xs text-gray-500">
-                    Recibido el {new Date(selectedRespuesta.created_at).toLocaleString('es-SV')}
+                    Recibido el {formatFechaHoraSV(selectedRespuesta.created_at)}
                   </p>
                 </div>
                 <button

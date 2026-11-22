@@ -20,6 +20,7 @@ import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import SolicitudesCarnetTab from '../components/solicitudes/SolicitudesCarnetTab';
 import { useSolicitudReadTracker, useModuleUnreadCount } from '../utils/solicitudReadTracker';
+import { formatFechaSV, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
 
 export type TipoSolicitudFilter = 'todas' | 'combustible' | 'compra';
 
@@ -151,12 +152,12 @@ export default function Solicitudes() {
     try {
       const payload: any = {
         estado: targetStatus,
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (targetStatus === 'Aprobada' || targetStatus === 'Finalizada' || targetStatus === 'Entregada') {
         payload.autorizado_por = userName || user?.email || 'Administración Central';
-        payload.fecha_autorizacion = new Date().toISOString();
+        payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (targetStatus === 'Pendiente') {
         payload.autorizado_por = null;
@@ -237,12 +238,12 @@ export default function Solicitudes() {
     try {
       const payload: any = {
         estado: newStatus,
-        updated_at: new Date().toISOString()
+        updated_at: getElSalvadorIsoTimestamp()
       };
 
       if (newStatus === 'Aprobada' || newStatus === 'Finalizada' || newStatus === 'Entregada') {
         payload.autorizado_por = userName || user?.email || 'Administración Central';
-        payload.fecha_autorizacion = new Date().toISOString();
+        payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (newStatus === 'Rechazada') {
         payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';
@@ -463,7 +464,7 @@ export default function Solicitudes() {
             estado: 'Pendiente',
             correo_enviado: true,
             correos_notificados: 'control_combustible@cruzverdesv.org',
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           }];
         }
       }
@@ -512,7 +513,7 @@ export default function Solicitudes() {
             estado: 'Aprobada',
             correo_enviado: true,
             correos_notificados: 'administracion@cruzverdesv.org, presidencia@cruzverdesv.org, santaana@cruzverdesv.org',
-            created_at: new Date().toISOString()
+            created_at: getElSalvadorIsoTimestamp()
           }];
         }
       }
@@ -1518,7 +1519,7 @@ export default function Solicitudes() {
                     <span>Autorizado formalmente</span>
                   </div>
                   <p className="mt-1 text-2xs text-green-800">
-                    Aprobado por: <span className="font-semibold">{detailItem.autorizado_por}</span> {detailItem.fecha_autorizacion ? `el ${new Date(detailItem.fecha_autorizacion).toLocaleDateString()}` : ''}
+                    Aprobado por: <span className="font-semibold">{detailItem.autorizado_por}</span> {detailItem.fecha_autorizacion ? `el ${formatFechaSV(detailItem.fecha_autorizacion)}` : ''}
                   </p>
                 </div>
               )}

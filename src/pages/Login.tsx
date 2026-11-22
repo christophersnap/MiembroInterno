@@ -8,6 +8,7 @@ import { sendEmailNotification } from '../lib/api';
 import { getOfficialLoginUrl } from '../utils/appUrl';
 import { logActivity } from '../lib/logger';
 import { getClientDeviceSummary } from '../utils/activityFormatter';
+import { formatHoraSV } from '../utils/dateUtils';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -78,7 +79,7 @@ export default function Login() {
       
       if (!lockError && lockStatus && lockStatus[0]?.is_locked) {
         const lockedUntil = new Date(lockStatus[0].locked_until);
-        throw new Error(`Cuenta bloqueada por múltiples intentos fallidos. Intenta de nuevo después de las ${lockedUntil.toLocaleTimeString()}`);
+        throw new Error(`Cuenta bloqueada por múltiples intentos fallidos. Intenta de nuevo después de las ${formatHoraSV(lockedUntil)}`);
       }
 
       const { error: signInError } = await supabase.auth.signInWithPassword({

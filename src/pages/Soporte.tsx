@@ -25,6 +25,11 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/logger';
 import {
+  formatFechaHoraSV,
+  formatFechaSV,
+  getElSalvadorIsoTimestamp,
+} from '../utils/dateUtils';
+import {
   EstadoSoporte,
   fetchSoporteTickets,
   SoporteTicket,
@@ -226,8 +231,8 @@ export default function Soporte() {
         estado: estadoToSave,
         nota_resolucion: editNota.trim() || null,
         atendido_por_nombre: userName || user?.email || 'Soporte Técnico',
-        fecha_finalizacion: estadoToSave === 'Finalizado' ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
+        fecha_finalizacion: estadoToSave === 'Finalizado' ? getElSalvadorIsoTimestamp() : null,
+        updated_at: getElSalvadorIsoTimestamp(),
       };
 
       setSelectedTicket(mergedTicket);
@@ -575,7 +580,7 @@ export default function Soporte() {
                       )}
                       <span className="inline-flex items-center gap-1 tabular-nums">
                         <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{new Date(ticket.created_at).toLocaleString()}</span>
+                        <span>{formatFechaHoraSV(ticket.created_at)}</span>
                       </span>
                       {ticket.imagenes.length > 0 && (
                         <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold tabular-nums">
@@ -637,7 +642,7 @@ export default function Soporte() {
                         <span className="text-[10px] opacity-80">
                           Atendido por {ticket.atendido_por_nombre}
                           {ticket.fecha_finalizacion
-                            ? ` · ${new Date(ticket.fecha_finalizacion).toLocaleDateString()}`
+                            ? ` · ${formatFechaSV(ticket.fecha_finalizacion)}`
                             : ''}
                         </span>
                       )}
@@ -716,7 +721,7 @@ export default function Soporte() {
                     {selectedTicket.seccional_nombre || 'No especificada'}
                   </span>
                   <span className="block text-[11px] text-slate-500 tabular-nums">
-                    {new Date(selectedTicket.created_at).toLocaleString()}
+                    {formatFechaHoraSV(selectedTicket.created_at)}
                     {selectedTicket.ruta_origen ? ` · Ruta: ${selectedTicket.ruta_origen}` : ''}
                   </span>
                 </div>
@@ -848,7 +853,7 @@ export default function Soporte() {
                         <p className="text-[11px] text-slate-500">
                           Solventado por: <strong>{selectedTicket.atendido_por_nombre}</strong>
                           {selectedTicket.fecha_finalizacion
-                            ? ` · Finalizado el ${new Date(selectedTicket.fecha_finalizacion).toLocaleString()}`
+                            ? ` · Finalizado el ${formatFechaHoraSV(selectedTicket.fecha_finalizacion)}`
                             : ''}
                         </p>
                       )}

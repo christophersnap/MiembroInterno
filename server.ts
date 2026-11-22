@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
+import { getElSalvadorDateString, getElSalvadorIsoTimestamp } from './src/utils/dateUtils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -673,7 +674,7 @@ async function startServer() {
           tipo, 
           tienePdfAdjunto: countAdjuntos > 0,
           nombreArchivoPdf: nombreArchivoPdf || (adjuntos && adjuntos[0]?.nombre),
-          timestamp: new Date().toISOString() 
+          timestamp: getElSalvadorIsoTimestamp() 
         } 
       });
     } catch (error: any) {
@@ -1352,8 +1353,8 @@ async function startServer() {
       // Certifications near expiration (e.g., within 30 days)
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-      const thirtyDaysStr = thirtyDaysFromNow.toISOString().split('T')[0];
-      const todayStr = new Date().toISOString().split('T')[0];
+      const thirtyDaysStr = getElSalvadorDateString(thirtyDaysFromNow);
+      const todayStr = getElSalvadorDateString();
       
       const certsPorVencer = db.prepare("SELECT COUNT(*) as count FROM socorrista_cursos WHERE fecha_vencimiento BETWEEN ? AND ?").get(todayStr, thirtyDaysStr).count;
 
@@ -1645,7 +1646,7 @@ async function startServer() {
         s.tipo_usuario || 'socorrista',
         s.motivo || 'Solicitud de acceso al sistema institucional',
         s.estado || 'pendiente',
-        s.fecha_solicitud || new Date().toISOString()
+        s.fecha_solicitud || getElSalvadorIsoTimestamp()
       );
       res.json({ success: true, message: 'Solicitud guardada en servidor' });
     } catch (error: any) {

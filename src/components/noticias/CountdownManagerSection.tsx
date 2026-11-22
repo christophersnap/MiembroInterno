@@ -44,6 +44,12 @@ import {
   saveNoticiasCountdownConfig,
 } from '../../lib/noticiasCountdown';
 import CountdownBannerSection from '../dashboard/CountdownBannerSection';
+import {
+  formatFechaHoraSV,
+  getElSalvadorDateTimeInput,
+  getElSalvadorIsoTimestamp,
+  parseElSalvadorDateTimeInputToIso,
+} from '../../utils/dateUtils';
 
 const SQL_MIGRATION_41 = `-- ==============================================================================
 -- 41_noticias_countdown_banner.sql
@@ -132,12 +138,8 @@ WHERE NOT EXISTS (SELECT 1 FROM public.configuracion WHERE clave = 'noticias_cou
 NOTIFY pgrst, 'reload schema';`;
 
 function toLocalDatetimeInput(iso?: string | null): string {
-  const date = iso ? new Date(iso) : new Date(Date.now() + 14 * 86400000);
-  if (isNaN(date.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
+  const date = iso ? iso : new Date(Date.now() + 14 * 86400000);
+  return getElSalvadorDateTimeInput(date);
 }
 
 function PositionSelector({
@@ -389,8 +391,8 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
       setFormError('Debes indicar la fecha y hora exacta del evento.');
       return;
     }
-    const parsedTarget = new Date(fechaObjetivoLocal);
-    if (isNaN(parsedTarget.getTime())) {
+    const targetIsoSv = parseElSalvadorDateTimeInputToIso(fechaObjetivoLocal);
+    if (!targetIsoSv) {
       setFormError('La fecha u hora ingresada no es válida.');
       return;
     }
@@ -403,7 +405,7 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
         nombre_evento: nombreEvento.trim(),
         etiqueta_superior: etiquetaSuperior.trim() || null,
         subtitulo: subtitulo.trim() || null,
-        fecha_objetivo: parsedTarget.toISOString(),
+        fecha_objetivo: targetIsoSv,
         texto_finalizado: textoFinalizado.trim() || '¡El evento ha comenzado!',
         mostrar_meses: mostrarMeses,
         imagen_url: imagenUrl.trim() || null,
@@ -425,7 +427,7 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
         activo,
         orden: editingItem ? editingItem.orden : countdowns.length,
         autor_id: user?.id || null,
-        updated_at: new Date().toISOString(),
+        updated_at: getElSalvadorIsoTimestamp(),
       };
 
       if (editingItem) {
@@ -460,7 +462,7 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
         const newRecord: NoticiaCountdown = {
           ...payload,
           id: newId,
-          created_at: new Date().toISOString(),
+          created_at: getElSalvadorIsoTimestamp(),
         };
 
         const { error: sbErr } = await supabase.from('noticias_countdown').insert([newRecord]);
@@ -494,7 +496,7 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
     const nextVal = !item.activo;
     const { error: sbErr } = await supabase
       .from('noticias_countdown')
-      .update({ activo: nextVal, updated_at: new Date().toISOString() })
+      .update({ activo: nextVal, updated_at: getElSalvadorIsoTimestamp() })
       .eq('id', item.id);
 
     if (sbErr) {
@@ -567,9 +569,9 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
     nombre_evento: nombreEvento.trim() || 'Nombre del Evento Institucional',
     etiqueta_superior: etiquetaSuperior.trim() || null,
     subtitulo: subtitulo.trim() || null,
-    fecha_objetivo: fechaObjetivoLocal
-      ? new Date(fechaObjetivoLocal).toISOString()
-      : new Date(Date.now() + 14 * 86400000).toISOString(),
+    fecha_objetivo:
+      parseElSalvadorDateTimeInputToIso(fechaObjetivoLocal) ||
+      getElSalvadorIsoTimestamp(new Date(Date.now() + 14 * 86400000)),
     texto_finalizado: textoFinalizado.trim() || '¡El evento ha comenzado!',
     mostrar_meses: mostrarMeses,
     imagen_url: imagenUrl.trim() || null,
@@ -793,16 +795,13 @@ export default function CountdownManagerSection({ canEdit }: { canEdit: boolean 
         ) : (
           <div className="space-y-3">
             {countdowns.map((item, idx) => {
-              const dt = new Date(item.fecha_objetivo);
-              const dateText = isNaN(dt.getTime())
-                ? 'Fecha inválida'
-                : dt.toLocaleString('es-SV', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
+              const dateText = formatFechaHoraSV(item.fecha_objetivo, {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }) || 'Fecha inválida';
 
               return (
                 <div
