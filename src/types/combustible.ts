@@ -149,12 +149,12 @@ export const DEFAULT_COMBUSTIBLE_BLOCKS: CombustibleBlockItem[] = [
 export const DEFAULT_COMBUSTIBLE_CONFIG: CombustibleConfig = {
   correoDestino: 'control_combustible@cruzverdesv.org',
   correoCcDefault: 'presidencia@cruzverdesv.org, administracion@cruzverdesv.org',
-  correoContactoTelefono: '7695-7911',
+  correoContactoTelefono: '2284-5792 / 7695-7911',
   asuntoPlantilla: 'Solicitud de Combustible: [FOLIO] - [SECCIONAL]',
   enviarCopiaSolicitante: true,
   correoTitulo: '¡Confirmamos de recibido tu solicitud de Combustible!',
   correoSubtitulo: 'Comunícate con Oficina Central para ver el estado de tu solicitud',
-  correoFooterTexto: 'Cualquier duda o consulta puedes enviar un correo a control_combustible@cruzverdesv.org o llamar al 7695-7911',
+  correoFooterTexto: 'Cualquier duda o consulta puedes enviar un correo a control_combustible@cruzverdesv.org o llamar al 2284-5792 / 7695-7911',
 
   pdfTitulo: 'CRUZ VERDE SALVADOREÑA',
   pdfSubtitulo: 'SOLICITUD DE COMBUSTIBLE',

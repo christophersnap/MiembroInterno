@@ -1347,8 +1347,11 @@ export default function CombustibleTemplateConfig({
                   value={currentConfig.correoContactoTelefono}
                   onChange={(e) => setCurrentConfig({ ...currentConfig, correoContactoTelefono: e.target.value })}
                   className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="7695-7911"
+                  placeholder="2284-5792 / 7695-7911"
                 />
+                <span className="text-3xs text-gray-400">
+                  Aparece en el pie del correo como &ldquo;Control de Combustible&rdquo;. El remitente general se edita en Configuración &rarr; Correos &rarr; Diseñador de Correos.
+                </span>
               </div>
 
               <div>

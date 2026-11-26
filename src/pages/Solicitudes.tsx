@@ -10,7 +10,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
-import { SolicitudCombustible, CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG } from '../types/combustible';
+import { SolicitudCombustible, CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, resolveCombustibleLogoUrl } from '../types/combustible';
 import { SolicitudCompra, CompraConfig, DEFAULT_COMPRA_CONFIG } from '../types/compra';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
 import { sendEmailNotification } from '../lib/api';
@@ -68,6 +68,8 @@ export default function Solicitudes() {
 
   const canViewCompra = isAdmin || Boolean(permissions.view_solicitudes_compra);
   const canViewCombustible = isAdmin || Boolean(permissions.view_solicitudes_combustible);
+  const canCreateCompra = canViewCompra && (isAdmin || (permissions.crear_solicitudes_compra ?? true));
+  const canCreateCombustible = canViewCombustible && (isAdmin || (permissions.crear_solicitudes_combustible ?? true));
   const canViewLogistica = canViewCompra || canViewCombustible;
   const canViewCarnet = isAdmin || Boolean(permissions.view_solicitudes_carnet);
   const canPreviewPdf = isAdmin || (permissions.ver_previsualizacion_pdf ?? true);
@@ -103,10 +105,22 @@ export default function Solicitudes() {
   const [loading, setLoading] = useState(true);
 
   // Filtros
-  const [tipoFiltro, setTipoFiltro] = useState<TipoSolicitudFilter>('todas');
+  const [tipoFiltro, setTipoFiltro] = useState<TipoSolicitudFilter>(() => {
+    if (canViewCombustible && !canViewCompra) return 'combustible';
+    if (canViewCompra && !canViewCombustible) return 'compra';
+    return 'todas';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('Todos');
   const [filterSeccional, setFilterSeccional] = useState('Todas');
+
+  useEffect(() => {
+    if (canViewCombustible && !canViewCompra && tipoFiltro !== 'combustible') {
+      setTipoFiltro('combustible');
+    } else if (canViewCompra && !canViewCombustible && tipoFiltro !== 'compra') {
+      setTipoFiltro('compra');
+    }
+  }, [canViewCombustible, canViewCompra, tipoFiltro]);
 
   // Modales
   const [detailItem, setDetailItem] = useState<SolicitudUnifiedItem | null>(null);
@@ -133,6 +147,7 @@ export default function Solicitudes() {
   const [resendEmailTo, setResendEmailTo] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState('');
+  const [sendErrorMsg, setSendErrorMsg] = useState('');
 
   const handleOpenStatusModal = (item: SolicitudUnifiedItem) => {
     markAsRead(item.tipo, item.originalId);
@@ -333,6 +348,7 @@ export default function Solicitudes() {
     if (!resendEmailItem) return;
     setSendingEmail(true);
     setSendSuccessMsg('');
+    setSendErrorMsg('');
     try {
       const isCombustible = resendEmailItem.tipo === 'combustible';
       const pdfUrl = getOfficialSolicitudPdfUrl(resendEmailItem.tipo, resendEmailItem.folio);
@@ -340,23 +356,49 @@ export default function Solicitudes() {
       
       let htmlBody = '';
       if (isCombustible && resendEmailItem.rawCombustible) {
-        htmlBody = generarHtmlCorreoCombustible({
-          folio: resendEmailItem.folio,
-          codigoSolicitud: resendEmailItem.folio,
-          seccional: resendEmailItem.seccional_nombre,
-          seccionalNombre: resendEmailItem.seccional_nombre,
-          solicitante: resendEmailItem.solicitante,
-          telefonoSolicitante: resendEmailItem.rawCombustible.telefono_solicitante,
-          correoSolicitante: resendEmailItem.rawCombustible.correo_electronico,
-          actividad: resendEmailItem.rawCombustible.actividad,
-          entregoLiquidacionAnterior: !!resendEmailItem.rawCombustible.entrego_liquidacion_anterior,
-          motivoNoLiquidacion: resendEmailItem.rawCombustible.motivo_no_liquidacion,
-          fecha: resendEmailItem.fecha,
-          fechaEnvio: resendEmailItem.fecha_completa,
-          asunto: `Solicitud de Combustible: ${resendEmailItem.folio} - ${resendEmailItem.seccional_nombre}`,
-          nombreArchivoPdf: `${resendEmailItem.folio}.pdf`,
-          pdfUrl
-        });
+        const resolvedLogoUrl = resolveCombustibleLogoUrl(combustibleConfig);
+        htmlBody = generarHtmlCorreoCombustible(
+          {
+            remitenteNombre: 'Cruz Verde Salvadoreña (No Responder)',
+            remitenteCorreo: 'notificaciones@cruzverdesv.org',
+            destinatarioCorreo: recipient,
+            destinatarioNombre: resendEmailItem.solicitante,
+            asunto: `Solicitud de Combustible: ${resendEmailItem.folio} - ${resendEmailItem.seccional_nombre}`,
+            seccionalNombre: resendEmailItem.seccional_nombre,
+            numeroSolicitud: resendEmailItem.folio,
+          },
+          {
+            folio: resendEmailItem.folio,
+            codigoSolicitud: resendEmailItem.folio,
+            seccional: resendEmailItem.seccional_nombre,
+            seccionalNombre: resendEmailItem.seccional_nombre,
+            director: resendEmailItem.rawCombustible.director_nombre,
+            solicitante: resendEmailItem.solicitante,
+            telefonoSolicitante: resendEmailItem.rawCombustible.telefono_solicitante,
+            correoSolicitante: resendEmailItem.rawCombustible.correo_electronico,
+            actividad: resendEmailItem.rawCombustible.actividad,
+            entregoLiquidacionAnterior: !!resendEmailItem.rawCombustible.entrego_liquidacion_anterior,
+            motivoNoLiquidacion: resendEmailItem.rawCombustible.motivo_no_liquidacion,
+            observaciones: resendEmailItem.rawCombustible.observaciones,
+            fecha: resendEmailItem.fecha,
+            fechaEnvio: resendEmailItem.fecha_completa,
+            nombreArchivoPdf: `${resendEmailItem.folio}.pdf`,
+            pdfUrl,
+            logoUrl: resolvedLogoUrl || undefined,
+            subtituloSecundario: combustibleConfig.pdfSubtituloSecundario || 'Documento Oficial Administrativo',
+            mostrarVehiculo: combustibleConfig.mostrarVehiculo,
+            mostrarPlaca: combustibleConfig.mostrarPlaca,
+            mostrarGalones: combustibleConfig.mostrarGalones,
+            mostrarTipoGasolina: combustibleConfig.mostrarTipoGasolina,
+            mostrarCantidadDinero: combustibleConfig.mostrarCantidadDinero,
+          },
+          {
+            ...(resolvedLogoUrl ? { logoUrl: resolvedLogoUrl, mostrarLogo: true } : {}),
+            ...(combustibleConfig.correoContactoTelefono?.trim()
+              ? { telefonoContacto: combustibleConfig.correoContactoTelefono.trim() }
+              : {}),
+          }
+        );
       } else {
         htmlBody = generarHtmlCorreoCompra({
           folio: resendEmailItem.folio,
@@ -393,9 +435,10 @@ export default function Solicitudes() {
       setTimeout(() => {
         setResendEmailItem(null);
         setSendSuccessMsg('');
+        setSendErrorMsg('');
       }, 2000);
     } catch (err: any) {
-      alert(`Error al enviar correo: ${err.message || 'Error en el servidor de correo'}`);
+      setSendErrorMsg(err.message || 'No se pudo enviar el correo desde el servidor.');
     } finally {
       setSendingEmail(false);
     }
@@ -783,7 +826,7 @@ export default function Solicitudes() {
               </button>
             )}
 
-            {canViewCombustible && (
+            {canCreateCombustible && (
               <button
                 onClick={() => navigate('/solicitudes-combustible')}
                 className="inline-flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
@@ -793,7 +836,7 @@ export default function Solicitudes() {
               </button>
             )}
 
-            {canViewCompra && (
+            {canCreateCompra && (
               <button
                 onClick={() => navigate('/solicitudes-compra')}
                 className="inline-flex items-center px-4 py-2.5 bg-primary hover:bg-blue-900 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
@@ -869,105 +912,111 @@ export default function Solicitudes() {
       ) : (
         <>
       {/* Tarjetas de Resumen Rápido / Pestañas de Tipo */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className={`grid grid-cols-1 gap-3 ${canViewCombustible && canViewCompra ? 'sm:grid-cols-3' : 'sm:grid-cols-1 max-w-md'}`}>
         
-        {/* Todas */}
-        <button
-          onClick={() => setTipoFiltro('todas')}
-          className={`p-4 rounded-xl border text-left transition ${
-            tipoFiltro === 'todas'
-              ? 'bg-white border-primary ring-2 ring-primary/20 shadow-sm'
-              : 'bg-gray-50/70 hover:bg-white border-gray-200'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              {isAdmin ? 'Todas las Solicitudes' : 'Mis Solicitudes'}
-            </span>
-            <div className="flex items-center gap-1.5">
-              {unreadLogisticaAll > 0 && (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
-                  {unreadLogisticaAll} sin leer
-                </span>
-              )}
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-800">
-                {solicitudes.length}
+        {/* Todas (solo cuando tiene acceso a ambos módulos) */}
+        {canViewCombustible && canViewCompra && (
+          <button
+            onClick={() => setTipoFiltro('todas')}
+            className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+              tipoFiltro === 'todas'
+                ? 'bg-white border-primary ring-2 ring-primary/20 shadow-sm'
+                : 'bg-gray-50/70 hover:bg-white border-gray-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                {isAdmin ? 'Todas las Solicitudes' : 'Mis Solicitudes'}
               </span>
+              <div className="flex items-center gap-1.5">
+                {unreadLogisticaAll > 0 && (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                    {unreadLogisticaAll} sin leer
+                  </span>
+                )}
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-800 tabular-nums">
+                  {solicitudes.length}
+                </span>
+              </div>
             </div>
-          </div>
-          <p className="text-2xl font-black text-gray-900 mt-2">
-            {solicitudes.length}
-          </p>
-          <span className="text-xs text-gray-500 mt-1 block">
-            {isAdmin ? 'Compra, Mantenimiento y Combustible' : 'Realizadas por ti en el sistema'}
-          </span>
-        </button>
+            <p className="text-2xl font-black text-gray-900 mt-2 tabular-nums">
+              {solicitudes.length}
+            </p>
+            <span className="text-xs text-gray-500 mt-1 block">
+              {isAdmin ? 'Compra, Mantenimiento y Combustible' : 'Realizadas por ti en el sistema'}
+            </span>
+          </button>
+        )}
 
         {/* Combustible */}
-        <button
-          onClick={() => setTipoFiltro('combustible')}
-          className={`p-4 rounded-xl border text-left transition ${
-            tipoFiltro === 'combustible'
-              ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm'
-              : 'bg-gray-50/70 hover:bg-white border-gray-200'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800 flex items-center">
-              <Fuel className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-              {isAdmin ? 'Combustible' : 'Mis Solicitudes de Combustible'}
-            </span>
-            <div className="flex items-center gap-1.5">
-              {unreadCombustibleCount > 0 && (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
-                  {unreadCombustibleCount} sin leer
-                </span>
-              )}
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                {countCombustible}
+        {canViewCombustible && (
+          <button
+            onClick={() => setTipoFiltro('combustible')}
+            className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+              tipoFiltro === 'combustible'
+                ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm'
+                : 'bg-gray-50/70 hover:bg-white border-gray-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800 flex items-center">
+                <Fuel className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                {isAdmin ? 'Combustible' : 'Mis Solicitudes de Combustible'}
               </span>
+              <div className="flex items-center gap-1.5">
+                {unreadCombustibleCount > 0 && (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                    {unreadCombustibleCount} sin leer
+                  </span>
+                )}
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 tabular-nums">
+                  {countCombustible}
+                </span>
+              </div>
             </div>
-          </div>
-          <p className="text-2xl font-black text-emerald-900 mt-2">
-            {countCombustible}
-          </p>
-          <span className="text-xs text-emerald-700 mt-1 block">
-            Dotación y liquidación de combustible
-          </span>
-        </button>
+            <p className="text-2xl font-black text-emerald-900 mt-2 tabular-nums">
+              {countCombustible}
+            </p>
+            <span className="text-xs text-emerald-700 mt-1 block">
+              Dotación y liquidación de combustible
+            </span>
+          </button>
+        )}
 
         {/* Compra */}
-        <button
-          onClick={() => setTipoFiltro('compra')}
-          className={`p-4 rounded-xl border text-left transition ${
-            tipoFiltro === 'compra'
-              ? 'bg-blue-50/50 border-primary ring-2 ring-primary/20 shadow-sm'
-              : 'bg-gray-50/70 hover:bg-white border-gray-200'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center">
-              <FileText className="w-3.5 h-3.5 mr-1 text-primary" />
-              {isAdmin ? 'Compras y Mantenimiento' : 'Mis Solicitudes de Compra'}
-            </span>
-            <div className="flex items-center gap-1.5">
-              {unreadCompraCount > 0 && (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
-                  {unreadCompraCount} sin leer
-                </span>
-              )}
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-                {countCompra}
+        {canViewCompra && (
+          <button
+            onClick={() => setTipoFiltro('compra')}
+            className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+              tipoFiltro === 'compra'
+                ? 'bg-blue-50/50 border-primary ring-2 ring-primary/20 shadow-sm'
+                : 'bg-gray-50/70 hover:bg-white border-gray-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center">
+                <FileText className="w-3.5 h-3.5 mr-1 text-primary" />
+                {isAdmin ? 'Compras y Mantenimiento' : 'Mis Solicitudes de Compra'}
               </span>
+              <div className="flex items-center gap-1.5">
+                {unreadCompraCount > 0 && (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                    {unreadCompraCount} sin leer
+                  </span>
+                )}
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 tabular-nums">
+                  {countCompra}
+                </span>
+              </div>
             </div>
-          </div>
-          <p className="text-2xl font-black text-primary mt-2">
-            {countCompra}
-          </p>
-          <span className="text-xs text-blue-700 mt-1 block">
-            Repuestos, suministros y servicios
-          </span>
-        </button>
+            <p className="text-2xl font-black text-primary mt-2 tabular-nums">
+              {countCompra}
+            </p>
+            <span className="text-xs text-blue-700 mt-1 block">
+              Repuestos, suministros y servicios
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Barra de Filtros y Búsqueda */}
@@ -975,7 +1024,7 @@ export default function Solicitudes() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
           
           {/* Buscador */}
-          <div className="md:col-span-5 relative">
+          <div className={`${canViewCombustible && canViewCompra ? 'md:col-span-5' : 'md:col-span-7'} relative`}>
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
             <input
               type="text"
@@ -986,18 +1035,20 @@ export default function Solicitudes() {
             />
           </div>
 
-          {/* Filtro Tipo */}
-          <div className="md:col-span-2">
-            <select
-              value={tipoFiltro}
-              onChange={(e) => setTipoFiltro(e.target.value as TipoSolicitudFilter)}
-              className="w-full py-2 px-2.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white font-medium"
-            >
-              <option value="todas">Tipo: Todos</option>
-              <option value="combustible">⛽ Combustible</option>
-              <option value="compra">🛒 Compra / Mant.</option>
-            </select>
-          </div>
+          {/* Filtro Tipo (solo si tiene acceso a ambos tipos) */}
+          {canViewCombustible && canViewCompra && (
+            <div className="md:col-span-2">
+              <select
+                value={tipoFiltro}
+                onChange={(e) => setTipoFiltro(e.target.value as TipoSolicitudFilter)}
+                className="w-full py-2 px-2.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white font-medium"
+              >
+                <option value="todas">Tipo: Todos</option>
+                <option value="combustible">Combustible</option>
+                <option value="compra">Compra / Mant.</option>
+              </select>
+            </div>
+          )}
 
           {/* Filtro Estado */}
           <div className="md:col-span-2">
@@ -1007,10 +1058,11 @@ export default function Solicitudes() {
               className="w-full py-2 px-2.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white font-medium"
             >
               <option value="Todos">Estado: Todos</option>
-              <option value="Pendiente">🟡 Pendiente</option>
-              <option value="Aprobada">🟢 Aprobada</option>
-              <option value="Rechazada">🔴 Rechazada</option>
-              <option value="En Proceso">🔵 En Proceso</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="En Proceso">En Proceso</option>
+              <option value="Aprobada">Aprobada</option>
+              <option value="Finalizada">Finalizada</option>
+              <option value="Rechazada">Rechazada</option>
             </select>
           </div>
 
@@ -1095,22 +1147,26 @@ export default function Solicitudes() {
                 ? 'Las solicitudes de combustible o compra que tú envíes se listarán automáticamente en esta tabla con su estado y copia PDF.'
                 : 'Puede registrar una nueva solicitud utilizando los botones superiores.'}
             </p>
-            {!isAdmin && (
+            {!isAdmin && (canCreateCombustible || canCreateCompra) && (
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                <button
-                  onClick={() => navigate('/solicitudes-combustible')}
-                  className="inline-flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
-                >
-                  <Fuel className="w-4 h-4 mr-1.5" />
-                  + Nueva Solicitud de Combustible
-                </button>
-                <button
-                  onClick={() => navigate('/solicitudes-compra')}
-                  className="inline-flex items-center px-4 py-2 bg-primary hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
-                >
-                  <FileText className="w-4 h-4 mr-1.5" />
-                  + Nueva Solicitud de Compra
-                </button>
+                {canCreateCombustible && (
+                  <button
+                    onClick={() => navigate('/solicitudes-combustible')}
+                    className="inline-flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
+                  >
+                    <Fuel className="w-4 h-4 mr-1.5" />
+                    + Nueva Solicitud de Combustible
+                  </button>
+                )}
+                {canCreateCompra && (
+                  <button
+                    onClick={() => navigate('/solicitudes-compra')}
+                    className="inline-flex items-center px-4 py-2 bg-primary hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 mr-1.5" />
+                    + Nueva Solicitud de Compra
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2068,6 +2124,11 @@ export default function Solicitudes() {
                   </div>
                 ) : (
                   <>
+                    {sendErrorMsg && (
+                      <div className="bg-rose-50 border border-rose-200 rounded-2xl px-3.5 py-2.5 text-rose-700 text-xs font-medium">
+                        {sendErrorMsg}
+                      </div>
+                    )}
                     <section className="space-y-1.5">
                       <label className="px-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                         Destinatario

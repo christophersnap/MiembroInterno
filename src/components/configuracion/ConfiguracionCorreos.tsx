@@ -41,12 +41,12 @@ export default function ConfiguracionCorreos() {
     destino: 'administracion@cruzverdesv.org',
     remitente: 'sistema@cruzverdesv.org',
     cc: 'presidencia@cruzverdesv.org',
-    telefono: '2284-0000',
+    telefono: '2284-5792',
     asunto: 'Solicitud de Compra/Mantenimiento - [DIRECTOR] - Seccional [SECCIONAL] - [FECHA]',
     enviarCopiaSeccional: true,
     titulo: '¡Confirmamos de recibido tu solicitud de Compra y Mantenimiento!',
     subtitulo: 'Tu solicitud ha ingresado a la bandeja del Departamento Administrativo para su revisión',
-    footer: 'Cualquier duda o consulta puedes enviar un correo a administracion@cruzverdesv.org o comunicarte al 2284-0000'
+    footer: 'Cualquier duda o consulta puedes enviar un correo a administracion@cruzverdesv.org o comunicarte al 2284-5792'
   });
 
   // Estados de configuración para Solicitudes de Combustible
@@ -54,12 +54,12 @@ export default function ConfiguracionCorreos() {
     destino: 'control_combustible@cruzverdesv.org',
     remitente: 'sistema@cruzverdesv.org',
     cc: 'presidencia@cruzverdesv.org, administracion@cruzverdesv.org',
-    telefono: '7695-7911',
+    telefono: '2284-5792 / 7695-7911',
     asunto: 'Solicitud de Combustible - [SOLICITANTE] - Seccional [SECCIONAL] - [FECHA]',
     enviarCopiaSeccional: true,
     titulo: '¡Confirmamos de recibido tu solicitud de Combustible!',
     subtitulo: 'Comunícate con Oficina Central para ver el estado de tu solicitud',
-    footer: 'Cualquier duda o consulta puedes enviar un correo a control_combustible@cruzverdesv.org o llama/whatsapp al 7695-7911'
+    footer: 'Cualquier duda o consulta puedes enviar un correo a control_combustible@cruzverdesv.org o llama/whatsapp al 2284-5792 / 7695-7911'
   });
 
   const [loading, setLoading] = useState(true);

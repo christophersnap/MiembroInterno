@@ -103,7 +103,7 @@ export const DEFAULT_EMAIL_DESIGN: Required<EmailDesignConfig> = {
   logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Cruz_Verde_Salvadore%C3%B1a.png/120px-Cruz_Verde_Salvadore%C3%B1a.png',
   mostrarLogo: true,
   leyendaNoReply: 'Este es un mensaje institucional automático generado por el Sistema Interno de Cruz Verde Salvadoreña. Por favor no responda a esta dirección de correo electrónico ya que es una casilla no monitoreada. Para consultas oficiales, comuníquese con la jefatura de su seccional o la administración nacional.',
-  telefonoContacto: '2284-0000 / 7695-7911'
+  telefonoContacto: '2284-5792 / 7695-7911'
 };
 
 export function getStoredDesignConfig(): Partial<EmailDesignConfig> {
@@ -112,6 +112,10 @@ export function getStoredDesignConfig(): Partial<EmailDesignConfig> {
       const stored = localStorage.getItem('cruz_verde_email_design');
       if (stored) {
         const parsed = JSON.parse(stored);
+        const normalizedPhone =
+          typeof parsed.telefonoContacto === 'string' && parsed.telefonoContacto.trim()
+            ? parsed.telefonoContacto.replace(/2284-0000/g, '2284-5792')
+            : undefined;
         return {
           headerColor: parsed.headerColor,
           headerTextColor: parsed.headerTextColor,
@@ -122,7 +126,7 @@ export function getStoredDesignConfig(): Partial<EmailDesignConfig> {
           logoUrl: parsed.logoUrl,
           mostrarLogo: parsed.mostrarLogo !== undefined ? parsed.mostrarLogo : true,
           leyendaNoReply: parsed.leyendaNoReply,
-          telefonoContacto: parsed.telefonoContacto
+          telefonoContacto: normalizedPhone
         };
       }
     } catch (e) {

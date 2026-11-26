@@ -88,7 +88,7 @@ ${config.correoFooterTexto}`;
       const htmlEmail = generarHtmlCorreoCombustible(
         {
           remitenteNombre: 'Cruz Verde Salvadoreña (No Responder)',
-          remitenteCorreo: 'no-reply@cruzverdesv.org',
+          remitenteCorreo: 'notificaciones@cruzverdesv.org',
           destinatarioCorreo: destinatario,
           destinatarioNombre: solicitud.nombre_solicitante,
           asunto,
@@ -122,9 +122,12 @@ ${config.correoFooterTexto}`;
           mostrarTipoGasolina: config.mostrarTipoGasolina,
           mostrarCantidadDinero: config.mostrarCantidadDinero,
         },
-        resolvedLogoUrl
-          ? { logoUrl: resolvedLogoUrl, mostrarLogo: true }
-          : undefined
+        {
+          ...(resolvedLogoUrl ? { logoUrl: resolvedLogoUrl, mostrarLogo: true } : {}),
+          ...(config.correoContactoTelefono?.trim()
+            ? { telefonoContacto: config.correoContactoTelefono.trim() }
+            : {}),
+        }
       );
 
       if (onSendEmail) {

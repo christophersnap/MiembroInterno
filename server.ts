@@ -373,7 +373,7 @@ try {
     ['email_template_font_body', 'Inter'],
     ['email_template_mostrar_logo', 'true'],
     ['email_template_legend', 'Este es un mensaje institucional generado automáticamente por el Sistema de Cruz Verde Salvadoreña desde una casilla no monitoreada. Por favor, no responda a este correo electrónico.'],
-    ['email_template_telefono_contacto', '2284-0000 / 7695-7911'],
+    ['email_template_telefono_contacto', '2284-5792 / 7695-7911'],
     ['smtp_host', 'smtp.hostinger.com'],
     ['smtp_port', '465'],
     ['smtp_secure', 'true'],
@@ -1980,6 +1980,150 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- Geolocalización segura del cliente para auditoría de intentos de inicio de sesión ---
+  const clientGeoCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      data: {
+        ip: string;
+        country: string | null;
+        country_code: string | null;
+        city: string | null;
+        region: string | null;
+        isp: string | null;
+      };
+    }
+  >();
+
+  const isPublicRoutableIp = (rawIp: string): boolean => {
+    const ip = rawIp.trim();
+    if (!ip || ip.length > 45) return false;
+
+    const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+    if (ipv4Match) {
+      const octets = ipv4Match.slice(1).map((n) => Number(n));
+      if (octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return false;
+      const [a, b] = octets;
+      if (a === 0 || a === 10 || a === 127) return false;
+      if (a === 169 && b === 254) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 100 && b >= 64 && b <= 127) return false;
+      if (a >= 224) return false;
+      return true;
+    }
+
+    if (/^[0-9a-fA-F:]{2,39}$/.test(ip) && ip.includes(':')) {
+      const lower = ip.toLowerCase();
+      if (
+        lower === '::1' ||
+        lower === '::' ||
+        lower.startsWith('fc') ||
+        lower.startsWith('fd') ||
+        lower.startsWith('fe80')
+      ) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  app.get('/api/client-geo', async (req, res) => {
+    try {
+      const cfIp = typeof req.headers['cf-connecting-ip'] === 'string' ? req.headers['cf-connecting-ip'] : '';
+      const xff = typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'].split(',')[0] : '';
+      const realIp = typeof req.headers['x-real-ip'] === 'string' ? req.headers['x-real-ip'] : '';
+      const rawIp = (cfIp || xff || realIp || req.socket.remoteAddress || '').trim().replace(/^::ffff:/i, '');
+
+      const headerCountryCode = String(
+        req.headers['cf-ipcountry'] ||
+          req.headers['x-vercel-ip-country'] ||
+          req.headers['x-appengine-country'] ||
+          ''
+      )
+        .trim()
+        .toUpperCase()
+        .slice(0, 8);
+      const headerCity = String(req.headers['x-appengine-city'] || req.headers['x-vercel-ip-city'] || '')
+        .trim()
+        .slice(0, 80);
+      const headerRegion = String(req.headers['x-appengine-region'] || req.headers['x-vercel-ip-country-region'] || '')
+        .trim()
+        .slice(0, 80);
+
+      const basePayload = {
+        ip: rawIp || 'Desconocida',
+        country: headerCountryCode && headerCountryCode !== 'ZZ' ? headerCountryCode : null,
+        country_code: headerCountryCode && headerCountryCode !== 'ZZ' ? headerCountryCode : null,
+        city: headerCity || null,
+        region: headerRegion || null,
+        isp: null as string | null,
+      };
+
+      if (!isPublicRoutableIp(rawIp)) {
+        return res.json(basePayload);
+      }
+
+      const cached = clientGeoCache.get(rawIp);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.data);
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
+      try {
+        const geoRes = await fetch(`https://ipwho.is/${encodeURIComponent(rawIp)}`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        if (geoRes.ok) {
+          const geoJson: any = await geoRes.json();
+          if (geoJson && geoJson.success !== false) {
+            const enriched = {
+              ip: rawIp,
+              country: typeof geoJson.country === 'string' ? geoJson.country.slice(0, 80) : basePayload.country,
+              country_code:
+                typeof geoJson.country_code === 'string'
+                  ? geoJson.country_code.toUpperCase().slice(0, 8)
+                  : basePayload.country_code,
+              city: typeof geoJson.city === 'string' ? geoJson.city.slice(0, 80) : basePayload.city,
+              region: typeof geoJson.region === 'string' ? geoJson.region.slice(0, 80) : basePayload.region,
+              isp:
+                typeof geoJson.connection?.isp === 'string'
+                  ? geoJson.connection.isp.slice(0, 100)
+                  : typeof geoJson.connection?.org === 'string'
+                  ? geoJson.connection.org.slice(0, 100)
+                  : null,
+            };
+            if (clientGeoCache.size >= 500) {
+              const firstKey = clientGeoCache.keys().next().value;
+              if (firstKey) clientGeoCache.delete(firstKey);
+            }
+            clientGeoCache.set(rawIp, { expiresAt: Date.now() + 10 * 60 * 1000, data: enriched });
+            return res.json(enriched);
+          }
+        }
+      } catch {
+        // Silencioso: devolver datos base si el proveedor tarda
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      return res.json(basePayload);
+    } catch {
+      return res.json({
+        ip: 'Desconocida',
+        country: null,
+        country_code: null,
+        city: null,
+        region: null,
+        isp: null,
+      });
     }
   });
 

@@ -93,7 +93,7 @@ export default function ModalDisenadorCorreos({
   const [logoUrl, setLogoUrl] = useState(DEFAULT_EMAIL_DESIGN.logoUrl);
   const [mostrarLogo, setMostrarLogo] = useState(true);
   const [leyendaNoReply, setLeyendaNoReply] = useState(DEFAULT_EMAIL_DESIGN.leyendaNoReply);
-  const [telefonoContacto, setTelefonoContacto] = useState('2284-0000 / 7695-7911');
+  const [telefonoContacto, setTelefonoContacto] = useState('2284-5792 / 7695-7911');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [logoUploadMsg, setLogoUploadMsg] = useState<string | null>(null);
 
@@ -1011,7 +1011,7 @@ ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;`;
                       type="text"
                       value={telefonoContacto}
                       onChange={(e) => setTelefonoContacto(e.target.value)}
-                      placeholder="2284-0000 / 7695-7911"
+                      placeholder="2284-5792 / 7695-7911"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-gray-700 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
                   </div>

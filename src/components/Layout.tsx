@@ -551,8 +551,8 @@ export default function Layout() {
     // Gestión & Solicitudes
     { name: 'Solicitudes', href: '/solicitudes', icon: ClipboardList, show: Boolean(role === 'admin' || permissions.view_solicitudes_compra || permissions.view_solicitudes_combustible), category: 'gestion', badge: totalUnreadSolicitudes > 0 ? totalUnreadSolicitudes : undefined },
     { name: 'Solicitudes de Carnet', href: '/solicitudes?tab=carnet', icon: IdCard, show: Boolean(role === 'admin' || permissions.view_solicitudes_carnet), category: 'gestion', badge: unreadCarnet > 0 ? unreadCarnet : undefined },
-    { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: permissions.view_solicitudes_compra ?? true, category: 'gestion', badge: unreadCompra > 0 ? unreadCompra : undefined },
-    { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: permissions.view_solicitudes_combustible ?? true, category: 'gestion', badge: unreadCombustible > 0 ? unreadCombustible : undefined },
+    { name: 'Solicitud Compra', href: '/solicitudes-compra', icon: FileText, show: Boolean(role === 'admin' || permissions.view_solicitudes_compra), category: 'gestion', badge: unreadCompra > 0 ? unreadCompra : undefined },
+    { name: 'Combustible', href: '/solicitudes-combustible', icon: Fuel, show: Boolean(role === 'admin' || permissions.view_solicitudes_combustible), category: 'gestion', badge: unreadCombustible > 0 ? unreadCombustible : undefined },
     
     // Identificación
     { name: 'Carnet Oficial', href: '/carnet', icon: IdCard, show: permissions.view_carnet, category: 'identificacion' },

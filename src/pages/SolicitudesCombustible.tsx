@@ -540,7 +540,12 @@ NOTIFY pgrst, 'reload schema';`;
             mostrarTipoGasolina: config.mostrarTipoGasolina,
             mostrarCantidadDinero: config.mostrarCantidadDinero,
           },
-          resolvedLogoUrl ? { logoUrl: resolvedLogoUrl, mostrarLogo: true } : undefined
+          {
+            ...(resolvedLogoUrl ? { logoUrl: resolvedLogoUrl, mostrarLogo: true } : {}),
+            ...(config.correoContactoTelefono?.trim()
+              ? { telefonoContacto: config.correoContactoTelefono.trim() }
+              : {}),
+          }
         );
 
         await sendEmailNotification({

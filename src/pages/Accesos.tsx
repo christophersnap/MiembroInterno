@@ -3,7 +3,8 @@ import {
   Shield, Save, Check, X, UserPlus, Trash2, Globe, 
   Building2, KeyRound, CheckCircle2, 
   AlertTriangle, Eye, Mail, Copy,
-  Sliders, Database, Search, Pencil, ChevronDown, Plus
+  Sliders, Database, Search, Pencil, ChevronDown, Plus,
+  Lock, Unlock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -12,6 +13,10 @@ import { useSettings } from '../contexts/SettingsContext';
 import SolicitudesRegistroTab from '../components/accesos/SolicitudesRegistroTab';
 import ResetPasswordModal from '../components/accesos/ResetPasswordModal';
 import PermisosIndividualesModal from '../components/accesos/PermisosIndividualesModal';
+import BloqueoLoginDetalleModal, {
+  LoginSecurityRecord,
+  isRecordActivelyLocked,
+} from '../components/accesos/BloqueoLoginDetalleModal';
 import {
   generarTextoCorreoAprobacion,
   generarTextoCorreoCreacionUsuario,
@@ -48,6 +53,15 @@ export default function Accesos() {
 
   // Permisos Individuales Modal State
   const [selectedUserForPermisos, setSelectedUserForPermisos] = useState<any | null>(null);
+
+  // Seguridad de Bloqueo por Intentos Fallidos
+  const [loginSecurityMap, setLoginSecurityMap] = useState<Record<string, LoginSecurityRecord>>({});
+  const [onlyLockedFilter, setOnlyLockedFilter] = useState<boolean>(false);
+  const [selectedSecurityUser, setSelectedSecurityUser] = useState<{
+    user: any;
+    record: LoginSecurityRecord;
+  } | null>(null);
+  const [unlockingEmail, setUnlockingEmail] = useState<string | null>(null);
 
   // New User Modal State
   const [showNewUserModal, setShowNewUserModal] = useState(false);
@@ -133,6 +147,79 @@ export default function Accesos() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const fetchLoginSecurityReport = async () => {
+    try {
+      const { data: secData, error: secErr } = await supabase.rpc('get_login_lockouts_report');
+      if (!secErr && Array.isArray(secData)) {
+        const map: Record<string, LoginSecurityRecord> = {};
+        for (const item of secData as LoginSecurityRecord[]) {
+          if (item?.email) {
+            map[item.email.trim().toLowerCase()] = item;
+          }
+        }
+        setLoginSecurityMap(map);
+        return map;
+      }
+    } catch {
+      // Silencioso si aún no se ha ejecutado la Migración 61
+    }
+    return null;
+  };
+
+  const handleUnlockUserLogin = async (targetEmail: string) => {
+    const cleanEmail = targetEmail.trim().toLowerCase();
+    if (!cleanEmail) return;
+    setUnlockingEmail(cleanEmail);
+    try {
+      const { data, error } = await supabase.rpc('admin_unlock_user_login', {
+        p_email: cleanEmail,
+      });
+      if (error) throw error;
+      if (data && data.ok === false) {
+        throw new Error(data.error || 'No se pudo levantar el bloqueo.');
+      }
+
+      await logActivity('Levantó bloqueo de intentos fallidos', 'Seguridad', cleanEmail, {
+        correo: cleanEmail,
+      });
+
+      const refreshed = await fetchLoginSecurityReport();
+      if (refreshed && refreshed[cleanEmail] && selectedSecurityUser) {
+        setSelectedSecurityUser({
+          user: selectedSecurityUser.user,
+          record: refreshed[cleanEmail],
+        });
+      } else {
+        setLoginSecurityMap((prev) => {
+          const existing = prev[cleanEmail];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [cleanEmail]: {
+              ...existing,
+              is_locked: false,
+              locked_until: null,
+              failed_attempts: 0,
+            },
+          };
+        });
+        setSelectedSecurityUser(null);
+      }
+
+      notifyStatus(
+        'Bloqueo levantado correctamente. El usuario ya puede volver a iniciar sesión.',
+        'success'
+      );
+    } catch (err: any) {
+      notifyStatus(
+        err?.message || 'Error al levantar el bloqueo. Verifica que la migración SQL 61 esté aplicada.',
+        'error'
+      );
+    } finally {
+      setUnlockingEmail(null);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -240,6 +327,9 @@ export default function Accesos() {
       }
 
       setUsuarios(mergedUsers);
+
+      // 1b. Consultar reporte de bloqueos e intentos fallidos de inicio de sesión (Migración 61)
+      await fetchLoginSecurityReport();
 
       // 2. Fetch role permissions
       const { data: rolesData, error: rolesError } = await supabase
@@ -2274,9 +2364,24 @@ NOTIFY pgrst, 'reload schema';`;
     setTimeout(() => setSql51Copied(false), 3000);
   };
 
+  const lockedUsersCount = usuarios.filter((u) => {
+    const rec = loginSecurityMap[(u.email || '').trim().toLowerCase()];
+    return isRecordActivelyLocked(rec);
+  }).length;
+
+  const flaggedSecurityUsersCount = usuarios.filter((u) => {
+    const rec = loginSecurityMap[(u.email || '').trim().toLowerCase()];
+    return isRecordActivelyLocked(rec) || Boolean(rec && rec.failed_attempts > 0);
+  }).length;
+
   const filteredUsuarios = usuarios.filter((u) => {
     const matchesRole = roleFilter === 'todos' || u.role === roleFilter;
     if (!matchesRole) return false;
+    if (onlyLockedFilter) {
+      const rec = loginSecurityMap[(u.email || '').trim().toLowerCase()];
+      const isFlagged = isRecordActivelyLocked(rec) || Boolean(rec && rec.failed_attempts > 0);
+      if (!isFlagged) return false;
+    }
     const q = userSearch.trim().toLowerCase();
     if (!q) return true;
     const display = getUserDisplayName(u).toLowerCase();
@@ -2743,12 +2848,34 @@ NOTIFY pgrst, 'reload schema';`;
                 })}
               </select>
 
-              {(roleFilter !== 'todos' || userSearch.trim() !== '') && (
+              {(lockedUsersCount > 0 || flaggedSecurityUsersCount > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyLockedFilter((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 tabular-nums border ${
+                    onlyLockedFilter
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                      : lockedUsersCount > 0
+                      ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>
+                    {lockedUsersCount > 0
+                      ? `Bloqueados (${lockedUsersCount})`
+                      : `Intentos fallidos (${flaggedSecurityUsersCount})`}
+                  </span>
+                </button>
+              )}
+
+              {(roleFilter !== 'todos' || userSearch.trim() !== '' || onlyLockedFilter) && (
                 <button
                   type="button"
                   onClick={() => {
                     setRoleFilter('todos');
                     setUserSearch('');
+                    setOnlyLockedFilter(false);
                   }}
                   className="px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 cursor-pointer whitespace-nowrap shrink-0"
                 >
@@ -2792,6 +2919,9 @@ NOTIFY pgrst, 'reload schema';`;
                     const isEditingName = editingUserNameId === user.id;
                     const isLinkingCarnet = linkingCarnetUserId === user.id;
                     const scopeInfo = getUserScopeSummary(user);
+                    const secRecord = loginSecurityMap[(user.email || '').trim().toLowerCase()];
+                    const isLoginLocked = isRecordActivelyLocked(secRecord);
+                    const failedAttemptsCount = secRecord?.failed_attempts || 0;
                     const initials = displayName
                       .split(' ')
                       .filter(Boolean)
@@ -3010,46 +3140,97 @@ NOTIFY pgrst, 'reload schema';`;
                           )}
                         </td>
 
-                        {/* 4. Estado (Switch estilo iOS) */}
+                        {/* 4. Estado (Switch estilo iOS + Indicador de bloqueo por intentos) */}
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <div className="flex items-center gap-2.5">
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={!isInactive}
-                              onClick={() => handleToggleUserActive(user)}
-                              title={isInactive ? 'Activar cuenta' : 'Desactivar cuenta'}
-                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
-                                isInactive
-                                  ? 'bg-slate-200'
-                                  : isPending
-                                  ? 'bg-amber-500'
-                                  : 'bg-emerald-500'
-                              }`}
-                            >
-                              <span
-                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
-                                  isInactive ? 'translate-x-0' : 'translate-x-4'
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={!isInactive}
+                                onClick={() => handleToggleUserActive(user)}
+                                title={isInactive ? 'Activar cuenta' : 'Desactivar cuenta'}
+                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
+                                  isInactive
+                                    ? 'bg-slate-200'
+                                    : isPending
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
                                 }`}
-                              />
-                            </button>
-                            <span
-                              className={`text-xs font-medium ${
-                                isInactive
-                                  ? 'text-slate-400'
-                                  : isPending
-                                  ? 'text-amber-700'
-                                  : 'text-slate-700'
-                              }`}
-                            >
-                              {isInactive ? 'Inactivo' : isPending ? 'Pendiente' : 'Activo'}
-                            </span>
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
+                                    isInactive ? 'translate-x-0' : 'translate-x-4'
+                                  }`}
+                                />
+                              </button>
+                              <span
+                                className={`text-xs font-medium ${
+                                  isInactive
+                                    ? 'text-slate-400'
+                                    : isPending
+                                    ? 'text-amber-700'
+                                    : 'text-slate-700'
+                                }`}
+                              >
+                                {isInactive ? 'Inactivo' : isPending ? 'Pendiente' : 'Activo'}
+                              </span>
+                            </div>
+
+                            {isLoginLocked && secRecord ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-[11px] font-semibold text-rose-700 transition-colors cursor-pointer tabular-nums"
+                                title="Ver reporte de bloqueo, país de origen y levantar bloqueo"
+                              >
+                                <Lock className="w-3 h-3 shrink-0" />
+                                <span>
+                                  Bloqueado · {failedAttemptsCount} int.
+                                  {secRecord.last_country_code ? ` · ${secRecord.last_country_code}` : ''}
+                                </span>
+                              </button>
+                            ) : secRecord && failedAttemptsCount > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-medium text-amber-800 transition-colors cursor-pointer tabular-nums"
+                                title="Ver detalle de intentos fallidos y país de origen"
+                              >
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {failedAttemptsCount} {failedAttemptsCount === 1 ? 'intento' : 'intentos'}
+                                  {secRecord.last_country_code ? ` · ${secRecord.last_country_code}` : ''}
+                                </span>
+                              </button>
+                            ) : secRecord && Array.isArray(secRecord.attempts) && secRecord.attempts.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors cursor-pointer tabular-nums"
+                                title="Ver historial de intentos anteriores"
+                              >
+                                <span>Ver historial ({secRecord.attempts.length})</span>
+                              </button>
+                            ) : null}
                           </div>
                         </td>
 
                         {/* 5. Acciones limpias en una sola fila */}
                         <td className="px-5 py-3.5 whitespace-nowrap text-right">
                           <div className="inline-flex items-center justify-end gap-1.5">
+                            {isLoginLocked && secRecord && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                                title="Ver reporte de seguridad y levantar bloqueo"
+                              >
+                                <Unlock className="h-3.5 w-3.5" />
+                                <span>Desbloquear</span>
+                              </button>
+                            )}
+
                             {user.role !== 'admin' && (
                               <button
                                 type="button"
@@ -4144,6 +4325,26 @@ NOTIFY pgrst, 'reload schema';`;
           seccionales={seccionales}
           onClose={() => setSelectedUserForPermisos(null)}
           onSave={handleSaveCustomPermissions}
+        />
+      )}
+
+      {/* MODAL DETALLE DE BLOQUEO E INTENTOS FALLIDOS */}
+      {selectedSecurityUser && (
+        <BloqueoLoginDetalleModal
+          open={true}
+          userDisplayName={getUserDisplayName(selectedSecurityUser.user)}
+          userEmail={selectedSecurityUser.user.email}
+          record={selectedSecurityUser.record}
+          unlocking={
+            unlockingEmail === (selectedSecurityUser.user.email || '').trim().toLowerCase()
+          }
+          onClose={() => setSelectedSecurityUser(null)}
+          onUnlock={handleUnlockUserLogin}
+          onResetPassword={() => {
+            const target = selectedSecurityUser.user;
+            setSelectedSecurityUser(null);
+            setSelectedUserForReset(target);
+          }}
         />
       )}
     </div>

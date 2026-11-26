@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Shield, Mail, Lock, UserPlus, KeyRound, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { generarTextoCorreoPasswordTemporal } from '../lib/emailNotification';
-import { sendEmailNotification } from '../lib/api';
+import { getApiUrl, sendEmailNotification } from '../lib/api';
 import { getOfficialLoginUrl } from '../utils/appUrl';
 import { logActivity } from '../lib/logger';
 import { getClientDeviceSummary } from '../utils/activityFormatter';
@@ -67,6 +67,57 @@ export default function Login() {
     }
   }, []);
 
+  const clientGeoRef = useRef<{
+    ip: string | null;
+    country: string | null;
+    country_code: string | null;
+    city: string | null;
+    region: string | null;
+    isp: string | null;
+  } | null>(null);
+
+  const getClientSecurityContext = async () => {
+    let geo = clientGeoRef.current;
+    if (!geo) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2200);
+        try {
+          const res = await fetch(getApiUrl('/api/client-geo'), { signal: controller.signal });
+          if (res.ok) {
+            geo = await res.json();
+            clientGeoRef.current = geo;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        geo = null;
+      }
+    }
+
+    const deviceInfo = getClientDeviceSummary();
+    let timezone: string | null = null;
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch {
+      timezone = null;
+    }
+
+    return {
+      p_ip: geo?.ip || null,
+      p_country: geo?.country || null,
+      p_country_code: geo?.country_code || null,
+      p_city: geo?.city || null,
+      p_region: geo?.region || null,
+      p_isp: geo?.isp || null,
+      p_timezone: timezone,
+      p_device: deviceInfo.dispositivo || null,
+      p_browser: deviceInfo.navegador || null,
+      p_user_agent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 280) : null,
+    };
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -74,24 +125,38 @@ export default function Login() {
     setResetEmailSent(false);
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       // Check if user is locked out
-      const { data: lockStatus, error: lockError } = await supabase.rpc('check_login_status', { user_email: email });
+      const { data: lockStatus, error: lockError } = await supabase.rpc('check_login_status', { user_email: normalizedEmail });
       
       if (!lockError && lockStatus && lockStatus[0]?.is_locked) {
+        // Registrar intento adicional mientras la cuenta permanece bloqueada (para diagnóstico forense)
+        getClientSecurityContext()
+          .then((ctx) => supabase.rpc('record_blocked_login_attempt', { user_email: normalizedEmail, ...ctx }))
+          .catch(() => {});
         const lockedUntil = new Date(lockStatus[0].locked_until);
         throw new Error(`Cuenta bloqueada por múltiples intentos fallidos. Intenta de nuevo después de las ${formatHoraSV(lockedUntil)}`);
       }
 
       const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: normalizedEmail,
         password,
       });
 
       if (signInError) {
         if (signInError.message.includes('Invalid login credentials')) {
-          await supabase.rpc('handle_failed_login', { user_email: email });
+          const ctx = await getClientSecurityContext();
+          const { error: failRpcErr } = await supabase.rpc('handle_failed_login', {
+            user_email: normalizedEmail,
+            ...ctx,
+            p_reason: 'Credenciales incorrectas',
+          });
+          if (failRpcErr) {
+            // Respaldo compatible si aún no se ha ejecutado la Migración 61 en Supabase
+            await supabase.rpc('handle_failed_login', { user_email: normalizedEmail });
+          }
           
-          const { data: newLockStatus } = await supabase.rpc('check_login_status', { user_email: email });
+          const { data: newLockStatus } = await supabase.rpc('check_login_status', { user_email: normalizedEmail });
           if (newLockStatus && newLockStatus[0]?.is_locked) {
             throw new Error('Has superado los 3 intentos fallidos. Tu cuenta ha sido bloqueada por 3 horas.');
           } else {
@@ -102,7 +167,7 @@ export default function Login() {
       }
 
       // Reset successful login
-      await supabase.rpc('reset_successful_login', { user_email: email });
+      await supabase.rpc('reset_successful_login', { user_email: normalizedEmail });
 
       // VERIFICAR ESTADO DEL USUARIO (PENDIENTE O INACTIVO)
       const { data: { user: loggedInUser } } = await supabase.auth.getUser();
