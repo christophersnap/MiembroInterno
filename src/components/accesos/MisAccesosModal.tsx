@@ -293,6 +293,11 @@ const PERMISSION_DESCRIPTIONS: Record<string, PermissionMeta> = {
     desc: 'Visualizar y operar información de todas las seccionales.',
     category: 'Administración',
   },
+  assign_jdn_cargos: {
+    label: 'Asignar Junta Directiva Nacional (JDN)',
+    desc: 'Autorizado para asignar, modificar o liberar los 11 cargos únicos a nivel nacional de la Junta Directiva Nacional.',
+    category: 'Administración',
+  },
   ver_personas_conectadas: {
     label: 'Detalle de Personas Conectadas',
     desc: 'Abrir la lista en vivo de usuarios conectados actualmente.',

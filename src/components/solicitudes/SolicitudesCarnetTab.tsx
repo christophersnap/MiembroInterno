@@ -31,6 +31,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/logger';
 import SmartStorageImage from '../common/SmartStorageImage';
+import PaginationBar from '../common/PaginationBar';
 import CarnetPhotoCaptureModal, { CarnetPhotoReadyMeta } from '../common/CarnetPhotoCaptureModal';
 import CorregirSolicitudCarnetModal from './CorregirSolicitudCarnetModal';
 import {
@@ -534,6 +535,20 @@ export default function SolicitudesCarnetTab() {
       return matchesSearch && matchesEstado && matchesSeccional && matchesUsuario && matchesPeriod;
     });
   }, [records, searchTerm, filterEstado, filterSeccional, filterUsuario, periodMode, selectedMonth, weekRange]);
+
+  const CARNET_PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterEstado, filterSeccional, filterUsuario, periodMode, selectedMonth, selectedWeek]);
+
+  const paginatedRecords = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredRecords.length / CARNET_PAGE_SIZE));
+    const safePage = Math.min(currentPage, totalPages);
+    const start = (safePage - 1) * CARNET_PAGE_SIZE;
+    return filteredRecords.slice(start, start + CARNET_PAGE_SIZE);
+  }, [filteredRecords, currentPage]);
 
   const stats = useMemo(() => {
     return {
@@ -1538,7 +1553,7 @@ export default function SolicitudesCarnetTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {filteredRecords.map((rec) => {
+                {paginatedRecords.map((rec) => {
                   const hasAnyPhoto = Boolean(rec.foto_url || rec.socorrista_foto_actual);
                   const rowUnread = isRecordUnread(rec);
                   const isCompleted = isCompletedCarnetEstado(rec.estado_solicitud);
@@ -1854,6 +1869,13 @@ export default function SolicitudesCarnetTab() {
                 })}
               </tbody>
             </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredRecords.length}
+              pageSize={CARNET_PAGE_SIZE}
+              onPageChange={setCurrentPage}
+              itemLabel="solicitudes de carnet"
+            />
           </div>
         )}
       </div>

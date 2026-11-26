@@ -20,6 +20,11 @@ import CarnetPhotoCaptureModal from '../components/common/CarnetPhotoCaptureModa
 import CargosSelector from '../components/socorristas/CargosSelector';
 import SocorristaConfirmModal from '../components/socorristas/SocorristaConfirmModal';
 import {
+  DEFAULT_CARGOS_JDN,
+  JDN_PERIODO_ACTUAL,
+  JdnSlotView,
+  assignJdnCargoSafe,
+  loadJdnSlots,
   normalizeDocumentForCompare,
   parseCargosSecundarios,
   saveSocorristaCargosSecundariosFallback,
@@ -60,6 +65,10 @@ export default function SocorristaProfile() {
   const [conoceModalMode, setConoceModalMode] = useState<'auto' | 'edit'>('auto');
   const [showExtraKycDetails, setShowExtraKycDetails] = useState(false);
   const [editKycForm, setEditKycForm] = useState<ConoceSocorristaExtraData>(EMPTY_CONOCE_SOCORRISTA_DATA);
+  const [jdnSlots, setJdnSlots] = useState<JdnSlotView[]>([]);
+  const [currentJdnCargo, setCurrentJdnCargo] = useState<string>('');
+  const [editJdnCargo, setEditJdnCargo] = useState<string>('');
+  const canAssignJdn = role === 'admin' || role === 'superadmin' || Boolean(permissions?.assign_jdn_cargos);
 
   const downloadImageWithWatermark = async (format: 'png' | 'jpeg') => {
     if (!carnetGeneradoUrl) return;
@@ -350,6 +359,17 @@ export default function SocorristaProfile() {
 
       // Cargar Méritos asignados a este socorrista
       fetchSocorristaMeritos(Number(id));
+
+      // Cargar conformación nacional de Junta Directiva Nacional (JDN)
+      try {
+        const { slots, bySocorristaId } = await loadJdnSlots();
+        setJdnSlots(slots);
+        const assignedJdn = bySocorristaId[Number(id)] || socData.cargo_jdn || '';
+        setCurrentJdnCargo(assignedJdn);
+        setEditJdnCargo(assignedJdn);
+      } catch (jdnErr) {
+        console.warn('Error cargando estado JDN:', jdnErr);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -812,6 +832,34 @@ export default function SocorristaProfile() {
         changes.foto = 'Cambió fotografía';
       }
 
+      if (canAssignJdn && editJdnCargo !== currentJdnCargo && id) {
+        const secNombre =
+          seccionales.find((s) => Number(s.id) === Number(targetSeccionalId))?.nombre ||
+          socorrista?.seccional_nombre ||
+          'Sin seccional';
+        const jdnRes = await assignJdnCargoSafe({
+          cargoJdn: editJdnCargo || null,
+          socorristaId: Number(id),
+          socorristaSnapshot: {
+            id: Number(id),
+            nombre_completo: [cleanPrimerNombre, cleanSegundoNombre, cleanPrimerApellido, cleanSegundoApellido]
+              .filter(Boolean)
+              .join(' '),
+            carnet: editForm.carnet || socorrista?.carnet || '',
+            foto_url: foto_url || null,
+            seccional_id: targetSeccionalId ? Number(targetSeccionalId) : null,
+            seccional_nombre: secNombre,
+            cargo_institucional: editForm.cargo_institucional || null,
+          },
+          periodo: JDN_PERIODO_ACTUAL,
+          replaceExisting: false,
+        });
+        if (!jdnRes.ok) {
+          throw new Error(jdnRes.error || 'No se pudo actualizar el cargo de Junta Directiva Nacional.');
+        }
+        changes.cargo_jdn = editJdnCargo || 'Liberado';
+      }
+
       await logActivity('Actualizó perfil', 'Socorrista', id, {
         ...changes,
         mensaje: 'Se actualizaron los datos del socorrista'
@@ -1011,6 +1059,7 @@ export default function SocorristaProfile() {
                     tiene_licencia_vehiculo: !!socorrista?.licencia_vehiculo_numero,
                     tiene_licencia_moto: !!socorrista?.licencia_moto_numero,
                   });
+                  setEditJdnCargo(currentJdnCargo);
                   setFotoFile(null);
                 }}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
@@ -1539,6 +1588,46 @@ export default function SocorristaProfile() {
                     </div>
                   </div>
 
+                  {/* Cargo Junta Directiva Nacional (JDN · 2026 - 2028) */}
+                  <div className="sm:col-span-3">
+                    <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-emerald-600" />
+                      Junta Directiva Nacional (JDN · {JDN_PERIODO_ACTUAL})
+                    </label>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      1 persona por cargo a nivel nacional · Requiere permiso JDN en Accesos
+                    </p>
+                    <div className="mt-1 space-y-1.5">
+                      <select
+                        disabled={!canEditThisSocorrista || !canAssignJdn}
+                        value={editJdnCargo}
+                        onChange={(e) => setEditJdnCargo(e.target.value)}
+                        className="shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-gray-300 rounded-md p-2 border disabled:bg-gray-100 disabled:text-gray-500"
+                      >
+                        <option value="">Ninguno / No pertenece a JDN</option>
+                        {DEFAULT_CARGOS_JDN.map((cargo) => {
+                          const slot = jdnSlots.find((s) => s.cargo === cargo);
+                          const occupiedByOther =
+                            Boolean(slot?.miembro) && String(slot?.miembro?.socorrista_id) !== String(id);
+                          return (
+                            <option key={cargo} value={cargo} disabled={occupiedByOther}>
+                              {cargo}{' '}
+                              {occupiedByOther
+                                ? `(Ocupado: ${slot?.miembro?.nombre_completo})`
+                                : '(Disponible)'}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {!canAssignJdn && (
+                        <p className="text-[11px] text-amber-700 flex items-center gap-1">
+                          <Lock className="w-3 h-3 shrink-0" />
+                          Solo usuarios con permiso de JDN en Accesos pueden asignar este cargo.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                 </div>
               </div>
 
@@ -1791,6 +1880,23 @@ export default function SocorristaProfile() {
                   )}
                 </dd>
               </div>
+              {currentJdnCargo && (
+                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6 bg-emerald-50/40">
+                  <dt className="text-sm font-medium text-emerald-900 flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-emerald-600" />
+                    Junta Directiva Nacional
+                  </dt>
+                  <dd className="mt-1 text-sm sm:mt-0 sm:col-span-2 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-700 text-white shadow-2xs">
+                      <Award className="w-3.5 h-3.5 mr-1.5 text-emerald-200" />
+                      {currentJdnCargo}
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      Período {JDN_PERIODO_ACTUAL}
+                    </span>
+                  </dd>
+                </div>
+              )}
               <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
                 <dt className="text-sm font-medium text-gray-500">Fecha de Ingreso</dt>
                 <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{socorrista.fecha_ingreso}</dd>

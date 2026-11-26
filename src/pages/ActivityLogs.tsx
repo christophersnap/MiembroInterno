@@ -33,6 +33,7 @@ import {
   getElSalvadorIsoTimestamp,
   parseElSalvadorDateTimeInputToIso,
 } from '../utils/dateUtils';
+import PaginationBar from '../components/common/PaginationBar';
 
 type ActivityCategoryFilter = 'todas' | HumanActivityResult['category'];
 type TimeWindowPreset = '3h' | '6h' | '12h' | 'today' | 'custom';
@@ -306,6 +307,20 @@ export default function ActivityLogs() {
     });
   }, [logs, search, selectedCategory, selectedEntity]);
 
+  const ACTIVITY_PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedCategory, selectedEntity, timeWindow, logs.length]);
+
+  const paginatedLogs = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredLogs.length / ACTIVITY_PAGE_SIZE));
+    const safePage = Math.min(currentPage, totalPages);
+    const start = (safePage - 1) * ACTIVITY_PAGE_SIZE;
+    return filteredLogs.slice(start, start + ACTIVITY_PAGE_SIZE);
+  }, [filteredLogs, currentPage]);
+
   const getCategoryIcon = (cat: HumanActivityResult['category']) => {
     switch (cat) {
       case 'sesion':
@@ -551,7 +566,7 @@ export default function ActivityLogs() {
             No se encontraron registros de actividad coincidentes.
           </div>
         ) : (
-          filteredLogs.map((log) => (
+          paginatedLogs.map((log) => (
             <button
               key={log.id}
               type="button"
@@ -582,6 +597,17 @@ export default function ActivityLogs() {
               </div>
             </button>
           ))
+        )}
+        {!loading && filteredLogs.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredLogs.length}
+              pageSize={ACTIVITY_PAGE_SIZE}
+              onPageChange={setCurrentPage}
+              itemLabel="actividades"
+            />
+          </div>
         )}
       </div>
 
@@ -638,7 +664,7 @@ export default function ActivityLogs() {
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => {
+                paginatedLogs.map((log) => {
                   const isSistema = !log.user_email || log.user_email === 'Sistema';
 
                   return (
@@ -703,6 +729,15 @@ export default function ActivityLogs() {
             </tbody>
           </table>
         </div>
+        {!loading && filteredLogs.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalItems={filteredLogs.length}
+            pageSize={ACTIVITY_PAGE_SIZE}
+            onPageChange={setCurrentPage}
+            itemLabel="actividades"
+          />
+        )}
       </div>
 
       {/* Modal de Detalle de Actividad (Estilo iOS limpio sin JSON crudo visible) */}

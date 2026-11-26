@@ -44,6 +44,7 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; keys: string[] }> =
       'ver_expediente_socorrista',
       'descargar_expediente_socorrista',
       'cambiar_estado_socorrista',
+      'assign_jdn_cargos',
       'ver_imagenes_socorristas',
       'view_carnet',
       'descargar_carnet',
@@ -324,6 +325,7 @@ export default function PermisosIndividualesModal({
       descargar_expediente_socorrista: false,
       descargar_ficha_conoce_socorrista: false,
       ver_personas_conectadas: false,
+      assign_jdn_cargos: false,
       view_meritos: true,
       view_anuncios: true,
       view_formularios: true,
@@ -1359,6 +1361,23 @@ export default function PermisosIndividualesModal({
                       checked={getPermissionStatus('descargar_excel_socorristas').effectiveValue}
                       onChange={() => handleToggleBooleanPerm('descargar_excel_socorristas')}
                       ariaLabel="Descargar Excel de Socorristas"
+                    />
+                  </div>
+
+                  {/* Asignar cargos de Junta Directiva Nacional (JDN) */}
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-4 bg-emerald-50/35">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Asignar cargos de Junta Directiva Nacional (JDN)
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Autoriza asignar, cambiar o liberar los 11 cargos únicos nacionales (Período 2026 - 2028)
+                      </p>
+                    </div>
+                    <IosSwitch
+                      checked={getPermissionStatus('assign_jdn_cargos').effectiveValue}
+                      onChange={() => handleToggleBooleanPerm('assign_jdn_cargos')}
+                      ariaLabel="Asignar cargos de Junta Directiva Nacional (JDN)"
                     />
                   </div>
 

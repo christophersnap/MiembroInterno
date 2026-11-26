@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import PresenceModal from '../components/PresenceModal';
 import NoticiasBannerSlider from '../components/dashboard/NoticiasBannerSlider';
 import CountdownBannerSection from '../components/dashboard/CountdownBannerSection';
+import JuntaDirectivaSection from '../components/dashboard/JuntaDirectivaSection';
 import {
   DEFAULT_BANNER_CONFIG,
   fetchNoticiasBannerData,
@@ -909,6 +910,11 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      {/* ========================================================================= */}
+      {/* 3.5 SECCIÓN: JUNTA DIRECTIVA NACIONAL (JDN · PERÍODO 2026 - 2028)         */}
+      {/* ========================================================================= */}
+      <JuntaDirectivaSection />
 
       {/* ========================================================================= */}
       {/* 4. SECCIÓN: GRÁFICAS ESTILO APPLE INSET GROUPED                           */}

@@ -16,6 +16,7 @@ import { useSolicitudReadTracker } from '../utils/solicitudReadTracker';
 import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
 import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import CompraForm, { ArchivoCotizacion } from '../components/compra/CompraForm';
+import PaginationBar from '../components/common/PaginationBar';
 import { generarHtmlCorreoCompra } from '../lib/emailNotification';
 import { sendEmailNotification, getApiUrl } from '../lib/api';
 import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
@@ -1302,6 +1303,20 @@ Cruz Verde Salvadoreña`;
     });
   }, [solicitudes, searchTerm, filterEstado, filterSeccional, filterTipo, compraScope, hasNivelNacional, isSeccionalOnly, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user, userName]);
 
+  const COMPRA_PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterEstado, filterSeccional, filterTipo, activeTab]);
+
+  const paginatedSolicitudes = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredSolicitudes.length / COMPRA_PAGE_SIZE));
+    const safePage = Math.min(currentPage, totalPages);
+    const start = (safePage - 1) * COMPRA_PAGE_SIZE;
+    return filteredSolicitudes.slice(start, start + COMPRA_PAGE_SIZE);
+  }, [filteredSolicitudes, currentPage]);
+
   const unreadAllCompra = useMemo(
     () =>
       solicitudes
@@ -1794,7 +1809,7 @@ Cruz Verde Salvadoreña`;
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredSolicitudes.map((sol) => {
+                    {paginatedSolicitudes.map((sol) => {
                       const rowUnread = isUnread('compra', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
                       return (
                         <tr
@@ -1968,6 +1983,13 @@ Cruz Verde Salvadoreña`;
                     })}
                   </tbody>
                 </table>
+                <PaginationBar
+                  currentPage={currentPage}
+                  totalItems={filteredSolicitudes.length}
+                  pageSize={COMPRA_PAGE_SIZE}
+                  onPageChange={setCurrentPage}
+                  itemLabel="solicitudes de compra"
+                />
               </div>
             )}
           </div>

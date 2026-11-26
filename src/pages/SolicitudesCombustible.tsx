@@ -19,6 +19,7 @@ import CombustibleForm from '../components/combustible/CombustibleForm';
 import CombustibleEmailModal from '../components/combustible/CombustibleEmailModal';
 import CombustiblePdfModal from '../components/combustible/CombustiblePdfModal';
 import CombustibleTemplateConfig from '../components/combustible/CombustibleTemplateConfig';
+import PaginationBar from '../components/common/PaginationBar';
 import { sendEmailNotification, getApiUrl } from '../lib/api';
 import { generarHtmlCorreoCombustible } from '../lib/emailNotification';
 import {
@@ -630,6 +631,20 @@ NOTIFY pgrst, 'reload schema';`;
     return matchesSearch && matchesEstado && matchesSeccional;
   });
 
+  const COMBUSTIBLE_PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterEstado, filterSeccional, activeTab]);
+
+  const totalCombustiblePages = Math.max(1, Math.ceil(filteredSolicitudes.length / COMBUSTIBLE_PAGE_SIZE));
+  const safeCombustiblePage = Math.min(currentPage, totalCombustiblePages);
+  const paginatedSolicitudes = filteredSolicitudes.slice(
+    (safeCombustiblePage - 1) * COMBUSTIBLE_PAGE_SIZE,
+    safeCombustiblePage * COMBUSTIBLE_PAGE_SIZE
+  );
+
   const scopedAllSolicitudes = solicitudes.filter(sol => matchesCombustibleScope(sol));
   const unreadAllCombustible = scopedAllSolicitudes.filter(sol =>
     isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud)
@@ -875,7 +890,7 @@ NOTIFY pgrst, 'reload schema';`;
                       </td>
                     </tr>
                   ) : (
-                    filteredSolicitudes.map((sol) => {
+                    paginatedSolicitudes.map((sol) => {
                       const rowUnread = isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
                       return (
                         <tr
@@ -1002,6 +1017,13 @@ NOTIFY pgrst, 'reload schema';`;
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              currentPage={safeCombustiblePage}
+              totalItems={filteredSolicitudes.length}
+              pageSize={COMBUSTIBLE_PAGE_SIZE}
+              onPageChange={setCurrentPage}
+              itemLabel="solicitudes de combustible"
+            />
           </div>
 
         </div>
