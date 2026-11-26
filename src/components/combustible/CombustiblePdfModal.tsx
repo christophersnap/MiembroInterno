@@ -8,6 +8,8 @@ import {
 } from '../../types/combustible';
 import SmartStorageImage from '../common/SmartStorageImage';
 import PdfWatermarkOverlay from '../common/PdfWatermarkOverlay';
+import { formatFechaHoraSV } from '../../utils/dateUtils';
+import { isSolicitudFinalizada } from '../../utils/solicitudLimite';
 
 interface CombustiblePdfModalProps {
   solicitud: SolicitudCombustible;
@@ -70,6 +72,10 @@ export default function CombustiblePdfModal({
   const cargoJefatura = (config.pdfLabelFirmaAdmin || 'Jefatura de Operaciones').trim();
   const labelFirmaSolicitante = (config.pdfLabelFirmaSolicitante || 'Firma del Solicitante').trim();
   const textoSello = (config.pdfTextoSelloInstitucional || 'Sello Institucional Oficial').trim();
+  const esFinalizada = isSolicitudFinalizada(solicitud.estado);
+  const estadoDisplay = esFinalizada ? 'Finalizado' : solicitud.estado;
+  const fechaResolucionRaw = solicitud.fecha_autorizacion || (esFinalizada ? solicitud.updated_at : null);
+  const fechaResolucionTexto = fechaResolucionRaw ? formatFechaHoraSV(fechaResolucionRaw) : null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex flex-col items-center justify-start p-4 md:p-8">
@@ -167,21 +173,72 @@ export default function CombustiblePdfModal({
 
               <div className="text-right text-xs space-y-1">
                 <span className="text-gray-500 block text-3xs uppercase tracking-wider font-semibold">
-                  Fecha y Hora de Solicitud
+                  Fecha de Solicitud
                 </span>
                 <span className="font-bold text-gray-900 block font-mono">
                   {fechaHoraSV.completa}
                 </span>
+                {esFinalizada && fechaResolucionTexto && (
+                  <div className="pt-0.5">
+                    <span className="text-emerald-700 block text-3xs uppercase tracking-wider font-semibold">
+                      Fecha de Resolución
+                    </span>
+                    <span className="font-bold text-emerald-950 block font-mono">
+                      {fechaResolucionTexto}
+                    </span>
+                  </div>
+                )}
                 <span className="text-[10px] text-gray-500 block">
                   (Hora de El Salvador)
                 </span>
-                <span className="inline-block px-2 py-0.5 rounded bg-gray-100 font-semibold border border-gray-300 text-2xs">
-                  Estado: {solicitud.estado}
+                <span
+                  className={`inline-block px-2.5 py-0.5 rounded font-bold border text-2xs uppercase tracking-wide ${
+                    esFinalizada
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-400'
+                      : 'bg-gray-100 text-gray-800 border-gray-300'
+                  }`}
+                >
+                  Estado: {estadoDisplay}
                 </span>
               </div>
             </div>
 
           </div>
+
+          {/* Bloque Oficial de Resolución (cuando la solicitud está finalizada) */}
+          {esFinalizada && (
+            <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 px-4 py-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                  Fecha de Solicitud
+                </span>
+                <span className="font-bold font-mono text-gray-900 block mt-0.5">
+                  {fechaHoraSV.completa}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                  Fecha de Resolución
+                </span>
+                <span className="font-bold font-mono text-emerald-950 block mt-0.5">
+                  {fechaResolucionTexto || 'Registrada al finalizar'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                  Estado de la Solicitud
+                </span>
+                <span className="font-extrabold uppercase tracking-wide text-emerald-900 block mt-0.5">
+                  Finalizado
+                </span>
+                {solicitud.autorizado_por && (
+                  <span className="text-[10px] text-emerald-800 block truncate">
+                    Por: {solicitud.autorizado_por}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Grid de 2 Columnas de Datos */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">

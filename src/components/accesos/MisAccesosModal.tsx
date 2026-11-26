@@ -183,8 +183,13 @@ const PERMISSION_DESCRIPTIONS: Record<string, PermissionMeta> = {
     category: 'Solicitudes y Flota',
   },
   view_solicitudes_carnet: {
-    label: 'Solicitudes de Carnet en Gestión Logística',
-    desc: 'Ver y filtrar solicitudes de carnetización por seccional y fecha.',
+    label: 'Solicitudes de Carnet (Solo ver)',
+    desc: 'Ver solicitudes de carnetización y sus observaciones sin realizar correcciones.',
+    category: 'Solicitudes y Flota',
+  },
+  corregir_solicitudes_carnet: {
+    label: 'Corregir Solicitudes de Carnet Observadas',
+    desc: 'Corregir nombre/fotografía o cancelar solicitudes de carnet en estado Observada.',
     category: 'Solicitudes y Flota',
   },
   edit_solicitudes_carnet: {

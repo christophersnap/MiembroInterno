@@ -34,6 +34,7 @@ export interface SolicitudCombustible {
   correo_enviado?: boolean;
   correos_notificados?: string;
   created_at?: string;
+  updated_at?: string;
   cargo_solicitante?: string;
   vehiculo_placa?: string;
   vehiculo_marca?: string;

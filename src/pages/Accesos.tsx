@@ -56,6 +56,7 @@ export default function Accesos() {
 
   // Seguridad de Bloqueo por Intentos Fallidos
   const [loginSecurityMap, setLoginSecurityMap] = useState<Record<string, LoginSecurityRecord>>({});
+  const [loginSecurityRpcMissing, setLoginSecurityRpcMissing] = useState<boolean>(false);
   const [onlyLockedFilter, setOnlyLockedFilter] = useState<boolean>(false);
   const [selectedSecurityUser, setSelectedSecurityUser] = useState<{
     user: any;
@@ -151,7 +152,15 @@ export default function Accesos() {
   const fetchLoginSecurityReport = async () => {
     try {
       const { data: secData, error: secErr } = await supabase.rpc('get_login_lockouts_report');
-      if (!secErr && Array.isArray(secData)) {
+      if (secErr) {
+        const msg = String(secErr.message || '').toLowerCase();
+        if (msg.includes('could not find the function') || msg.includes('does not exist') || secErr.code === 'PGRST202') {
+          setLoginSecurityRpcMissing(true);
+        }
+        return null;
+      }
+      setLoginSecurityRpcMissing(false);
+      if (Array.isArray(secData)) {
         const map: Record<string, LoginSecurityRecord> = {};
         for (const item of secData as LoginSecurityRecord[]) {
           if (item?.email) {
@@ -162,7 +171,7 @@ export default function Accesos() {
         return map;
       }
     } catch {
-      // Silencioso si aún no se ha ejecutado la Migración 61
+      // Silencioso si hay error temporal de red
     }
     return null;
   };
@@ -2434,8 +2443,9 @@ NOTIFY pgrst, 'reload schema';`;
     view_combustible_historial: 'Ver Historial en Solicitudes de Combustible',
     view_combustible_plantillas: 'Ver Plantillas en Solicitudes de Combustible',
     ver_previsualizacion_pdf: 'Previsualizar e imprimir PDF en Solicitudes',
-    view_solicitudes_carnet: 'Ver Solicitudes de Carnet en Gestión Logística',
-    edit_solicitudes_carnet: 'Gestionar Solicitudes de Carnet',
+    view_solicitudes_carnet: 'Ver Solicitudes de Carnet (Solo ver solicitudes y observaciones)',
+    corregir_solicitudes_carnet: 'Corregir Solicitudes de Carnet observadas (Ver y corregir)',
+    edit_solicitudes_carnet: 'Gestionar Solicitudes de Carnet (Cambiar estado y revisar)',
     view_archivos: 'Ver y descargar Archivos Institucionales',
     subir_archivos: 'Subir Archivos Institucionales',
     edit_archivos: 'Administrar Archivos Institucionales',
@@ -2505,6 +2515,7 @@ NOTIFY pgrst, 'reload schema';`;
         'view_compra_plantillas',
         'ver_previsualizacion_pdf',
         'view_solicitudes_carnet',
+        'corregir_solicitudes_carnet',
         'edit_solicitudes_carnet',
       ],
     },
@@ -2848,26 +2859,29 @@ NOTIFY pgrst, 'reload schema';`;
                 })}
               </select>
 
-              {(lockedUsersCount > 0 || flaggedSecurityUsersCount > 0) && (
-                <button
-                  type="button"
-                  onClick={() => setOnlyLockedFilter((prev) => !prev)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 tabular-nums border ${
-                    onlyLockedFilter
-                      ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
-                      : lockedUsersCount > 0
-                      ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                  }`}
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>
-                    {lockedUsersCount > 0
-                      ? `Bloqueados (${lockedUsersCount})`
-                      : `Intentos fallidos (${flaggedSecurityUsersCount})`}
-                  </span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setOnlyLockedFilter((prev) => !prev)}
+                title="Filtrar cuentas bloqueadas o con intentos fallidos de acceso"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 tabular-nums border ${
+                  onlyLockedFilter
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                    : lockedUsersCount > 0
+                    ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                    : flaggedSecurityUsersCount > 0
+                    ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                    : 'bg-slate-100/80 text-slate-600 border-transparent hover:bg-slate-200/70'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>
+                  {lockedUsersCount > 0
+                    ? `Bloqueados (${lockedUsersCount})`
+                    : flaggedSecurityUsersCount > 0
+                    ? `Intentos fallidos (${flaggedSecurityUsersCount})`
+                    : 'Bloqueos (0)'}
+                </span>
+              </button>
 
               {(roleFilter !== 'todos' || userSearch.trim() !== '' || onlyLockedFilter) && (
                 <button
@@ -2889,6 +2903,18 @@ NOTIFY pgrst, 'reload schema';`;
             </span>
           </div>
 
+          {loginSecurityRpcMissing && (
+            <div className="px-4 sm:px-5 py-2.5 bg-amber-50/80 border-b border-amber-200/80 flex items-center justify-between gap-3 text-xs text-amber-900">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="truncate sm:whitespace-normal">
+                  Para ver bloqueos por intentos fallidos, país de origen y levantar bloqueos desde esta tabla, ejecuta el script{' '}
+                  <strong className="font-mono">61_seguridad_bloqueos_login_y_correo.sql</strong> en Supabase.
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-100 text-left">
               <thead className="bg-slate-50/70 text-[11px] font-semibold text-slate-500">
@@ -2897,14 +2923,17 @@ NOTIFY pgrst, 'reload schema';`;
                   <th className="px-4 py-3">Rol y Carnet</th>
                   <th className="px-4 py-3">Nivel y Alcance</th>
                   <th className="px-4 py-3">Estado</th>
+                  <th className="px-4 py-3">Intentos / Bloqueo</th>
                   <th className="px-5 py-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-100 text-xs">
                 {filteredUsuarios.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-slate-400">
-                      No se encontraron usuarios con ese criterio de búsqueda.
+                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                      {onlyLockedFilter
+                        ? 'No hay usuarios bloqueados ni con intentos fallidos registrados.'
+                        : 'No se encontraron usuarios con ese criterio de búsqueda.'}
                     </td>
                   </tr>
                 ) : (
@@ -3140,83 +3169,102 @@ NOTIFY pgrst, 'reload schema';`;
                           )}
                         </td>
 
-                        {/* 4. Estado (Switch estilo iOS + Indicador de bloqueo por intentos) */}
+                        {/* 4. Estado (Switch estilo iOS) */}
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-2.5">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={!isInactive}
-                                onClick={() => handleToggleUserActive(user)}
-                                title={isInactive ? 'Activar cuenta' : 'Desactivar cuenta'}
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
-                                  isInactive
-                                    ? 'bg-slate-200'
-                                    : isPending
-                                    ? 'bg-amber-500'
-                                    : 'bg-emerald-500'
-                                }`}
-                              >
-                                <span
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
-                                    isInactive ? 'translate-x-0' : 'translate-x-4'
-                                  }`}
-                                />
-                              </button>
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!isInactive}
+                              onClick={() => handleToggleUserActive(user)}
+                              title={isInactive ? 'Activar cuenta' : 'Desactivar cuenta'}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ${
+                                isInactive
+                                  ? 'bg-slate-200'
+                                  : isPending
+                                  ? 'bg-amber-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                            >
                               <span
-                                className={`text-xs font-medium ${
-                                  isInactive
-                                    ? 'text-slate-400'
-                                    : isPending
-                                    ? 'text-amber-700'
-                                    : 'text-slate-700'
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform duration-150 ${
+                                  isInactive ? 'translate-x-0' : 'translate-x-4'
                                 }`}
-                              >
-                                {isInactive ? 'Inactivo' : isPending ? 'Pendiente' : 'Activo'}
-                              </span>
-                            </div>
-
-                            {isLoginLocked && secRecord ? (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-[11px] font-semibold text-rose-700 transition-colors cursor-pointer tabular-nums"
-                                title="Ver reporte de bloqueo, país de origen y levantar bloqueo"
-                              >
-                                <Lock className="w-3 h-3 shrink-0" />
-                                <span>
-                                  Bloqueado · {failedAttemptsCount} int.
-                                  {secRecord.last_country_code ? ` · ${secRecord.last_country_code}` : ''}
-                                </span>
-                              </button>
-                            ) : secRecord && failedAttemptsCount > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-medium text-amber-800 transition-colors cursor-pointer tabular-nums"
-                                title="Ver detalle de intentos fallidos y país de origen"
-                              >
-                                <AlertTriangle className="w-3 h-3 shrink-0" />
-                                <span>
-                                  {failedAttemptsCount} {failedAttemptsCount === 1 ? 'intento' : 'intentos'}
-                                  {secRecord.last_country_code ? ` · ${secRecord.last_country_code}` : ''}
-                                </span>
-                              </button>
-                            ) : secRecord && Array.isArray(secRecord.attempts) && secRecord.attempts.length > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSecurityUser({ user, record: secRecord })}
-                                className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors cursor-pointer tabular-nums"
-                                title="Ver historial de intentos anteriores"
-                              >
-                                <span>Ver historial ({secRecord.attempts.length})</span>
-                              </button>
-                            ) : null}
+                              />
+                            </button>
+                            <span
+                              className={`text-xs font-medium ${
+                                isInactive
+                                  ? 'text-slate-400'
+                                  : isPending
+                                  ? 'text-amber-700'
+                                  : 'text-slate-700'
+                              }`}
+                            >
+                              {isInactive ? 'Inactivo' : isPending ? 'Pendiente' : 'Activo'}
+                            </span>
                           </div>
                         </td>
 
-                        {/* 5. Acciones limpias en una sola fila */}
+                        {/* 5. Intentos fallidos / Bloqueo de acceso */}
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {(() => {
+                            const fallbackRecord: LoginSecurityRecord = secRecord || {
+                              email: user.email || '',
+                              failed_attempts: 0,
+                              is_locked: false,
+                              attempts: [],
+                            };
+                            if (isLoginLocked) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSecurityUser({ user, record: fallbackRecord })}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-[11px] font-semibold text-rose-700 transition-colors cursor-pointer tabular-nums"
+                                  title="Ver reporte de bloqueo, país de origen y levantar bloqueo"
+                                >
+                                  <Lock className="w-3 h-3 shrink-0" />
+                                  <span>
+                                    Bloqueado · {failedAttemptsCount} int.
+                                    {fallbackRecord.last_country_code ? ` · ${fallbackRecord.last_country_code}` : ''}
+                                  </span>
+                                </button>
+                              );
+                            }
+                            if (failedAttemptsCount > 0) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSecurityUser({ user, record: fallbackRecord })}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-semibold text-amber-800 transition-colors cursor-pointer tabular-nums"
+                                  title="Ver detalle de intentos fallidos y país de origen"
+                                >
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  <span>
+                                    {failedAttemptsCount} {failedAttemptsCount === 1 ? 'intento' : 'intentos'}
+                                    {fallbackRecord.last_country_code ? ` · ${fallbackRecord.last_country_code}` : ''}
+                                  </span>
+                                </button>
+                              );
+                            }
+                            const historyCount = Array.isArray(fallbackRecord.attempts) ? fallbackRecord.attempts.length : 0;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityUser({ user, record: fallbackRecord })}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-[11px] font-medium text-slate-600 transition-colors cursor-pointer tabular-nums"
+                                title="Ver reporte de accesos e intentos de este usuario"
+                              >
+                                <Shield className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>
+                                  {historyCount > 0 ? `Normal · ${historyCount} reg.` : 'Sin bloqueos'}
+                                </span>
+                              </button>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 6. Acciones limpias en una sola fila */}
                         <td className="px-5 py-3.5 whitespace-nowrap text-right">
                           <div className="inline-flex items-center justify-end gap-1.5">
                             {isLoginLocked && secRecord && (
@@ -3227,7 +3275,7 @@ NOTIFY pgrst, 'reload schema';`;
                                 title="Ver reporte de seguridad y levantar bloqueo"
                               >
                                 <Unlock className="h-3.5 w-3.5" />
-                                <span>Desbloquear</span>
+                                <span>Levantar bloqueo</span>
                               </button>
                             )}
 

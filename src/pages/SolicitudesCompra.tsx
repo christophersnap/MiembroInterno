@@ -68,6 +68,7 @@ export interface SolicitudCompra {
   correos_notificados?: string;
   cotizaciones_archivos?: ArchivoCotizacion[];
   created_at?: string;
+  updated_at?: string;
 }
 
 export interface VehiculoSimple {
@@ -1222,12 +1223,16 @@ Cruz Verde Salvadoreña`;
         updated_at: getElSalvadorIsoTimestamp()
       };
 
-      if (newStatus === 'Aprobada') {
+      if (newStatus === 'Aprobada' || newStatus === 'Finalizada') {
         payload.autorizado_por = userName || user?.email || 'Departamento Administrativo';
         payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (newStatus === 'Rechazada') {
         payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';
+      } else if (newStatus === 'Pendiente') {
+        payload.autorizado_por = null;
+        payload.fecha_autorizacion = null;
+        payload.motivo_rechazo = null;
       }
 
       if (dbTableMissing) {

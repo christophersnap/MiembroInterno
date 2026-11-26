@@ -2,7 +2,8 @@ import React, { useRef } from 'react';
 import { X, Printer, Download, Eye, Sparkles, Check } from 'lucide-react';
 import { CompraConfig } from '../../types/compra';
 import { SolicitudCompra } from '../../pages/SolicitudesCompra';
-import { getElSalvadorDateString } from '../../utils/dateUtils';
+import { getElSalvadorDateString, formatFechaHoraSV, formatFechaSV } from '../../utils/dateUtils';
+import { isSolicitudFinalizada } from '../../utils/solicitudLimite';
 import PdfWatermarkOverlay from '../common/PdfWatermarkOverlay';
 
 interface CompraPdfPreviewModalProps {
@@ -58,6 +59,14 @@ export default function CompraPdfPreviewModal({
       default: return 'text-sm';
     }
   };
+
+  const esFinalizada = isSolicitudFinalizada(solicitud.estado);
+  const estadoDisplay = esFinalizada ? 'Finalizado' : solicitud.estado;
+  const fechaSolicitudTexto = solicitud.created_at
+    ? formatFechaHoraSV(solicitud.created_at)
+    : `${formatFechaSV(solicitud.fecha_solicitud)}${solicitud.hora_solicitud ? ` · ${solicitud.hora_solicitud}` : ''}`;
+  const fechaResolucionRaw = solicitud.fecha_autorizacion || (esFinalizada ? solicitud.updated_at : null);
+  const fechaResolucionTexto = fechaResolucionRaw ? formatFechaHoraSV(fechaResolucionRaw) : null;
 
   const handlePrint = () => {
     window.print();
@@ -162,23 +171,68 @@ export default function CompraPdfPreviewModal({
 
       case 'subtitulo_folio':
         return (
-          <div key={blockId} className="flex flex-col sm:flex-row items-center justify-between border-b border-gray-300 pb-2 pt-2 gap-2">
-            <div className="text-center sm:text-left">
-              <span className="text-sm font-black text-gray-900 uppercase tracking-wide bg-gray-100 px-3 py-1 rounded">
-                {config.pdfSubtitulo}
-              </span>
-            </div>
-            <div className="flex items-center space-x-4 text-xs font-mono">
-              <div className="bg-gray-100 border border-gray-300 px-2.5 py-1 rounded">
-                <span className="text-gray-500 font-sans mr-1">FOLIO:</span>
-                <span className="font-bold text-green-900">{solicitud.folio}</span>
+          <div key={blockId} className="space-y-2.5">
+            <div className="flex flex-col sm:flex-row items-center justify-between border-b border-gray-300 pb-2 pt-2 gap-2">
+              <div className="flex items-center flex-wrap justify-center sm:justify-start gap-2">
+                <span className="text-sm font-black text-gray-900 uppercase tracking-wide bg-gray-100 px-3 py-1 rounded">
+                  {config.pdfSubtitulo}
+                </span>
+                <span
+                  className={`inline-block px-2.5 py-1 rounded text-2xs font-bold uppercase tracking-wide border ${
+                    esFinalizada
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-400'
+                      : 'bg-gray-100 text-gray-700 border-gray-300'
+                  }`}
+                >
+                  Estado: {estadoDisplay}
+                </span>
               </div>
-              {config.pdfMostrarFechaHora && (
-                <div className="text-gray-600 font-sans text-xs">
-                  {solicitud.fecha_solicitud} • {solicitud.hora_solicitud || '10:00 AM'}
+              <div className="flex items-center flex-wrap justify-end gap-3 text-xs font-mono">
+                <div className="bg-gray-100 border border-gray-300 px-2.5 py-1 rounded">
+                  <span className="text-gray-500 font-sans mr-1">FOLIO:</span>
+                  <span className="font-bold text-green-900">{solicitud.folio}</span>
                 </div>
-              )}
+                {config.pdfMostrarFechaHora && (
+                  <div className="text-gray-600 font-sans text-xs">
+                    {fechaSolicitudTexto}
+                  </div>
+                )}
+              </div>
             </div>
+
+            {esFinalizada && (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50/75 px-3.5 py-2.5 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-sans">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Fecha de Solicitud
+                  </span>
+                  <span className="font-bold font-mono text-gray-900 block mt-0.5">
+                    {fechaSolicitudTexto}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Fecha de Resolución
+                  </span>
+                  <span className="font-bold font-mono text-emerald-950 block mt-0.5">
+                    {fechaResolucionTexto || 'Registrada al finalizar'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Estado de la Solicitud
+                  </span>
+                  <span className="font-extrabold uppercase tracking-wide text-emerald-900 block mt-0.5">
+                    Finalizado
+                  </span>
+                  {solicitud.autorizado_por && (
+                    <span className="text-[10px] text-emerald-800 block truncate">
+                      Por: {solicitud.autorizado_por}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
 

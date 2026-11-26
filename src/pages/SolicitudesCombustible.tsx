@@ -628,12 +628,16 @@ NOTIFY pgrst, 'reload schema';`;
         updated_at: getElSalvadorIsoTimestamp()
       };
 
-      if (newStatus === 'Aprobada') {
+      if (newStatus === 'Aprobada' || newStatus === 'Finalizada' || newStatus === 'Entregada') {
         payload.autorizado_por = userName || user?.email || 'Administración Central';
         payload.fecha_autorizacion = getElSalvadorIsoTimestamp();
         payload.motivo_rechazo = null;
       } else if (newStatus === 'Rechazada') {
         payload.motivo_rechazo = motivoRechazo.trim() || 'No especificado';
+      } else if (newStatus === 'Pendiente') {
+        payload.autorizado_por = null;
+        payload.fecha_autorizacion = null;
+        payload.motivo_rechazo = null;
       }
 
       if (dbTableMissing) {

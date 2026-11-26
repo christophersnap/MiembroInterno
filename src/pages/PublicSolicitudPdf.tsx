@@ -22,6 +22,8 @@ import {
 } from '../types/compra';
 import SmartStorageImage from '../components/common/SmartStorageImage';
 import PdfWatermarkOverlay from '../components/common/PdfWatermarkOverlay';
+import { formatFechaHoraSV, formatFechaSV } from '../utils/dateUtils';
+import { isSolicitudFinalizada } from '../utils/solicitudLimite';
 
 export default function PublicSolicitudPdf() {
   const { tipo, folio } = useParams<{ tipo: string; folio: string }>();
@@ -222,12 +224,13 @@ export default function PublicSolicitudPdf() {
               </div>
               <div className="flex items-center space-x-2 mt-0.5">
                 <span className={`inline-flex items-center px-2 py-0.2 rounded-full text-3xs font-bold ${
+                  isSolicitudFinalizada(estadoActual) ? 'bg-emerald-600 text-white' :
                   estadoActual === 'Aprobada' ? 'bg-emerald-100 text-emerald-800' :
                   estadoActual === 'Pendiente' ? 'bg-amber-100 text-amber-800' :
                   estadoActual === 'Rechazada' ? 'bg-rose-100 text-rose-800' :
                   'bg-blue-100 text-blue-800'
                 }`}>
-                  {estadoActual}
+                  {isSolicitudFinalizada(estadoActual) ? 'Finalizado' : estadoActual}
                 </span>
                 <span className="text-3xs text-gray-500">• Verificación Oficial Digital</span>
               </div>
@@ -293,6 +296,10 @@ export default function PublicSolicitudPdf() {
           const labelFirmaSolicitante = (combustibleConfig.pdfLabelFirmaSolicitante || 'Firma del Solicitante').trim();
           const textoSello = (combustibleConfig.pdfTextoSelloInstitucional || 'Sello Institucional Oficial').trim();
 
+          const esCombFinalizada = isSolicitudFinalizada(solicitudCombustible.estado);
+          const combFechaResRaw = solicitudCombustible.fecha_autorizacion || (esCombFinalizada ? solicitudCombustible.updated_at : null);
+          const combFechaResTexto = combFechaResRaw ? formatFechaHoraSV(combFechaResRaw) : null;
+
           return (
             <div className="relative z-10 space-y-6 text-gray-900 font-sans">
               {/* Encabezado */}
@@ -331,28 +338,67 @@ export default function PublicSolicitudPdf() {
                     {solicitudCombustible.folio}
                   </div>
                   <div className="text-3xs text-gray-700 font-mono font-semibold mt-1">
-                    {fechaHoraSV.completa}
+                    Solicitud: {fechaHoraSV.completa}
                   </div>
+                  {esCombFinalizada && combFechaResTexto && (
+                    <div className="text-3xs text-emerald-800 font-mono font-bold mt-0.5">
+                      Resolución: {combFechaResTexto}
+                    </div>
+                  )}
                   <div className="text-[10px] text-gray-500">
                     (Hora de El Salvador)
                   </div>
                 </div>
               </div>
 
-              {/* Estado Banner */}
-              <div className={`p-3 rounded-lg border flex items-center justify-between text-xs font-bold ${
-                solicitudCombustible.estado === 'Aprobada' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
-                solicitudCombustible.estado === 'Pendiente' ? 'bg-amber-50 border-amber-300 text-amber-900' :
-                solicitudCombustible.estado === 'Rechazada' ? 'bg-rose-50 border-rose-300 text-rose-900' :
-                'bg-blue-50 border-blue-300 text-blue-900'
-              }`}>
-                <span>Estado del Requerimiento: {solicitudCombustible.estado.toUpperCase()}</span>
-                {solicitudCombustible.autorizado_por && (
-                  <span className="font-normal text-3xs">
-                    Autorizado por: <strong>{solicitudCombustible.autorizado_por}</strong>
-                  </span>
-                )}
-              </div>
+              {/* Estado Banner / Resolución Finalizada */}
+              {esCombFinalizada ? (
+                <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-3.5 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                      Fecha de Solicitud
+                    </span>
+                    <span className="font-bold font-mono text-gray-900 block mt-0.5">
+                      {fechaHoraSV.completa}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                      Fecha de Resolución
+                    </span>
+                    <span className="font-bold font-mono text-emerald-950 block mt-0.5">
+                      {combFechaResTexto || 'Registrada al finalizar'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                      Estado de la Solicitud
+                    </span>
+                    <span className="font-black uppercase tracking-wide text-emerald-900 block mt-0.5">
+                      FINALIZADO
+                    </span>
+                    {solicitudCombustible.autorizado_por && (
+                      <span className="text-[10px] text-emerald-800 block">
+                        Por: <strong>{solicitudCombustible.autorizado_por}</strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className={`p-3 rounded-lg border flex items-center justify-between text-xs font-bold ${
+                  solicitudCombustible.estado === 'Aprobada' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
+                  solicitudCombustible.estado === 'Pendiente' ? 'bg-amber-50 border-amber-300 text-amber-900' :
+                  solicitudCombustible.estado === 'Rechazada' ? 'bg-rose-50 border-rose-300 text-rose-900' :
+                  'bg-blue-50 border-blue-300 text-blue-900'
+                }`}>
+                  <span>Estado del Requerimiento: {solicitudCombustible.estado.toUpperCase()}</span>
+                  {solicitudCombustible.autorizado_por && (
+                    <span className="font-normal text-3xs">
+                      Autorizado por: <strong>{solicitudCombustible.autorizado_por}</strong>
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Datos Generales */}
               <div className="grid grid-cols-2 gap-4 text-xs border border-gray-200 rounded-lg p-4 bg-gray-50/30">
@@ -517,7 +563,15 @@ export default function PublicSolicitudPdf() {
           );
         })()}
 
-        {!isComb && solicitudCompra && (
+        {!isComb && solicitudCompra && (() => {
+          const esCompFinalizada = isSolicitudFinalizada(solicitudCompra.estado);
+          const compFechaSolicitudTexto = solicitudCompra.created_at
+            ? formatFechaHoraSV(solicitudCompra.created_at)
+            : `${formatFechaSV(solicitudCompra.fecha_solicitud)}${solicitudCompra.hora_solicitud ? ` · ${solicitudCompra.hora_solicitud}` : ''}`;
+          const compFechaResRaw = solicitudCompra.fecha_autorizacion || (esCompFinalizada ? solicitudCompra.updated_at : null);
+          const compFechaResTexto = compFechaResRaw ? formatFechaHoraSV(compFechaResRaw) : null;
+
+          return (
           <div className="relative z-10 space-y-6 text-gray-900 font-sans">
             {/* Encabezado */}
             <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4">
@@ -546,26 +600,65 @@ export default function PublicSolicitudPdf() {
                 <div className="text-sm font-mono font-black text-gray-900 border border-slate-300 bg-slate-50 px-2.5 py-1 rounded-md inline-block">
                   {solicitudCompra.folio}
                 </div>
-                <div className="text-3xs text-gray-500 mt-1">
-                  Fecha: {solicitudCompra.fecha_solicitud}
+                <div className="text-3xs text-gray-700 font-mono font-semibold mt-1">
+                  Solicitud: {compFechaSolicitudTexto}
                 </div>
+                {esCompFinalizada && compFechaResTexto && (
+                  <div className="text-3xs text-emerald-800 font-mono font-bold mt-0.5">
+                    Resolución: {compFechaResTexto}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Estado Banner */}
-            <div className={`p-3 rounded-lg border flex items-center justify-between text-xs font-bold ${
-              solicitudCompra.estado === 'Aprobada' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
-              solicitudCompra.estado === 'Pendiente' ? 'bg-amber-50 border-amber-300 text-amber-900' :
-              solicitudCompra.estado === 'Rechazada' ? 'bg-rose-50 border-rose-300 text-rose-900' :
-              'bg-blue-50 border-blue-300 text-blue-900'
-            }`}>
-              <span>Estado de la Solicitud: {solicitudCompra.estado.toUpperCase()}</span>
-              {solicitudCompra.autorizado_por && (
-                <span className="font-normal text-3xs">
-                  Autorizado por: <strong>{solicitudCompra.autorizado_por}</strong>
-                </span>
-              )}
-            </div>
+            {/* Estado Banner / Resolución Finalizada */}
+            {esCompFinalizada ? (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-3.5 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Fecha de Solicitud
+                  </span>
+                  <span className="font-bold font-mono text-gray-900 block mt-0.5">
+                    {compFechaSolicitudTexto}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Fecha de Resolución
+                  </span>
+                  <span className="font-bold font-mono text-emerald-950 block mt-0.5">
+                    {compFechaResTexto || 'Registrada al finalizar'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                    Estado de la Solicitud
+                  </span>
+                  <span className="font-black uppercase tracking-wide text-emerald-900 block mt-0.5">
+                    FINALIZADO
+                  </span>
+                  {solicitudCompra.autorizado_por && (
+                    <span className="text-[10px] text-emerald-800 block">
+                      Por: <strong>{solicitudCompra.autorizado_por}</strong>
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className={`p-3 rounded-lg border flex items-center justify-between text-xs font-bold ${
+                solicitudCompra.estado === 'Aprobada' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
+                solicitudCompra.estado === 'Pendiente' ? 'bg-amber-50 border-amber-300 text-amber-900' :
+                solicitudCompra.estado === 'Rechazada' ? 'bg-rose-50 border-rose-300 text-rose-900' :
+                'bg-blue-50 border-blue-300 text-blue-900'
+              }`}>
+                <span>Estado de la Solicitud: {solicitudCompra.estado.toUpperCase()}</span>
+                {solicitudCompra.autorizado_por && (
+                  <span className="font-normal text-3xs">
+                    Autorizado por: <strong>{solicitudCompra.autorizado_por}</strong>
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Datos Generales */}
             <div className="grid grid-cols-2 gap-4 text-xs border border-gray-200 rounded-lg p-4 bg-gray-50/30">
@@ -657,7 +750,8 @@ export default function PublicSolicitudPdf() {
               <p>Documento oficial emitido con código: {solicitudCompra.folio}</p>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

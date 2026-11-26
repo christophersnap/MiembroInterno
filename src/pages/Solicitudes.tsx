@@ -209,28 +209,43 @@ export default function Solicitudes() {
         }
       }
 
-      // Actualizar estado en UI
-      setSolicitudes(prev => prev.map(s => {
-        if (s.id === item.id) {
-          return {
-            ...s,
-            estado: targetStatus,
-            autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por,
-            fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion,
-            motivo_rechazo: null
-          };
-        }
-        return s;
-      }));
+      // Actualizar estado en UI (incluyendo rawCombustible / rawCompra para que el PDF se actualice de inmediato)
+      const mergeUpdatedRaw = (s: SolicitudUnifiedItem): SolicitudUnifiedItem => {
+        const nextAutorizado = payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por;
+        const nextFechaAut = payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion;
+        return {
+          ...s,
+          estado: targetStatus,
+          autorizado_por: nextAutorizado,
+          fecha_autorizacion: nextFechaAut,
+          motivo_rechazo: undefined,
+          rawCombustible: s.rawCombustible
+            ? {
+                ...s.rawCombustible,
+                estado: targetStatus,
+                autorizado_por: nextAutorizado,
+                fecha_autorizacion: nextFechaAut,
+                motivo_rechazo: null,
+                updated_at: payload.updated_at,
+              }
+            : s.rawCombustible,
+          rawCompra: s.rawCompra
+            ? {
+                ...s.rawCompra,
+                estado: targetStatus as SolicitudCompra['estado'],
+                autorizado_por: nextAutorizado || undefined,
+                fecha_autorizacion: nextFechaAut || undefined,
+                motivo_rechazo: undefined,
+                updated_at: payload.updated_at,
+              }
+            : s.rawCompra,
+        };
+      };
+
+      setSolicitudes(prev => prev.map(s => (s.id === item.id ? mergeUpdatedRaw(s) : s)));
 
       if (detailItem && detailItem.id === item.id) {
-        setDetailItem(prev => prev ? {
-          ...prev,
-          estado: targetStatus,
-          autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : prev.autorizado_por,
-          fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : prev.fecha_autorizacion,
-          motivo_rechazo: null
-        } : null);
+        setDetailItem(prev => (prev ? mergeUpdatedRaw(prev) : null));
       }
 
       await logActivity(
@@ -301,28 +316,44 @@ export default function Solicitudes() {
         }
       }
 
-      // Actualizar en el estado local de la tabla
-      setSolicitudes(prev => prev.map(s => {
-        if (s.id === statusModalItem.id) {
-          return {
-            ...s,
-            estado: newStatus,
-            autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por,
-            fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion,
-            motivo_rechazo: payload.motivo_rechazo !== undefined ? payload.motivo_rechazo : s.motivo_rechazo
-          };
-        }
-        return s;
-      }));
+      // Actualizar en el estado local de la tabla (incluyendo rawCombustible / rawCompra para el PDF)
+      const mergeSavedRaw = (s: SolicitudUnifiedItem): SolicitudUnifiedItem => {
+        const nextAutorizado = payload.autorizado_por !== undefined ? payload.autorizado_por : s.autorizado_por;
+        const nextFechaAut = payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : s.fecha_autorizacion;
+        const nextMotivo = payload.motivo_rechazo !== undefined ? payload.motivo_rechazo : s.motivo_rechazo;
+        return {
+          ...s,
+          estado: newStatus,
+          autorizado_por: nextAutorizado,
+          fecha_autorizacion: nextFechaAut,
+          motivo_rechazo: nextMotivo || undefined,
+          rawCombustible: s.rawCombustible
+            ? {
+                ...s.rawCombustible,
+                estado: newStatus,
+                autorizado_por: nextAutorizado,
+                fecha_autorizacion: nextFechaAut,
+                motivo_rechazo: nextMotivo ?? null,
+                updated_at: payload.updated_at,
+              }
+            : s.rawCombustible,
+          rawCompra: s.rawCompra
+            ? {
+                ...s.rawCompra,
+                estado: newStatus as SolicitudCompra['estado'],
+                autorizado_por: nextAutorizado || undefined,
+                fecha_autorizacion: nextFechaAut || undefined,
+                motivo_rechazo: nextMotivo || undefined,
+                updated_at: payload.updated_at,
+              }
+            : s.rawCompra,
+        };
+      };
+
+      setSolicitudes(prev => prev.map(s => (s.id === statusModalItem.id ? mergeSavedRaw(s) : s)));
 
       if (detailItem && detailItem.id === statusModalItem.id) {
-        setDetailItem(prev => prev ? {
-          ...prev,
-          estado: newStatus,
-          autorizado_por: payload.autorizado_por !== undefined ? payload.autorizado_por : prev.autorizado_por,
-          fecha_autorizacion: payload.fecha_autorizacion !== undefined ? payload.fecha_autorizacion : prev.fecha_autorizacion,
-          motivo_rechazo: payload.motivo_rechazo !== undefined ? payload.motivo_rechazo : prev.motivo_rechazo
-        } : null);
+        setDetailItem(prev => (prev ? mergeSavedRaw(prev) : null));
       }
 
       await logActivity(
@@ -716,13 +747,25 @@ export default function Solicitudes() {
     });
   }, [solicitudes, tipoFiltro, filterSeccional, filterEstado, searchTerm, compraScope, combustibleScope]);
 
-  // Manejar apertura de PDF
+  // Manejar apertura de PDF (sincronizando siempre el estado y fecha de resolución actuales)
   const handleOpenPdf = (item: SolicitudUnifiedItem) => {
     markAsRead(item.tipo, item.originalId);
     if (item.tipo === 'combustible' && item.rawCombustible) {
-      setPdfCombustibleItem(item.rawCombustible);
+      setPdfCombustibleItem({
+        ...item.rawCombustible,
+        estado: item.estado,
+        autorizado_por: item.autorizado_por ?? item.rawCombustible.autorizado_por,
+        fecha_autorizacion: item.fecha_autorizacion ?? item.rawCombustible.fecha_autorizacion,
+        motivo_rechazo: item.motivo_rechazo ?? item.rawCombustible.motivo_rechazo,
+      });
     } else if (item.tipo === 'compra' && item.rawCompra) {
-      setPdfCompraItem(item.rawCompra);
+      setPdfCompraItem({
+        ...item.rawCompra,
+        estado: item.estado as SolicitudCompra['estado'],
+        autorizado_por: item.autorizado_por ?? item.rawCompra.autorizado_por,
+        fecha_autorizacion: item.fecha_autorizacion ?? item.rawCompra.fecha_autorizacion,
+        motivo_rechazo: item.motivo_rechazo ?? item.rawCompra.motivo_rechazo,
+      });
     }
   };
 

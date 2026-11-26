@@ -117,6 +117,19 @@ export function analyzeLoginRisk(record: LoginSecurityRecord): {
     };
   }
 
+  if (!isRecordActivelyLocked(record) && record.failed_attempts === 0 && attempts.length === 0) {
+    return {
+      level: 'user_error',
+      title: 'Cuenta sin bloqueos ni intentos fallidos',
+      summary:
+        'Esta cuenta no registra intentos fallidos activos. Si se bloquea tras 3 intentos fallidos, aquí aparecerá el país de origen, dirección IP, dispositivo y el botón para levantar el bloqueo.',
+      countries: Array.from(countryNames),
+      uniqueIps: Array.from(uniqueIps),
+      hasForeignAttempt: false,
+      blockedRepeatCount: 0,
+    };
+  }
+
   if (countryCodes.has('SV') || (uniqueIps.size <= 1 && record.failed_attempts <= 4)) {
     return {
       level: 'user_error',

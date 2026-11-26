@@ -73,6 +73,7 @@ const PERMISSION_CATEGORIES: Record<string, { label: string; keys: string[] }> =
       'view_combustible_plantillas',
       'ver_previsualizacion_pdf',
       'view_solicitudes_carnet',
+      'corregir_solicitudes_carnet',
       'edit_solicitudes_carnet',
     ],
   },
@@ -132,6 +133,7 @@ const SCOPED_MODULES: {
   label: string;
   subtitle: string;
   viewKey: string;
+  correctKey?: string;
   editKeys: string[];
   createKey?: string;
   resolveKey?: string;
@@ -164,8 +166,9 @@ const SCOPED_MODULES: {
   {
     key: 'solicitudes_carnet',
     label: 'Solicitudes de Carnet',
-    subtitle: 'Revisión y estados de emisión',
+    subtitle: 'Revisión, observaciones y corrección de emisión',
     viewKey: 'view_solicitudes_carnet',
+    correctKey: 'corregir_solicitudes_carnet',
     editKeys: ['edit_solicitudes_carnet'],
   },
   {
@@ -258,10 +261,12 @@ function IosSwitch({
   checked,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -269,10 +274,13 @@ function IosSwitch({
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
-      onClick={onChange}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
-        checked ? 'bg-emerald-500' : 'bg-slate-200'
-      }`}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange();
+      }}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
+        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+      } ${checked ? 'bg-emerald-500' : 'bg-slate-200'}`}
     >
       <span
         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ${
@@ -668,29 +676,49 @@ export default function PermisosIndividualesModal({
     });
   };
 
-  const getModuleAccessLevel = (viewKey: string, editKeys: string[]): 'blocked' | 'view' | 'edit' => {
+  const getModuleAccessLevel = (
+    viewKey: string,
+    editKeys: string[],
+    correctKey?: string
+  ): 'blocked' | 'view' | 'correct' | 'edit' => {
     const canView = getPermissionStatus(viewKey).effectiveValue;
+    const canCorrect = correctKey ? getPermissionStatus(correctKey).effectiveValue : false;
     const canEdit = editKeys.some((ek) => getPermissionStatus(ek).effectiveValue);
-    if (!canView && !canEdit) return 'blocked';
+    if (!canView && !canCorrect && !canEdit) return 'blocked';
     if (canEdit) return 'edit';
+    if (correctKey && canCorrect) return 'correct';
     return 'view';
   };
 
-  const setModuleAccessLevel = (viewKey: string, editKeys: string[], level: 'blocked' | 'view' | 'edit') => {
+  const setModuleAccessLevel = (
+    viewKey: string,
+    editKeys: string[],
+    level: 'blocked' | 'view' | 'correct' | 'edit',
+    correctKey?: string
+  ) => {
     setCustomOverrides((prev) => {
       const copy = { ...prev };
       if (level === 'blocked') {
         copy[viewKey] = false;
+        if (correctKey) copy[correctKey] = false;
         editKeys.forEach((ek) => {
           copy[ek] = false;
         });
       } else if (level === 'view') {
         copy[viewKey] = true;
+        if (correctKey) copy[correctKey] = false;
+        editKeys.forEach((ek) => {
+          copy[ek] = false;
+        });
+      } else if (level === 'correct') {
+        copy[viewKey] = true;
+        if (correctKey) copy[correctKey] = true;
         editKeys.forEach((ek) => {
           copy[ek] = false;
         });
       } else {
         copy[viewKey] = true;
+        if (correctKey) copy[correctKey] = true;
         editKeys.forEach((ek) => {
           copy[ek] = true;
         });
@@ -1456,10 +1484,17 @@ export default function PermisosIndividualesModal({
                 </p>
                 <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden">
                   {SCOPED_MODULES.map((mod) => {
-                    const accessLevel = getModuleAccessLevel(mod.viewKey, mod.editKeys);
+                    const accessLevel = getModuleAccessLevel(
+                      mod.viewKey,
+                      mod.editKeys,
+                      mod.correctKey
+                    );
                     const currentScope = moduleScopes[mod.key];
                     const selectedSecIds = moduleSeccionales[mod.key] || [];
                     const isExpanded = expandedScopedModule === mod.key;
+                    const canCorrectMod = mod.correctKey
+                      ? getPermissionStatus(mod.correctKey).effectiveValue
+                      : null;
                     const canCreate = mod.createKey
                       ? getPermissionStatus(mod.createKey).effectiveValue
                       : null;
@@ -1481,6 +1516,15 @@ export default function PermisosIndividualesModal({
                           s.nombre.toLowerCase().includes(scopeSecSearch.trim().toLowerCase())
                         )
                       : seccionales;
+
+                    const modeHint =
+                      mod.correctKey && accessLevel !== 'blocked'
+                        ? accessLevel === 'edit'
+                          ? 'Gestionar'
+                          : accessLevel === 'correct'
+                          ? 'Ver y corregir'
+                          : 'Solo ver (sin corregir)'
+                        : null;
 
                     const scopeText =
                       accessLevel === 'blocked'
@@ -1506,7 +1550,25 @@ export default function PermisosIndividualesModal({
                                 {mod.label}
                               </p>
                               <p className="text-xs text-slate-500 truncate">
-                                {mod.subtitle} · <span className="text-slate-700 font-medium">{scopeText}</span>
+                                {mod.subtitle}
+                                {modeHint ? (
+                                  <>
+                                    {' · '}
+                                    <span
+                                      className={
+                                        accessLevel === 'correct'
+                                          ? 'text-amber-700 font-semibold'
+                                          : accessLevel === 'view'
+                                          ? 'text-slate-700 font-semibold'
+                                          : 'text-emerald-700 font-semibold'
+                                      }
+                                    >
+                                      {modeHint}
+                                    </span>
+                                  </>
+                                ) : null}
+                                {' · '}
+                                <span className="text-slate-700 font-medium">{scopeText}</span>
                               </p>
                             </div>
                             <ChevronDown
@@ -1516,11 +1578,16 @@ export default function PermisosIndividualesModal({
                             />
                           </button>
 
-                          <div className="bg-slate-100 p-1 rounded-xl inline-flex items-center gap-1 self-start sm:self-auto shrink-0">
+                          <div className="bg-slate-100 p-1 rounded-xl inline-flex flex-wrap items-center gap-1 self-start sm:self-auto shrink-0">
                             <button
                               type="button"
                               onClick={() =>
-                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'blocked')
+                                setModuleAccessLevel(
+                                  mod.viewKey,
+                                  mod.editKeys,
+                                  'blocked',
+                                  mod.correctKey
+                                )
                               }
                               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                                 accessLevel === 'blocked'
@@ -1533,7 +1600,12 @@ export default function PermisosIndividualesModal({
                             <button
                               type="button"
                               onClick={() => {
-                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'view');
+                                setModuleAccessLevel(
+                                  mod.viewKey,
+                                  mod.editKeys,
+                                  'view',
+                                  mod.correctKey
+                                );
                                 setExpandedScopedModule(mod.key);
                               }}
                               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
@@ -1541,13 +1613,45 @@ export default function PermisosIndividualesModal({
                                   ? 'bg-white text-slate-900 shadow-2xs'
                                   : 'text-slate-600 hover:text-slate-900'
                               }`}
+                              title={
+                                mod.correctKey
+                                  ? 'Solo verá la solicitud y la observación, sin poder corregir ni cancelar'
+                                  : undefined
+                              }
                             >
                               Solo Ver
                             </button>
+                            {mod.correctKey && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModuleAccessLevel(
+                                    mod.viewKey,
+                                    mod.editKeys,
+                                    'correct',
+                                    mod.correctKey
+                                  );
+                                  setExpandedScopedModule(mod.key);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                                  accessLevel === 'correct'
+                                    ? 'bg-white text-amber-700 shadow-2xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                                title="Podrá ver solicitudes, observaciones y corregir o cancelar las observadas"
+                              >
+                                Ver y Corregir
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
-                                setModuleAccessLevel(mod.viewKey, mod.editKeys, 'edit');
+                                setModuleAccessLevel(
+                                  mod.viewKey,
+                                  mod.editKeys,
+                                  'edit',
+                                  mod.correctKey
+                                );
                                 setExpandedScopedModule(mod.key);
                               }}
                               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
@@ -1902,6 +2006,30 @@ export default function PermisosIndividualesModal({
                                       </div>
                                     );
                                   })()}
+                              </div>
+                            )}
+
+                            {/* Permiso explícito para corregir solicitudes observadas (Solicitudes de Carnet) */}
+                            {mod.correctKey && (
+                              <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between gap-3">
+                                <div>
+                                  <span className="text-xs font-medium text-slate-700 block">
+                                    Corregir solicitudes observadas
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 block">
+                                    {accessLevel === 'edit'
+                                      ? 'Incluido automáticamente al tener acceso de Gestionar.'
+                                      : 'Si está desactivado (Solo ver), verá la solicitud y la observación sin botones para corregir ni cancelar.'}
+                                  </span>
+                                </div>
+                                <IosSwitch
+                                  checked={Boolean(canCorrectMod || accessLevel === 'edit')}
+                                  disabled={accessLevel === 'edit'}
+                                  onChange={() =>
+                                    setMultipleKeys([mod.correctKey!], !canCorrectMod)
+                                  }
+                                  ariaLabel="Corregir solicitudes de carnet observadas"
+                                />
                               </div>
                             )}
 

@@ -148,6 +148,7 @@ export default function SolicitudesCarnetTab() {
   const scope = getModuleScope('solicitudes_carnet');
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_carnet');
   const canEdit = isAdmin || Boolean(permissions?.edit_solicitudes_carnet);
+  const canCorrect = isAdmin || canEdit || Boolean(permissions?.corregir_solicitudes_carnet);
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
   const { isCarnetUnread, markCarnetAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
 
@@ -624,15 +625,17 @@ export default function SolicitudesCarnetTab() {
   };
 
   const canCorrectOrCancelObservedInline = (rec: SolicitudCarnetRecord) =>
-    rec.estado_solicitud === 'Observada' && (!canEdit || isDirectRequester(rec));
+    rec.estado_solicitud === 'Observada' && canCorrect && (!canEdit || isDirectRequester(rec));
 
   const handleOpenCorrect = (rec: SolicitudCarnetRecord) => {
+    if (!canCorrect) return;
     markRecordAsRead(rec);
     setDetailRecord(null);
     setCorrectRecord(rec);
   };
 
   const handleOpenCancelModal = (rec: SolicitudCarnetRecord) => {
+    if (!canCorrect) return;
     markRecordAsRead(rec);
     setCancelTarget(rec);
     setCancelMotivo('');
@@ -2098,34 +2101,42 @@ export default function SolicitudesCarnetTab() {
                 </div>
               )}
 
-              {detailRecord.estado_solicitud === 'Observada' && (
-                <div className="p-3.5 rounded-2xl bg-orange-50/90 border border-orange-300 space-y-2.5">
-                  <p className="text-xs font-bold text-orange-950">
-                    Acciones disponibles para esta solicitud observada:
-                  </p>
-                  <p className="text-[11px] text-orange-900/90 leading-snug">
-                    Puedes corregir el nombre según DUI y/o cargar una nueva fotografía para reenviar la solicitud, o cancelarla si ya no se requiere.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenCorrect(detailRecord)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                      Corregir Nombre / Foto
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenCancelModal(detailRecord)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-300 hover:border-rose-300 text-xs font-bold cursor-pointer transition-colors"
-                    >
-                      <Ban className="w-3.5 h-3.5" />
-                      Cancelar Solicitud
-                    </button>
+              {detailRecord.estado_solicitud === 'Observada' &&
+                (canCorrect ? (
+                  <div className="p-3.5 rounded-2xl bg-orange-50/90 border border-orange-300 space-y-2.5">
+                    <p className="text-xs font-bold text-orange-950">
+                      Acciones disponibles para esta solicitud observada:
+                    </p>
+                    <p className="text-[11px] text-orange-900/90 leading-snug">
+                      Puedes corregir el nombre según DUI y/o cargar una nueva fotografía para reenviar la solicitud, o cancelarla si ya no se requiere.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCorrect(detailRecord)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                      >
+                        <Wrench className="w-3.5 h-3.5" />
+                        Corregir Nombre / Foto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCancelModal(detailRecord)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-300 hover:border-rose-300 text-xs font-bold cursor-pointer transition-colors"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        Cancelar Solicitud
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center gap-2 text-xs text-slate-600">
+                    <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>
+                      Acceso de solo lectura: puedes ver la solicitud y la observación, pero no tienes permiso para corregirla ni cancelarla.
+                    </span>
+                  </div>
+                ))}
 
               {detailRecord.nota_correccion && (
                 <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
@@ -2420,13 +2431,13 @@ export default function SolicitudesCarnetTab() {
 
       {/* Modal de Corrección de Solicitud Observada (Nombre según DUI + Fotografía) */}
       <CorregirSolicitudCarnetModal
-        record={correctRecord}
+        record={canCorrect ? correctRecord : null}
         onClose={() => setCorrectRecord(null)}
         onCorrected={handleRecordCorrected}
       />
 
       {/* Modal de Confirmación de Cancelación de Solicitud (Sin window.confirm) */}
-      {cancelTarget && (
+      {canCorrect && cancelTarget && (
         <div className="fixed inset-0 z-[55] bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4">
           <form
             onSubmit={handleConfirmCancel}
