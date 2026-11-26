@@ -21,6 +21,7 @@ import CompraPdfPreviewModal from '../components/compra/CompraPdfPreviewModal';
 import SolicitudesCarnetTab from '../components/solicitudes/SolicitudesCarnetTab';
 import { useSolicitudReadTracker, useModuleUnreadCount } from '../utils/solicitudReadTracker';
 import { formatFechaSV, getElSalvadorIsoTimestamp } from '../utils/dateUtils';
+import { isSolicitudFinalizada } from '../utils/solicitudLimite';
 
 export type TipoSolicitudFilter = 'todas' | 'combustible' | 'compra';
 
@@ -1132,6 +1133,8 @@ export default function Solicitudes() {
                 {filteredSolicitudes.map((item) => {
                   const isCombustible = item.tipo === 'combustible';
                   const rowUnread = isItemUnread(item);
+                  const rowFinalizada = isSolicitudFinalizada(item.estado);
+                  const rowRechazada = item.estado === 'Rechazada';
 
                   return (
                     <tr
@@ -1142,7 +1145,11 @@ export default function Solicitudes() {
                       className={`transition-colors ${
                         rowUnread
                           ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
-                          : 'bg-white hover:bg-gray-50/80 border-l-4 border-l-transparent'
+                          : rowFinalizada
+                          ? 'bg-emerald-50/75 hover:bg-emerald-100/65 border-l-4 border-l-emerald-500'
+                          : rowRechazada
+                          ? 'bg-rose-50/35 hover:bg-rose-50/65 border-l-4 border-l-rose-300'
+                          : 'bg-white hover:bg-slate-50/80 border-l-4 border-l-transparent'
                       }`}
                     >
                       
@@ -1174,7 +1181,7 @@ export default function Solicitudes() {
                               </>
                             )}
                           </span>
-                          <span className={`font-mono ${rowUnread ? 'font-black text-slate-950' : 'font-bold text-gray-900'}`}>
+                          <span className={`font-mono tabular-nums ${rowUnread ? 'font-black text-slate-950' : rowFinalizada ? 'font-bold text-emerald-950' : 'font-bold text-gray-900'}`}>
                             {item.folio}
                           </span>
                           {rowUnread && (
@@ -1186,31 +1193,31 @@ export default function Solicitudes() {
                       </td>
 
                       {/* Seccional */}
-                      <td className={`px-4 py-3 whitespace-nowrap ${rowUnread ? 'font-bold text-slate-900' : 'font-medium text-gray-800'}`}>
+                      <td className={`px-4 py-3 whitespace-nowrap ${rowUnread ? 'font-bold text-slate-900' : rowFinalizada ? 'font-medium text-emerald-950' : 'font-medium text-gray-800'}`}>
                         <div className="flex items-center space-x-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          <Building2 className={`w-3.5 h-3.5 shrink-0 ${rowFinalizada ? 'text-emerald-600/70' : 'text-gray-400'}`} />
                           <span>{item.seccional_nombre}</span>
                         </div>
                       </td>
 
                       {/* Solicitante */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className={rowUnread ? 'font-bold text-slate-950' : 'font-semibold text-gray-900'}>{item.solicitante}</div>
-                        <div className="text-2xs text-gray-500">{item.cargo}</div>
+                        <div className={rowUnread ? 'font-bold text-slate-950' : rowFinalizada ? 'font-semibold text-emerald-950' : 'font-semibold text-gray-900'}>{item.solicitante}</div>
+                        <div className={`text-2xs ${rowFinalizada ? 'text-emerald-800/70' : 'text-gray-500'}`}>{item.cargo}</div>
                       </td>
 
                       {/* Fecha */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className={`flex items-center space-x-1 ${rowUnread ? 'text-slate-900 font-semibold' : 'text-gray-800 font-medium'}`}>
-                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        <div className={`flex items-center space-x-1 tabular-nums ${rowUnread ? 'text-slate-900 font-semibold' : rowFinalizada ? 'text-emerald-950 font-medium' : 'text-gray-800 font-medium'}`}>
+                          <Calendar className={`w-3.5 h-3.5 ${rowFinalizada ? 'text-emerald-600/70' : 'text-gray-400'}`} />
                           <span>{item.fecha}</span>
                         </div>
-                        <div className="text-2xs text-gray-400">{item.hora}</div>
+                        <div className={`text-2xs tabular-nums ${rowFinalizada ? 'text-emerald-800/65' : 'text-gray-400'}`}>{item.hora}</div>
                       </td>
 
                       {/* Requerimiento */}
                       <td className="px-4 py-3 max-w-xs truncate">
-                        <div className={`truncate ${rowUnread ? 'font-bold text-slate-950' : 'font-medium text-gray-900'}`}>
+                        <div className={`truncate ${rowUnread ? 'font-bold text-slate-950' : rowFinalizada ? 'font-medium text-emerald-950' : 'font-medium text-gray-900'}`}>
                           {item.detalle_resumen}
                         </div>
                         {item.vehiculo_info && (
@@ -1220,7 +1227,7 @@ export default function Solicitudes() {
                           </div>
                         )}
                         {item.monto_o_dotacion && (
-                          <div className="text-2xs text-gray-500 mt-0.5">
+                          <div className={`text-2xs mt-0.5 tabular-nums ${rowFinalizada ? 'text-emerald-800/75' : 'text-gray-500'}`}>
                             {item.monto_o_dotacion}
                           </div>
                         )}
@@ -1236,56 +1243,56 @@ export default function Solicitudes() {
                               if (canManageItem(item)) handleOpenStatusModal(item);
                             }}
                             disabled={!canManageItem(item)}
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-2xs font-bold transition ${
-                              canManageItem(item) ? 'cursor-pointer hover:shadow-xs hover:ring-2 hover:ring-offset-1 hover:ring-primary/40' : 'cursor-default'
+                            className={`inline-flex items-center px-2.5 py-1 rounded-xl text-2xs font-semibold transition w-fit ${
+                              canManageItem(item) ? 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300' : 'cursor-default'
                             } ${
                               item.estado === 'Aprobada'
-                                ? 'bg-green-100 text-green-800'
+                                ? 'bg-blue-50 text-blue-800 border border-blue-200/80'
                                 : item.estado === 'Pendiente'
-                                ? 'bg-amber-100 text-amber-800'
-                                : item.estado === 'Finalizada' || item.estado === 'Entregada'
-                                ? 'bg-purple-100 text-purple-800'
-                                : item.estado === 'Rechazada'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-blue-100 text-blue-800'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200/80'
+                                : rowFinalizada
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : rowRechazada
+                                ? 'bg-rose-50 text-rose-800 border border-rose-200/80'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200/80'
                             }`}
-                            title={canManageItem(item) ? "Haga clic para cambiar estado (Aprobar, Finalizar, Pendiente, etc.)" : item.estado}
+                            title={canManageItem(item) ? 'Gestionar estado' : item.estado}
                           >
-                            {item.estado === 'Aprobada' && <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />}
+                            {item.estado === 'Aprobada' && <CheckCircle2 className="w-3 h-3 mr-1 text-blue-600" />}
                             {item.estado === 'Pendiente' && <Clock className="w-3 h-3 mr-1 text-amber-600" />}
-                            {(item.estado === 'Finalizada' || item.estado === 'Entregada') && <ShieldCheck className="w-3 h-3 mr-1 text-purple-600" />}
-                            {item.estado === 'Rechazada' && <XCircle className="w-3 h-3 mr-1 text-red-600" />}
+                            {rowFinalizada && <CheckCheck className="w-3 h-3 mr-1 text-white" />}
+                            {rowRechazada && <XCircle className="w-3 h-3 mr-1 text-rose-600" />}
                             <span>{item.estado}</span>
-                            {canManageItem(item) && <Edit3 className="w-2.5 h-2.5 ml-1 opacity-60" />}
+                            {canManageItem(item) && <Edit3 className="w-2.5 h-2.5 ml-1.5 opacity-60" />}
                           </button>
 
-                          {/* Acciones directas de estado para usuarios con permiso de edición */}
+                          {/* Acciones directas minimalistas */}
                           {canManageItem(item) && (
-                            <div className="flex items-center space-x-1 pt-0.5">
-                              {item.estado !== 'Aprobada' && (
+                            <div className="flex items-center gap-1 pt-0.5">
+                              {item.estado !== 'Aprobada' && !rowFinalizada && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleQuickStatus(item, 'Aprobada');
                                   }}
-                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition cursor-pointer"
-                                  title="Aprobar solicitud inmediatamente"
+                                  className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-white text-blue-700 hover:bg-blue-50 border border-slate-200 transition cursor-pointer whitespace-nowrap"
+                                  title="Aprobar solicitud"
                                 >
-                                  ✓ Aprobar
+                                  Aprobar
                                 </button>
                               )}
-                              {item.estado !== 'Finalizada' && item.estado !== 'Entregada' && (
+                              {!rowFinalizada && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleQuickStatus(item, 'Finalizada');
                                   }}
-                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition cursor-pointer"
-                                  title="Marcar como Finalizada (Entrega o despacho completado)"
+                                  className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-white text-emerald-700 hover:bg-emerald-50 border border-slate-200 transition cursor-pointer whitespace-nowrap"
+                                  title="Marcar como Finalizada"
                                 >
-                                  ★ Finalizar
+                                  Finalizar
                                 </button>
                               )}
                               {item.estado !== 'Pendiente' && (
@@ -1295,10 +1302,10 @@ export default function Solicitudes() {
                                     e.stopPropagation();
                                     handleQuickStatus(item, 'Pendiente');
                                   }}
-                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition cursor-pointer"
-                                  title="Regresar a estado Pendiente"
+                                  className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-white text-slate-600 hover:bg-slate-100 border border-slate-200 transition cursor-pointer whitespace-nowrap"
+                                  title="Regresar a Pendiente"
                                 >
-                                  ↺ Pendiente
+                                  Pendiente
                                 </button>
                               )}
                             </div>
@@ -1315,11 +1322,11 @@ export default function Solicitudes() {
                               markAsRead(item.tipo, item.originalId);
                               setEmailInfoItem(item);
                             }}
-                            className="inline-flex items-center px-2.5 py-1 rounded-lg text-2xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition cursor-pointer"
-                            title="Haga clic para ver los correos a los que se envió"
+                            className="inline-flex items-center px-2.5 py-1 rounded-xl text-2xs font-semibold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200/80 transition cursor-pointer shadow-2xs"
+                            title="Ver correos notificados"
                           >
                             <Mail className="w-3 h-3 mr-1 text-emerald-600" />
-                            Notificado (Ver)
+                            Notificado
                           </button>
                         ) : (
                           <button
@@ -1329,74 +1336,70 @@ export default function Solicitudes() {
                               setResendEmailItem(item);
                               setResendEmailTo(item.correo_solicitante || '');
                             }}
-                            className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-600 transition cursor-pointer"
-                            title="Enviar correo de notificación con PDF ahora"
+                            className="inline-flex items-center px-2.5 py-1 rounded-xl text-2xs font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition cursor-pointer"
+                            title="Enviar correo con PDF"
                           >
-                            <Mail className="w-3 h-3 mr-1 text-gray-500" />
-                            Enviar Correo
+                            <Mail className="w-3 h-3 mr-1 text-slate-400" />
+                            Enviar
                           </button>
                         )}
                       </td>
 
                       {/* Acciones */}
-                      <td className="px-4 py-3 whitespace-nowrap text-right space-x-1.5">
-                        
-                        {/* Cambiar estado */}
-                        {canManageItem(item) && (
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <div className="inline-flex items-center gap-1">
+                          {canManageItem(item) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenStatusModal(item);
+                              }}
+                              className="inline-flex items-center justify-center w-8 h-8 text-slate-600 hover:text-slate-950 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition cursor-pointer"
+                              title="Gestionar estado"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          )}
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleOpenStatusModal(item);
+                              markAsRead(item.tipo, item.originalId);
+                              setDetailItem(item);
                             }}
-                            className="inline-flex items-center p-1.5 text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition cursor-pointer"
-                            title="Gestionar estado formal (Pendiente, Aprobada, Finalizada, Rechazada)"
+                            className="inline-flex items-center justify-center w-8 h-8 text-slate-600 hover:text-slate-950 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition cursor-pointer"
+                            title="Ver solicitud"
                           >
-                            <Sliders className="w-4 h-4" />
+                            <Eye className="w-4 h-4" />
                           </button>
-                        )}
 
-                        {/* Ver más detalles */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            markAsRead(item.tipo, item.originalId);
-                            setDetailItem(item);
-                          }}
-                          className="inline-flex items-center p-1.5 text-gray-600 hover:text-primary hover:bg-gray-100 rounded-lg transition cursor-pointer"
-                          title="Ver más detalles de la solicitud"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-
-                        {/* Reenviar o ver correos notificados */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            markAsRead(item.tipo, item.originalId);
-                            setResendEmailItem(item);
-                            setResendEmailTo(item.correo_solicitante || '');
-                          }}
-                          className="inline-flex items-center p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
-                          title="Enviar o reenviar correo con enlace y documento oficial en PDF"
-                        >
-                          <Mail className="w-4 h-4" />
-                        </button>
-
-                        {/* Descargar / Ver PDF */}
-                        {canPreviewPdf && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleOpenPdf(item);
+                              markAsRead(item.tipo, item.originalId);
+                              setResendEmailItem(item);
+                              setResendEmailTo(item.correo_solicitante || '');
                             }}
-                            className="inline-flex items-center px-2.5 py-1 bg-gray-900 hover:bg-black text-white rounded-lg text-2xs font-bold transition shadow-2xs cursor-pointer"
-                            title="Abrir y descargar documento oficial en PDF"
+                            className="inline-flex items-center justify-center w-8 h-8 text-slate-600 hover:text-emerald-700 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition cursor-pointer"
+                            title="Enviar o reenviar correo con PDF"
                           >
-                            <Download className="w-3 h-3 mr-1" />
-                            PDF
+                            <Mail className="w-4 h-4" />
                           </button>
-                        )}
 
+                          {canPreviewPdf && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenPdf(item);
+                              }}
+                              className="inline-flex items-center px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-2xs font-semibold transition shadow-2xs cursor-pointer whitespace-nowrap"
+                              title="Abrir documento PDF"
+                            >
+                              <Download className="w-3 h-3 mr-1" />
+                              PDF
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                     </tr>
@@ -1411,508 +1414,596 @@ export default function Solicitudes() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL 1: VER MÁS DETALLES DE LA SOLICITUD                 */}
+      {/* MODAL 1: VER DETALLE DE LA SOLICITUD (ESTILO iOS)         */}
       {/* ========================================================= */}
-      {detailItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200">
-            
-            {/* Header del Modal */}
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/70 rounded-t-2xl">
-              <div className="flex items-center space-x-2.5">
-                <span
-                  className={`p-2 rounded-xl text-white ${
-                    detailItem.tipo === 'combustible' ? 'bg-emerald-600' : 'bg-primary'
-                  }`}
-                >
-                  {detailItem.tipo === 'combustible' ? <Fuel className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
-                </span>
-                <div>
-                  <h3 className="text-base font-black text-gray-900">
-                    Detalle de Solicitud ({detailItem.folio})
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    {detailItem.tipo === 'combustible' ? 'Dotación de Combustible Institucional' : 'Compra y Mantenimiento'}
-                  </p>
-                </div>
-              </div>
+      {detailItem && (() => {
+        const detailFinalizada = isSolicitudFinalizada(detailItem.estado);
+        const detailStatusDot =
+          detailFinalizada
+            ? 'bg-emerald-500'
+            : detailItem.estado === 'Aprobada'
+            ? 'bg-blue-500'
+            : detailItem.estado === 'Pendiente'
+            ? 'bg-amber-500'
+            : detailItem.estado === 'Rechazada'
+            ? 'bg-rose-500'
+            : 'bg-slate-400';
 
-              <button
-                onClick={() => setDetailItem(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Contenido del Detalle */}
-            <div className="p-6 space-y-4 text-xs">
-              
-              {/* Bloque Principal */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Folio Único</span>
-                  <span className="font-mono font-bold text-gray-900 text-sm">{detailItem.folio}</span>
-                </div>
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Seccional</span>
-                  <span className="font-semibold text-gray-900">{detailItem.seccional_nombre}</span>
-                </div>
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Estado</span>
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-bold mt-0.5 ${
-                      detailItem.estado === 'Aprobada'
-                        ? 'bg-green-100 text-green-800'
-                        : detailItem.estado === 'Pendiente'
-                        ? 'bg-amber-100 text-amber-800'
-                        : detailItem.estado === 'Rechazada'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-blue-100 text-blue-800'
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-5"
+            onClick={() => setDetailItem(null)}
+          >
+            <div
+              className="bg-[#F2F2F7] rounded-[28px] max-w-xl w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200/80 animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header estilo iOS Sheet */}
+              <div className="px-5 py-4 bg-white border-b border-slate-200/70 flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                      detailItem.tipo === 'combustible'
+                        ? 'bg-emerald-500/12 text-emerald-600'
+                        : 'bg-blue-500/12 text-blue-600'
                     }`}
                   >
-                    {detailItem.estado}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Solicitado por</span>
-                  <span className="font-medium text-gray-800">{detailItem.solicitante}</span>
-                </div>
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Cargo</span>
-                  <span className="text-gray-700">{detailItem.cargo}</span>
-                </div>
-                <div>
-                  <span className="text-gray-400 block uppercase font-bold text-2xs">Fecha y Hora</span>
-                  <span className="text-gray-700">{detailItem.fecha} ({detailItem.hora})</span>
-                </div>
-              </div>
-
-              {/* Información de Requerimiento */}
-              <div className="bg-white p-4 rounded-xl border border-gray-200 space-y-2">
-                <span className="text-xs font-bold text-gray-800 uppercase tracking-wider block">
-                  Descripción del Requerimiento
-                </span>
-                <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {detailItem.detalle_completo}
-                </p>
-
-                {detailItem.vehiculo_info && (
-                  <div className="pt-2 border-t border-gray-100 flex items-center space-x-2 text-primary font-medium">
-                    <Truck className="w-4 h-4" />
-                    <span>Vehículo / Unidad asignada: {detailItem.vehiculo_info}</span>
+                    {detailItem.tipo === 'combustible' ? (
+                      <Fuel className="w-5 h-5" />
+                    ) : (
+                      <FileText className="w-5 h-5" />
+                    )}
                   </div>
-                )}
-
-                {detailItem.monto_o_dotacion && (
-                  <div className="pt-1 text-gray-600 font-semibold">
-                    Presupuesto / Concepto: {detailItem.monto_o_dotacion}
-                  </div>
-                )}
-              </div>
-
-              {/* Autorización / Rechazo si aplica */}
-              {detailItem.autorizado_por && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3.5 text-green-900">
-                  <div className="flex items-center space-x-2 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-green-600" />
-                    <span>Autorizado formalmente</span>
-                  </div>
-                  <p className="mt-1 text-2xs text-green-800">
-                    Aprobado por: <span className="font-semibold">{detailItem.autorizado_por}</span> {detailItem.fecha_autorizacion ? `el ${formatFechaSV(detailItem.fecha_autorizacion)}` : ''}
-                  </p>
-                </div>
-              )}
-
-              {detailItem.motivo_rechazo && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 text-red-900">
-                  <div className="flex items-center space-x-2 font-bold">
-                    <XCircle className="w-4 h-4 text-red-600" />
-                    <span>Motivo de Rechazo</span>
-                  </div>
-                  <p className="mt-1 text-2xs text-red-800">
-                    {detailItem.motivo_rechazo}
-                  </p>
-                </div>
-              )}
-
-              {/* Acciones de Estado directamente desde el Detalle */}
-              {canManageStatus && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center">
-                      <Sliders className="w-3.5 h-3.5 mr-1.5 text-primary" />
-                      Gestión de Estado de la Solicitud
-                    </span>
-                    <span className="text-2xs font-semibold text-gray-600">
-                      Estado actual: <strong className="text-gray-900">{detailItem.estado}</strong>
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={updatingStatus}
-                      onClick={() => handleQuickStatus(detailItem, 'Pendiente')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
-                        detailItem.estado === 'Pendiente'
-                          ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400'
-                          : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
-                      }`}
-                    >
-                      <Clock className="w-3.5 h-3.5 mr-1.5" />
-                      🟡 Marcar Pendiente
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={updatingStatus}
-                      onClick={() => handleQuickStatus(detailItem, 'Aprobada')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
-                        detailItem.estado === 'Aprobada'
-                          ? 'bg-green-200 text-green-900 ring-2 ring-green-500'
-                          : 'bg-green-600 hover:bg-green-700 text-white shadow-xs'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                      🟢 Autorizar y Aprobar
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={updatingStatus}
-                      onClick={() => handleQuickStatus(detailItem, 'Finalizada')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${
-                        detailItem.estado === 'Finalizada' || detailItem.estado === 'Entregada'
-                          ? 'bg-purple-200 text-purple-900 ring-2 ring-purple-500'
-                          : 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs'
-                      }`}
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
-                      🟣 Marcar como Finalizada
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={updatingStatus}
-                      onClick={() => {
-                        handleOpenStatusModal(detailItem);
-                        setNewStatus('Rechazada');
-                      }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-100 hover:bg-red-200 text-red-800 transition flex items-center cursor-pointer"
-                    >
-                      <XCircle className="w-3.5 h-3.5 mr-1.5" />
-                      🔴 Rechazar Solicitud...
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResendEmailItem(detailItem);
-                        setResendEmailTo(detailItem.correo_solicitante || '');
-                      }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center ml-auto shadow-xs cursor-pointer"
-                    >
-                      <Mail className="w-3.5 h-3.5 mr-1.5" />
-                      ✉️ Enviar Correo con PDF
-                    </button>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-slate-900 tracking-tight truncate font-mono">
+                      {detailItem.folio}
+                    </h3>
+                    <p className="text-xs text-slate-500 truncate">
+                      {detailItem.tipo === 'combustible'
+                        ? 'Solicitud de Combustible'
+                        : 'Solicitud de Compra y Mantenimiento'}
+                    </p>
                   </div>
                 </div>
-              )}
 
-            </div>
-
-            {/* Footer con Acciones */}
-            <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
-              <button
-                onClick={() => {
-                  setDetailItem(null);
-                  setEmailInfoItem(detailItem);
-                }}
-                className="inline-flex items-center px-3.5 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition cursor-pointer"
-              >
-                <Mail className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                Ver Correos Notificados
-              </button>
-
-              <div className="flex items-center space-x-2">
                 <button
+                  type="button"
                   onClick={() => setDetailItem(null)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold transition cursor-pointer"
+                  aria-label="Cerrar detalle"
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
                 >
-                  Cerrar
+                  <X className="w-4 h-4" />
                 </button>
+              </div>
 
-                {canPreviewPdf && (
-                  <button
-                    onClick={() => {
-                      handleOpenPdf(detailItem);
-                      setDetailItem(null);
-                    }}
-                    className="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 mr-1.5" />
-                    Descargar / Imprimir PDF
-                  </button>
+              {/* Contenido agrupado estilo iOS */}
+              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
+                {/* Tarjeta resumen */}
+                <section className="space-y-1.5">
+                  <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Información general
+                  </h4>
+                  <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden shadow-2xs text-xs">
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <span className="text-slate-500">Estado</span>
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900">
+                        <span className={`w-2 h-2 rounded-full ${detailStatusDot}`} />
+                        {detailItem.estado}
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <span className="text-slate-500">Seccional</span>
+                      <span className="font-semibold text-slate-900 text-right">{detailItem.seccional_nombre}</span>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <span className="text-slate-500">Solicitante</span>
+                      <div className="text-right min-w-0">
+                        <span className="font-semibold text-slate-900 block truncate">{detailItem.solicitante}</span>
+                        {detailItem.cargo && (
+                          <span className="text-[11px] text-slate-500 block">{detailItem.cargo}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <span className="text-slate-500">Fecha y hora</span>
+                      <span className="font-medium text-slate-800 tabular-nums">
+                        {detailItem.fecha} · {detailItem.hora}
+                      </span>
+                    </div>
+                    {detailItem.vehiculo_info && (
+                      <div className="px-4 py-3 flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Unidad / Vehículo</span>
+                        <span className="font-medium text-slate-900 text-right">{detailItem.vehiculo_info}</span>
+                      </div>
+                    )}
+                    {detailItem.monto_o_dotacion && (
+                      <div className="px-4 py-3 flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Concepto / Monto</span>
+                        <span className="font-semibold text-slate-900 tabular-nums text-right">
+                          {detailItem.monto_o_dotacion}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* Detalle del requerimiento */}
+                <section className="space-y-1.5">
+                  <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Requerimiento
+                  </h4>
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs">
+                    <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                      {detailItem.detalle_completo}
+                    </p>
+                  </div>
+                </section>
+
+                {/* Autorización o Rechazo */}
+                {detailItem.autorizado_por && (
+                  <div className="bg-emerald-50/90 border border-emerald-200/80 rounded-2xl px-4 py-3 flex items-start gap-3">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs min-w-0">
+                      <p className="font-semibold text-emerald-950">Autorizada</p>
+                      <p className="text-[11px] text-emerald-800 mt-0.5">
+                        {detailItem.autorizado_por}
+                        {detailItem.fecha_autorizacion ? ` · ${formatFechaSV(detailItem.fecha_autorizacion)}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {detailItem.motivo_rechazo && (
+                  <div className="bg-rose-50/90 border border-rose-200/80 rounded-2xl px-4 py-3 flex items-start gap-3">
+                    <XCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="text-xs min-w-0">
+                      <p className="font-semibold text-rose-950">Motivo de rechazo</p>
+                      <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">{detailItem.motivo_rechazo}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cambio rápido de estado */}
+                {canManageItem(detailItem) && (
+                  <section className="space-y-1.5">
+                    <div className="flex items-center justify-between px-1">
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                        Actualizar estado
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenStatusModal(detailItem)}
+                        className="text-[11px] font-semibold text-slate-600 hover:text-slate-950 transition-colors cursor-pointer"
+                      >
+                        Más opciones
+                      </button>
+                    </div>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 p-2 shadow-2xs grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      <button
+                        type="button"
+                        disabled={updatingStatus}
+                        onClick={() => handleQuickStatus(detailItem, 'Pendiente')}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                          detailItem.estado === 'Pendiente'
+                            ? 'bg-amber-500 text-white shadow-2xs'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Pendiente</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={updatingStatus}
+                        onClick={() => handleQuickStatus(detailItem, 'Aprobada')}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                          detailItem.estado === 'Aprobada'
+                            ? 'bg-blue-600 text-white shadow-2xs'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Aprobar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={updatingStatus}
+                        onClick={() => handleQuickStatus(detailItem, 'Finalizada')}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                          detailFinalizada
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <CheckCheck className="w-3.5 h-3.5" />
+                        <span>Finalizar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={updatingStatus}
+                        onClick={() => {
+                          handleOpenStatusModal(detailItem);
+                          setNewStatus('Rechazada');
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                          detailItem.estado === 'Rechazada'
+                            ? 'bg-rose-600 text-white shadow-2xs'
+                            : 'bg-slate-50 hover:bg-rose-50 text-rose-700'
+                        }`}
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Rechazar</span>
+                      </button>
+                    </div>
+                  </section>
                 )}
               </div>
-            </div>
 
+              {/* Footer limpio estilo iOS */}
+              <div className="px-5 py-3.5 bg-white border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailItem(null);
+                      setEmailInfoItem(detailItem);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Correos</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResendEmailItem(detailItem);
+                      setResendEmailTo(detailItem.correo_solicitante || '');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Send className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Reenviar</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDetailItem(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cerrar
+                  </button>
+
+                  {canPreviewPdf && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleOpenPdf(detailItem);
+                        setDetailItem(null);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Ver PDF</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
-      {/* MODAL 2: A QUÉ CORREOS SE LES ENVIÓ LA INFORMACIÓN Y PDF  */}
+      {/* MODAL 2: HISTORIAL DE CORREOS NOTIFICADOS (ESTILO iOS)    */}
       {/* ========================================================= */}
       {emailInfoItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-gray-200 overflow-hidden">
-            
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-emerald-50/60">
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2.5 bg-emerald-600 text-white rounded-xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-5"
+          onClick={() => setEmailInfoItem(null)}
+        >
+          <div
+            className="bg-[#F2F2F7] rounded-[28px] max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200/80 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 bg-white border-b border-slate-200/70 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/12 text-emerald-600 flex items-center justify-center shrink-0">
                   <Mail className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-gray-900">
-                    Historial de Notificación y Envío de Correos
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight truncate">
+                    Correos notificados
                   </h3>
-                  <p className="text-xs text-emerald-800 font-medium">
-                    Folio: <span className="font-mono font-bold">{emailInfoItem.folio}</span> • {emailInfoItem.seccional_nombre}
+                  <p className="text-xs text-slate-500 truncate">
+                    <span className="font-mono font-semibold text-slate-700">{emailInfoItem.folio}</span> · {emailInfoItem.seccional_nombre}
                   </p>
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => setEmailInfoItem(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition"
+                aria-label="Cerrar"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
-              
+            <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
               {/* Estado de envío */}
-              <div className="flex items-center justify-between p-3.5 bg-emerald-50 rounded-xl border border-emerald-200">
-                <div className="flex items-center space-x-2">
+              <div className="bg-white rounded-2xl border border-slate-200/80 px-4 py-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div>
-                    <span className="font-bold text-emerald-900 block">
-                      {emailInfoItem.correo_enviado ? 'Correos Emitidos con Éxito' : 'Pendiente de Notificación'}
-                    </span>
-                    <span className="text-2xs text-emerald-700">
-                      Copia digital en formato PDF oficial adjuntada automáticamente.
-                    </span>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900">
+                      {emailInfoItem.correo_enviado ? 'Notificación enviada' : 'Pendiente de envío'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 truncate">
+                      Incluye enlace al documento PDF oficial
+                    </p>
                   </div>
                 </div>
-                <span className="text-2xs font-mono font-bold bg-white text-emerald-800 px-2 py-1 rounded-md border border-emerald-300">
-                  {emailInfoItem.fecha} {emailInfoItem.hora}
+                <span className="text-[11px] font-medium text-slate-500 tabular-nums shrink-0">
+                  {emailInfoItem.fecha}
                 </span>
               </div>
 
-              {/* Lista Desglosada de Destinatarios */}
-              <div className="space-y-2">
-                <span className="text-xs font-bold text-gray-800 uppercase tracking-wider block">
-                  Destinatarios y Copias Notificadas (CC)
-                </span>
-
-                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden bg-white">
-                  
-                  {/* Correo del Solicitante con copia */}
+              {/* Destinatarios */}
+              <section className="space-y-1.5">
+                <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Destinatarios
+                </h4>
+                <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden shadow-2xs">
                   {emailInfoItem.correo_solicitante && (
-                    <div className="p-3 flex items-start justify-between bg-blue-50/40">
-                      <div>
-                        <div className="flex items-center space-x-1.5">
-                          <span className="font-bold text-gray-900">{emailInfoItem.correo_solicitante}</span>
-                          <span className="text-2xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">
-                            Copia al Solicitante
-                          </span>
-                        </div>
-                        <p className="text-2xs text-gray-500 mt-0.5">
-                          Acuse de recibo y copia de PDF para {emailInfoItem.solicitante} ({emailInfoItem.seccional_nombre})
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900 truncate">{emailInfoItem.correo_solicitante}</p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          Copia al solicitante · {emailInfoItem.solicitante}
                         </p>
                       </div>
-                      <Check className="w-4 h-4 text-emerald-600 mt-1 shrink-0" />
+                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                     </div>
                   )}
 
-                  {/* Correos adicionales notificados */}
                   {emailInfoItem.correos_notificados ? (
                     emailInfoItem.correos_notificados.split(',').map((c, idx) => {
                       const trimmed = c.trim();
                       if (!trimmed || trimmed === emailInfoItem.correo_solicitante) return null;
-                      
+
                       const isAdminDest = trimmed.includes('administracion') || trimmed.includes('combustible');
                       const isPresidencia = trimmed.includes('presidencia');
 
                       return (
-                        <div key={idx} className="p-3 flex items-start justify-between hover:bg-gray-50 transition">
-                          <div>
-                            <div className="flex items-center space-x-1.5">
-                              <span className="font-bold text-gray-900">{trimmed}</span>
-                              <span className="text-2xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-bold">
-                                {isAdminDest ? 'Revisión y Control' : isPresidencia ? 'Copia Institucional (CC)' : 'Destinatario'}
-                              </span>
-                            </div>
-                            <p className="text-2xs text-gray-400 mt-0.5">
-                              Notificación instantánea con archivo PDF descargable
+                        <div key={idx} className="px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 truncate">{trimmed}</p>
+                            <p className="text-[11px] text-slate-500 truncate">
+                              {isAdminDest
+                                ? 'Revisión y control'
+                                : isPresidencia
+                                ? 'Copia institucional'
+                                : 'Destinatario notificado'}
                             </p>
                           </div>
-                          <Check className="w-4 h-4 text-emerald-600 mt-1 shrink-0" />
+                          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                         </div>
                       );
                     })
-                  ) : (
-                    <div className="p-3 text-gray-500 italic">
+                  ) : !emailInfoItem.correo_solicitante ? (
+                    <div className="px-4 py-3 text-slate-500">
                       No se registraron correos adicionales en el envío.
                     </div>
-                  )}
-
+                  ) : null}
                 </div>
-              </div>
+              </section>
 
-              {/* Asunto y plantilla utilizada */}
-              <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 space-y-1.5 text-2xs">
-                <span className="font-bold text-gray-700 block">Asunto Registrado:</span>
-                <p className="font-mono text-gray-800 bg-white p-2 rounded border border-gray-200">
-                  {emailInfoItem.tipo === 'combustible'
-                    ? `Solicitud de Combustible [${emailInfoItem.folio}] - ${emailInfoItem.seccional_nombre} - ${emailInfoItem.solicitante} - ${emailInfoItem.fecha}`
-                    : `Solicitud de Compra [${emailInfoItem.folio}] - ${emailInfoItem.seccional_nombre} - ${emailInfoItem.solicitante} - ${emailInfoItem.fecha}`}
-                </p>
-              </div>
-
+              {/* Asunto */}
+              <section className="space-y-1.5">
+                <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Asunto registrado
+                </h4>
+                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 shadow-2xs">
+                  <p className="font-mono text-[11px] text-slate-700 leading-relaxed break-words">
+                    {emailInfoItem.tipo === 'combustible'
+                      ? `Solicitud de Combustible [${emailInfoItem.folio}] - ${emailInfoItem.seccional_nombre} - ${emailInfoItem.solicitante} - ${emailInfoItem.fecha}`
+                      : `Solicitud de Compra [${emailInfoItem.folio}] - ${emailInfoItem.seccional_nombre} - ${emailInfoItem.solicitante} - ${emailInfoItem.fecha}`}
+                  </p>
+                </div>
+              </section>
             </div>
 
-            <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-2xl">
+            <div className="px-5 py-3.5 bg-white border-t border-slate-200/70 flex items-center justify-between gap-2 shrink-0">
               {canPreviewPdf ? (
                 <button
+                  type="button"
                   onClick={() => {
                     handleOpenPdf(emailInfoItem);
                     setEmailInfoItem(null);
                   }}
-                  className="inline-flex items-center px-3.5 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                 >
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  Descargar Copia de PDF
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Ver PDF</span>
                 </button>
               ) : (
                 <div />
               )}
 
               <button
+                type="button"
                 onClick={() => setEmailInfoItem(null)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-semibold transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
                 Cerrar
               </button>
             </div>
-
           </div>
         </div>
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: CAMBIO DE ESTADO (PENDIENTE, APROBADA, FINALIZADA) */}
+      {/* MODAL: GESTIONAR ESTADO (ESTILO iOS)                      */}
       {/* ========================================================= */}
       {statusModalItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
-              <div className="flex items-center space-x-2.5">
-                <span className={`p-2 rounded-xl text-white ${statusModalItem.tipo === 'combustible' ? 'bg-emerald-600' : 'bg-primary'}`}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-5"
+          onClick={() => setStatusModalItem(null)}
+        >
+          <div
+            className="bg-[#F2F2F7] rounded-[28px] max-w-md w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200/80 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header iOS */}
+            <div className="px-5 py-4 bg-white border-b border-slate-200/70 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-slate-900/8 text-slate-800 flex items-center justify-center shrink-0">
                   <Sliders className="w-5 h-5" />
-                </span>
-                <div>
-                  <h3 className="text-base font-black text-gray-900">
-                    Cambiar Estado de Solicitud
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                    Gestionar estado
                   </h3>
-                  <p className="text-xs text-gray-500">
-                    Folio: <span className="font-mono font-bold text-gray-800">{statusModalItem.folio}</span> ({statusModalItem.tipo === 'combustible' ? 'Combustible' : 'Compra'})
+                  <p className="text-xs text-slate-500 truncate">
+                    <span className="font-mono font-semibold text-slate-700">{statusModalItem.folio}</span> · {statusModalItem.tipo === 'combustible' ? 'Combustible' : 'Compra'}
                   </p>
                 </div>
               </div>
+
               <button
+                type="button"
                 onClick={() => setStatusModalItem(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition cursor-pointer"
+                aria-label="Cerrar"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
-              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                <span className="text-gray-400 uppercase font-bold text-[10px] block">Seccional y Solicitante</span>
-                <p className="font-medium text-gray-800 mt-0.5">{statusModalItem.seccional_nombre} • {statusModalItem.solicitante}</p>
-                <p className="text-2xs text-gray-500 mt-0.5">{statusModalItem.detalle_resumen}</p>
+            {/* Body */}
+            <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Resumen compacto */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 px-4 py-3 shadow-2xs">
+                <p className="font-semibold text-slate-900 truncate">
+                  {statusModalItem.seccional_nombre} · {statusModalItem.solicitante}
+                </p>
+                <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                  {statusModalItem.detalle_resumen}
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-2">
-                  Selecciona la Acción / Estado a Aplicar:
-                </label>
-                <div className="space-y-2">
+              {/* Lista de estados estilo iOS Grouped Table */}
+              <section className="space-y-1.5">
+                <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Seleccionar estado
+                </h4>
+                <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden shadow-2xs">
                   {[
-                    { val: 'Pendiente', label: '🟡 Pendiente de Revisión', desc: 'Permite dejar la solicitud en espera de confirmación o documentos.' },
-                    { val: 'Aprobada', label: '🟢 Aprobada (Autorizada formalmente)', desc: 'Autoriza la compra o dotación de combustible con su firma digital.' },
-                    { val: 'Finalizada', label: '🟣 Finalizada (Entrega / Despacho completado)', desc: 'Marca el proceso como concluido (vale entregado o compras recibidas).' },
-                    { val: 'En Proceso', label: '🔵 En Proceso de Gestión', desc: 'En cotizaciones de proveedores o turno operativo.' },
-                    { val: 'Rechazada', label: '🔴 Rechazada', desc: 'No procede la solicitud. Se registrará el motivo.' },
-                  ].map(opt => (
-                    <label
-                      key={opt.val}
-                      className={`flex items-start p-2.5 rounded-xl border cursor-pointer transition ${
-                        newStatus === opt.val
-                          ? 'border-primary bg-blue-50/50 ring-1 ring-primary shadow-xs'
-                          : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="solicitudEstadoRadio"
-                        value={opt.val}
-                        checked={newStatus === opt.val}
-                        onChange={(e) => setNewStatus(e.target.value)}
-                        className="mt-0.5 text-primary focus:ring-primary"
-                      />
-                      <div className="ml-2.5">
-                        <span className="font-bold text-gray-900 block">{opt.label}</span>
-                        <span className="text-2xs text-gray-500">{opt.desc}</span>
-                      </div>
-                    </label>
-                  ))}
+                    {
+                      val: 'Pendiente',
+                      label: 'Pendiente',
+                      desc: 'En espera de revisión o documentos',
+                      dot: 'bg-amber-500',
+                    },
+                    {
+                      val: 'En Proceso',
+                      label: 'En Proceso',
+                      desc: 'En cotización o gestión operativa',
+                      dot: 'bg-sky-500',
+                    },
+                    {
+                      val: 'Aprobada',
+                      label: 'Aprobada',
+                      desc: 'Autorizada formalmente para ejecución',
+                      dot: 'bg-blue-600',
+                    },
+                    {
+                      val: 'Finalizada',
+                      label: 'Finalizada',
+                      desc: 'Entrega o despacho concluido (habilita nuevas solicitudes)',
+                      dot: 'bg-emerald-600',
+                    },
+                    {
+                      val: 'Rechazada',
+                      label: 'Rechazada',
+                      desc: 'No procede; se registra el motivo',
+                      dot: 'bg-rose-500',
+                    },
+                  ].map((opt) => {
+                    const selected = newStatus === opt.val;
+                    return (
+                      <button
+                        key={opt.val}
+                        type="button"
+                        onClick={() => setNewStatus(opt.val)}
+                        className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
+                          selected ? 'bg-slate-50' : 'hover:bg-slate-50/70'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3 min-w-0">
+                          <span className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${opt.dot}`} />
+                          <div className="min-w-0">
+                            <span className={`block text-xs font-semibold ${selected ? 'text-slate-950' : 'text-slate-800'}`}>
+                              {opt.label}
+                            </span>
+                            <span className="block text-[11px] text-slate-500 mt-0.5 leading-snug">
+                              {opt.desc}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                            selected
+                              ? 'bg-slate-900 text-white'
+                              : 'border border-slate-300 bg-white'
+                          }`}
+                        >
+                          {selected && <Check className="w-3 h-3" />}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              </div>
+              </section>
 
               {newStatus === 'Rechazada' && (
-                <div>
-                  <label className="block text-xs font-bold text-red-700 mb-1">
-                    Motivo del Rechazo (Obligatorio):
+                <section className="space-y-1.5">
+                  <label className="px-1 block text-[11px] font-semibold uppercase tracking-wider text-rose-600">
+                    Motivo del rechazo (obligatorio)
                   </label>
                   <textarea
                     rows={3}
                     value={motivoRechazo}
                     onChange={(e) => setMotivoRechazo(e.target.value)}
-                    placeholder="Escriba la justificación por la cual no procede esta solicitud..."
-                    className="w-full p-2.5 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-xs"
+                    placeholder="Indique brevemente por qué no procede esta solicitud..."
+                    className="w-full p-3.5 bg-white border border-rose-200 rounded-2xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-400 outline-none text-xs text-slate-800"
                   />
-                </div>
+                </section>
               )}
 
               {(newStatus === 'Aprobada' || newStatus === 'Finalizada') && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-900 text-2xs space-y-0.5">
-                  <span className="font-bold block">Firma y Registro de Auditoría:</span>
-                  <p>Autorizado por: <strong>{userName || user?.email || 'Administración Central'}</strong></p>
+                <div className="px-3.5 py-2.5 bg-white rounded-2xl border border-slate-200/80 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span>Registro de auditoría</span>
+                  <span className="font-semibold text-slate-800 truncate">
+                    {userName || user?.email || 'Administración Central'}
+                  </span>
                 </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-100 flex items-center justify-end space-x-2 bg-gray-50 rounded-b-2xl">
+            {/* Footer */}
+            <div className="px-5 py-3.5 bg-white border-t border-slate-200/70 flex items-center justify-end gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setStatusModalItem(null)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
                 Cancelar
               </button>
@@ -1920,9 +2011,9 @@ export default function Solicitudes() {
                 type="button"
                 disabled={updatingStatus || (newStatus === 'Rechazada' && !motivoRechazo.trim())}
                 onClick={handleSaveStatus}
-                className="inline-flex items-center px-5 py-2 bg-primary hover:bg-blue-900 text-white rounded-lg text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors disabled:opacity-45 cursor-pointer whitespace-nowrap"
               >
-                {updatingStatus ? 'Guardando...' : 'Confirmar Estado'}
+                {updatingStatus ? 'Guardando...' : 'Guardar estado'}
               </button>
             </div>
           </div>
@@ -1930,72 +2021,91 @@ export default function Solicitudes() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: REENVIAR / NOTIFICAR POR CORREO CON ENLACE Y PDF   */}
+      {/* MODAL: REENVIAR / NOTIFICAR POR CORREO (ESTILO iOS)       */}
       {/* ========================================================= */}
       {resendEmailItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-emerald-50/70">
-              <div className="flex items-center space-x-2.5">
-                <span className="p-2 bg-emerald-600 text-white rounded-xl">
-                  <Mail className="w-5 h-5" />
-                </span>
-                <div>
-                  <h3 className="text-base font-black text-gray-900">
-                    Enviar Notificación con Enlace y PDF Oficial
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-5"
+          onClick={() => setResendEmailItem(null)}
+        >
+          <div
+            className="bg-[#F2F2F7] rounded-[28px] max-w-md w-full overflow-hidden shadow-2xl border border-slate-200/80 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 bg-white border-b border-slate-200/70 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/12 text-emerald-600 flex items-center justify-center shrink-0">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight truncate">
+                    Enviar notificación
                   </h3>
-                  <p className="text-xs text-emerald-800">
-                    Folio: <span className="font-mono font-bold">{resendEmailItem.folio}</span> • {resendEmailItem.seccional_nombre}
+                  <p className="text-xs text-slate-500 truncate">
+                    <span className="font-mono font-semibold text-slate-700">{resendEmailItem.folio}</span> · {resendEmailItem.seccional_nombre}
                   </p>
                 </div>
               </div>
+
               <button
+                type="button"
                 onClick={() => setResendEmailItem(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg transition cursor-pointer"
+                aria-label="Cerrar"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSendEmailWithPdf} className="p-6 space-y-4 text-xs">
-              {sendSuccessMsg ? (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-2">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
-                  <p className="font-bold text-emerald-900">{sendSuccessMsg}</p>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">
-                      Correo Electrónico del Destinatario:
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={resendEmailTo}
-                      onChange={(e) => setResendEmailTo(e.target.value)}
-                      placeholder="seccional@cruzverdesv.org, solicitante@cruzverdesv.org"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs"
-                    />
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      El correo incluirá el resumen institucional completo y el botón de acceso directo al documento oficial en PDF con firmas y sello.
-                    </p>
+            <form onSubmit={handleSendEmailWithPdf}>
+              <div className="p-4 sm:p-5 space-y-4 text-xs">
+                {sendSuccessMsg ? (
+                  <div className="bg-white rounded-2xl border border-emerald-200 p-5 text-center space-y-2">
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-500/12 text-emerald-600 flex items-center justify-center mx-auto">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <p className="font-semibold text-slate-900">{sendSuccessMsg}</p>
                   </div>
+                ) : (
+                  <>
+                    <section className="space-y-1.5">
+                      <label className="px-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                        Destinatario
+                      </label>
+                      <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 space-y-2 shadow-2xs">
+                        <input
+                          type="email"
+                          required
+                          value={resendEmailTo}
+                          onChange={(e) => setResendEmailTo(e.target.value)}
+                          placeholder="correo@cruzverdesv.org"
+                          className="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 outline-none text-xs text-slate-900"
+                        />
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          Se enviará el resumen oficial junto al enlace directo al documento PDF.
+                        </p>
+                      </div>
+                    </section>
 
-                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-                    <span className="font-bold text-gray-700 block text-2xs uppercase">Enlace que se enviará en el correo:</span>
-                    <p className="font-mono text-2xs text-emerald-700 bg-white p-2 rounded border border-gray-200 break-all select-all">
-                      {getOfficialSolicitudPdfUrl(resendEmailItem.tipo, resendEmailItem.folio)}
-                    </p>
-                  </div>
-                </>
-              )}
+                    <section className="space-y-1.5">
+                      <span className="px-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                        Enlace del documento PDF
+                      </span>
+                      <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-2xs">
+                        <p className="font-mono text-[11px] text-slate-600 break-all select-all leading-relaxed">
+                          {getOfficialSolicitudPdfUrl(resendEmailItem.tipo, resendEmailItem.folio)}
+                        </p>
+                      </div>
+                    </section>
+                  </>
+                )}
+              </div>
 
-              <div className="p-4 border-t border-gray-100 flex items-center justify-end space-x-2 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-4">
+              <div className="px-5 py-3.5 bg-white border-t border-slate-200/70 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setResendEmailItem(null)}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Cerrar
                 </button>
@@ -2003,10 +2113,10 @@ export default function Solicitudes() {
                   <button
                     type="submit"
                     disabled={sendingEmail || !resendEmailTo.trim()}
-                    className="inline-flex items-center px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-45 cursor-pointer whitespace-nowrap"
                   >
-                    <Send className="w-3.5 h-3.5 mr-1.5" />
-                    {sendingEmail ? 'Enviando Correo...' : 'Enviar Notificación con PDF'}
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{sendingEmail ? 'Enviando...' : 'Enviar correo'}</span>
                   </button>
                 )}
               </div>

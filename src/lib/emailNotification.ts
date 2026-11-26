@@ -57,16 +57,20 @@ export interface DatosSolicitudCompra {
 
 export interface DatosSolicitudCombustible {
   codigoSolicitud: string;
+  folio?: string;
   fecha?: string;
   fechaEnvio?: string;
+  horaSolicitud?: string;
   seccional?: string;
   seccionalNombre?: string;
+  director?: string;
   solicitante?: string;
   telefonoSolicitante?: string;
   correoSolicitante?: string;
   actividad?: string;
   entregoLiquidacionAnterior?: boolean;
   motivoNoLiquidacion?: string;
+  observaciones?: string;
   vehiculo?: string;
   vehiculoAsignado?: string;
   placa?: string;
@@ -74,10 +78,18 @@ export interface DatosSolicitudCombustible {
   misionOJustificacion?: string;
   tipoCombustible?: string;
   galonesSolicitados?: number | string;
+  cantidadDinero?: number | string;
   combustibleSolicitado?: string;
   cuponOVales?: string;
   nombreArchivoPdf?: string;
   pdfUrl?: string;
+  logoUrl?: string;
+  subtituloSecundario?: string;
+  mostrarVehiculo?: boolean;
+  mostrarPlaca?: boolean;
+  mostrarGalones?: boolean;
+  mostrarTipoGasolina?: boolean;
+  mostrarCantidadDinero?: boolean;
 }
 
 // Configuración de diseño por defecto institucional
@@ -675,16 +687,45 @@ export function generarHtmlCorreoCompra(
 </html>`;
 }
 
+function escapeHtmlSafe(val: unknown): string {
+  return String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveBestEmailLogoUrl(explicitLogo?: string, storedDesignLogo?: string): string {
+  const candidates = [explicitLogo, storedDesignLogo];
+  if (typeof window !== 'undefined') {
+    try {
+      const rawComb = localStorage.getItem('cruz_verde_combustible_config');
+      if (rawComb) {
+        const parsed = JSON.parse(rawComb);
+        if (parsed?.pdfLogoHeaderUrl) candidates.push(parsed.pdfLogoHeaderUrl);
+      }
+    } catch {}
+  }
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim() && c.trim() !== 'null' && c.trim() !== 'undefined') {
+      return c.trim();
+    }
+  }
+  return DEFAULT_EMAIL_DESIGN.logoUrl;
+}
+
 /**
  * 4. Genera el correo para Solicitudes de Combustible
- * Incluye el FORMULARIO COMPLETO LLENO y el PDF OFICIAL ADJUNTO generado.
+ * Incluye el logo configurado, actividad, estado de liquidación, campos opcionales activos y enlace al PDF oficial.
  */
 export function generarHtmlCorreoCombustible(
   paramsOrUnified: any, 
   datosArg?: DatosSolicitudCombustible, 
   design?: EmailDesignConfig
 ): string {
-  const cfg = { ...DEFAULT_EMAIL_DESIGN, ...getStoredDesignConfig(), ...design };
+  const stored = getStoredDesignConfig();
+  const cfg = { ...DEFAULT_EMAIL_DESIGN, ...stored, ...design };
   
   let p: any;
   let d: any;
@@ -709,36 +750,63 @@ export function generarHtmlCorreoCombustible(
   const datos = d;
   const params = p;
 
+  const resolvedLogoUrl = resolveBestEmailLogoUrl(design?.logoUrl || datos.logoUrl, stored.logoUrl);
+  const showLogo = cfg.mostrarLogo !== false && Boolean(resolvedLogoUrl);
+  const subtituloSecundario = datos.subtituloSecundario || 'Documento Oficial Administrativo';
+
+  const fechaHoraSv = datos.fechaEnvio
+    ? `${datos.fechaEnvio} (Hora de El Salvador)`
+    : `${datos.fecha || formatFechaHoraSV(new Date())} (Hora de El Salvador)`;
+
+  const entregoLiq = Boolean(datos.entregoLiquidacionAnterior);
+  const motivoNoLiq = !entregoLiq && datos.motivoNoLiquidacion ? String(datos.motivoNoLiquidacion).trim() : '';
+
+  const showVehiculo = Boolean(datos.mostrarVehiculo);
+  const showPlaca = Boolean(datos.mostrarPlaca);
+  const showGalones = Boolean(datos.mostrarGalones);
+  const showTipoGasolina = Boolean(datos.mostrarTipoGasolina);
+  const showCantidadDinero = Boolean(datos.mostrarCantidadDinero);
+
+  const vehiculoVal = datos.vehiculo || datos.vehiculoAsignado || '';
+  const placaVal = datos.placa || '';
+  const galonesVal = datos.galonesSolicitados !== undefined && datos.galonesSolicitados !== null && String(datos.galonesSolicitados).trim() !== ''
+    ? String(datos.galonesSolicitados).trim()
+    : '';
+  const tipoGasVal = datos.tipoCombustible || '';
+  const dineroVal = datos.cantidadDinero !== undefined && datos.cantidadDinero !== null && String(datos.cantidadDinero).trim() !== ''
+    ? `$${Number(datos.cantidadDinero).toFixed(2)}`
+    : '';
+
+  const showFuelHighlight = (showGalones && galonesVal) || (showTipoGasolina && tipoGasVal) || (showCantidadDinero && dineroVal);
+  const highlightParts: string[] = [];
+  if (showGalones && galonesVal) highlightParts.push(`${escapeHtmlSafe(galonesVal)} Galones`);
+  if (showTipoGasolina && tipoGasVal) highlightParts.push(`(${escapeHtmlSafe(tipoGasVal)})`);
+  if (showCantidadDinero && dineroVal) highlightParts.push(`Monto: ${escapeHtmlSafe(dineroVal)}`);
+
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${asuntoStr}</title>
+  <title>${escapeHtmlSafe(asuntoStr)}</title>
   <style>
     body { font-family: ${cfg.fontBody}; background-color: #f3f4f6; margin: 0; padding: 24px 12px; color: #1f2937; }
     .container { max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb; }
-    .header { background: ${cfg.headerColor}; color: ${cfg.headerTextColor}; padding: 34px 24px; text-align: center; }
-    .header-logo { max-height: 54px; width: auto; margin-bottom: 12px; }
-    .header-badge { display: inline-block; background-color: rgba(255,255,255,0.22); color: ${cfg.headerTextColor}; padding: 4px 14px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 12px; }
-    .header h1 { font-family: ${cfg.fontTitle}; margin: 0; font-size: 24px; font-weight: 800; }
-    .header p { margin: 8px 0 0; font-size: 14px; opacity: 0.95; }
-    .content { padding: 32px 28px; }
+    .header { background: ${cfg.headerColor}; color: ${cfg.headerTextColor}; padding: 32px 24px; text-align: center; }
+    .header-logo { max-height: 68px; width: auto; margin: 0 auto 12px auto; display: block; background: rgba(255,255,255,0.96); padding: 6px; border-radius: 12px; }
+    .header-badge { display: inline-block; background-color: rgba(255,255,255,0.22); color: ${cfg.headerTextColor}; padding: 4px 14px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }
+    .header h1 { font-family: ${cfg.fontTitle}; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.4px; }
+    .header h2 { font-family: ${cfg.fontTitle}; margin: 6px 0 0; font-size: 15px; font-weight: 700; opacity: 0.96; text-transform: uppercase; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.9; }
+    .content { padding: 28px; }
     .section-title { font-family: ${cfg.fontTitle}; font-size: 13px; font-weight: 800; text-transform: uppercase; color: ${cfg.headerColor}; margin: 20px 0 10px; letter-spacing: 0.5px; }
-    .grid-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
-    .grid-table td { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
-    .grid-label { color: #64748b; font-weight: 600; width: 40%; }
-    .grid-value { color: #0f172a; font-weight: 700; width: 60%; }
-
-    .highlight-card { background-color: #f0fdf4; border: 2px solid #bbf7d0; border-radius: 12px; padding: 18px; margin: 20px 0; display: flex; justify-content: space-between; align-items: center; }
-    
-    /* Tarjeta de PDF Adjunto */
-    .pdf-card { background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 18px; margin: 24px 0; display: flex; align-items: center; justify-content: space-between; }
-    .pdf-icon-box { width: 48px; height: 48px; background-color: #fee2e2; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #dc2626; font-size: 14px; margin-right: 14px; }
-    .pdf-info { flex: 1; }
-    .pdf-title { font-weight: 800; font-size: 14px; color: #0f172a; margin-bottom: 2px; }
-    .pdf-sub { font-size: 12px; color: #64748b; }
-
+    .grid-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 13px; }
+    .grid-table td { padding: 9px 6px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .grid-label { color: #64748b; font-weight: 600; width: 42%; }
+    .grid-value { color: #0f172a; font-weight: 700; width: 58%; }
+    .badge-si { display: inline-block; background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 9999px; font-weight: 800; font-size: 12px; }
+    .badge-no { display: inline-block; background: #fef3c7; color: #92400e; padding: 3px 10px; border-radius: 9999px; font-weight: 800; font-size: 12px; }
+    .highlight-card { background-color: #f0fdf4; border: 2px solid #bbf7d0; border-radius: 12px; padding: 16px; margin: 16px 0; }
     .footer { background-color: ${cfg.footerColor}; color: ${cfg.footerTextColor}; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; line-height: 1.6; }
     .footer-noreply { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 10px 14px; border-radius: 8px; font-weight: 700; font-size: 11px; margin-bottom: 14px; display: inline-block; }
   </style>
@@ -746,97 +814,128 @@ export function generarHtmlCorreoCombustible(
 <body>
   <div class="container">
     <div class="header">
-      ${cfg.mostrarLogo && cfg.logoUrl ? `<img src="${cfg.logoUrl}" alt="Cruz Verde Salvadoreña" class="header-logo" />` : ''}
-      <div><span class="header-badge">Control de Flota y Combustible</span></div>
-      <h1>Cruz Verde Salvadoreña</h1>
-      <p>Notificación Oficial de Solicitud de Combustible</p>
+      ${showLogo ? `<img src="${escapeHtmlSafe(resolvedLogoUrl)}" alt="Cruz Verde Salvadoreña" class="header-logo" />` : ''}
+      <div><span class="header-badge">Control de Combustible</span></div>
+      <h1>CRUZ VERDE SALVADOREÑA</h1>
+      <h2>Solicitud de Combustible</h2>
+      <p>${escapeHtmlSafe(subtituloSecundario)}</p>
     </div>
 
     <div class="content">
-      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 14px; margin-bottom: 20px;">
-        <div>
-          <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Código de Vale / Solicitud:</span>
-          <div style="font-size: 18px; font-weight: 900; color: #0f172a;">${datos.codigoSolicitud}</div>
-        </div>
-        <div style="text-align: right;">
-          <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Fecha:</span>
-          <div style="font-size: 14px; font-weight: 700; color: #334155;">${datos.fecha || datos.fechaEnvio || 'Fecha Oficial'}</div>
-        </div>
-      </div>
+      <table style="width: 100%; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 18px; border-collapse: collapse;">
+        <tr>
+          <td style="padding-bottom: 12px;">
+            <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Folio de Solicitud:</span>
+            <div style="font-size: 18px; font-weight: 900; color: #0f172a; font-family: monospace;">${escapeHtmlSafe(codigo)}</div>
+          </td>
+          <td style="text-align: right; padding-bottom: 12px;">
+            <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Fecha y Hora de Solicitud:</span>
+            <div style="font-size: 13px; font-weight: 700; color: #334155;">${escapeHtmlSafe(fechaHoraSv)}</div>
+          </td>
+        </tr>
+      </table>
 
+      ${showFuelHighlight ? `
       <div class="highlight-card">
-        <div>
-          <span style="font-size: 11px; color: #166534; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Combustible Solicitado:</span>
-          <div style="font-size: 22px; font-weight: 900; color: #14532d;">${datos.combustibleSolicitado || `${datos.galonesSolicitados || 'N/A'} Galones (${datos.tipoCombustible || 'Regular / Diesel'})`}</div>
-        </div>
-        ${datos.cuponOVales ? `
-        <div style="background-color: #dcfce7; color: #166534; padding: 6px 12px; border-radius: 8px; font-weight: 800; font-size: 12px;">
-          Vale: ${datos.cuponOVales}
-        </div>` : ''}
-      </div>
+        <span style="font-size: 11px; color: #166534; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Detalle de Dotación Solicitada:</span>
+        <div style="font-size: 20px; font-weight: 900; color: #14532d; margin-top: 4px;">${highlightParts.join(' · ')}</div>
+      </div>` : ''}
 
-      <div class="section-title">1. Datos del Vehículo y Operador</div>
+      <div class="section-title">1. Datos de la Solicitud</div>
       <table class="grid-table">
         <tr>
           <td class="grid-label">Seccional:</td>
-          <td class="grid-value">${datos.seccional || datos.seccionalNombre || 'Cruz Verde'}</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.seccional || datos.seccionalNombre || 'Cruz Verde')}</td>
+        </tr>
+        ${datos.director ? `
+        <tr>
+          <td class="grid-label">Director(a) Seccional:</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.director)}</td>
+        </tr>` : ''}
+        <tr>
+          <td class="grid-label">Solicitante:</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.solicitante || 'Socorrista')}</td>
+        </tr>
+        ${datos.telefonoSolicitante ? `
+        <tr>
+          <td class="grid-label">Teléfono del Solicitante:</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.telefonoSolicitante)}</td>
+        </tr>` : ''}
+        ${datos.correoSolicitante ? `
+        <tr>
+          <td class="grid-label">Correo de la Seccional:</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.correoSolicitante)}</td>
+        </tr>` : ''}
+        <tr>
+          <td class="grid-label">Tipo de Actividad:</td>
+          <td class="grid-value">${escapeHtmlSafe(datos.actividad || 'No especificada')}</td>
         </tr>
         <tr>
-          <td class="grid-label">Solicitante / Motorista:</td>
-          <td class="grid-value">${datos.solicitante || 'Socorrista'} ${datos.telefonoSolicitante ? `(${datos.telefonoSolicitante})` : ''}</td>
+          <td class="grid-label">¿Entregó liquidación del mes anterior?:</td>
+          <td class="grid-value">
+            <span class="${entregoLiq ? 'badge-si' : 'badge-no'}">${entregoLiq ? 'Sí' : 'No'}</span>
+          </td>
         </tr>
-        ${datos.vehiculo || datos.vehiculoAsignado ? `
+        ${!entregoLiq && motivoNoLiq ? `
+        <tr>
+          <td class="grid-label">Motivo de no entrega de liquidación:</td>
+          <td class="grid-value" style="color: #92400e;">${escapeHtmlSafe(motivoNoLiq)}</td>
+        </tr>` : ''}
+        ${showVehiculo && vehiculoVal ? `
         <tr>
           <td class="grid-label">Vehículo / Unidad:</td>
-          <td class="grid-value">${datos.vehiculo || datos.vehiculoAsignado}</td>
+          <td class="grid-value">${escapeHtmlSafe(vehiculoVal)}</td>
         </tr>` : ''}
-        ${datos.placa ? `
+        ${showPlaca && placaVal ? `
         <tr>
           <td class="grid-label">Número de Placa:</td>
-          <td class="grid-value">${datos.placa}</td>
+          <td class="grid-value">${escapeHtmlSafe(placaVal)}</td>
         </tr>` : ''}
-        ${datos.kilometrajeActual ? `
+        ${showTipoGasolina && tipoGasVal ? `
         <tr>
-          <td class="grid-label">Odómetro / Kilometraje Actual:</td>
-          <td class="grid-value">${datos.kilometrajeActual} km</td>
+          <td class="grid-label">Tipo de Gasolina:</td>
+          <td class="grid-value">${escapeHtmlSafe(tipoGasVal)}</td>
         </tr>` : ''}
-        ${datos.actividad ? `
+        ${showGalones && galonesVal ? `
         <tr>
-          <td class="grid-label">Actividad / Emergencia:</td>
-          <td class="grid-value">${datos.actividad}</td>
+          <td class="grid-label">Galones Solicitados:</td>
+          <td class="grid-value">${escapeHtmlSafe(galonesVal)} Gl.</td>
+        </tr>` : ''}
+        ${showCantidadDinero && dineroVal ? `
+        <tr>
+          <td class="grid-label">Cantidad de Dinero:</td>
+          <td class="grid-value">${escapeHtmlSafe(dineroVal)}</td>
+        </tr>` : ''}
+        ${datos.observaciones ? `
+        <tr>
+          <td class="grid-label">Observaciones:</td>
+          <td class="grid-value" style="font-weight: 500;">${escapeHtmlSafe(datos.observaciones)}</td>
         </tr>` : ''}
       </table>
 
-      ${datos.misionOJustificacion ? `
-      <div class="section-title">2. Misión o Recorrido Programado</div>
-      <div style="background-color: #f8fafc; border-left: 4px solid ${cfg.headerColor}; padding: 14px; border-radius: 6px; font-size: 13px; color: #334155; line-height: 1.5; margin-bottom: 20px;">
-        ${datos.misionOJustificacion}
-      </div>` : ''}
-
-      <!-- Documento PDF Adjunto Oficial -->
-      <div class="section-title">3. Vale / Documento PDF Oficial Generado</div>
-      <table style="width: 100%; background-color: #f8fafc; border: 2px solid #cbd5e1; border-radius: 12px; margin: 18px 0 12px 0; border-collapse: separate; padding: 16px;">
+      <!-- Documento PDF Oficial -->
+      <div class="section-title">2. Documento Oficial PDF</div>
+      <table style="width: 100%; background-color: #f8fafc; border: 2px solid #cbd5e1; border-radius: 12px; margin: 14px 0 12px 0; border-collapse: separate; padding: 16px;">
         <tr>
           <td style="width: 52px; vertical-align: middle;">
             <div style="width: 48px; height: 48px; background-color: #fee2e2; border-radius: 10px; text-align: center; line-height: 48px; font-weight: 900; color: #dc2626; font-size: 15px; border: 1px solid #fca5a5;">PDF</div>
           </td>
           <td style="padding-left: 14px; vertical-align: middle;">
-            <div style="font-weight: 800; font-size: 15px; color: #0f172a; margin-bottom: 3px;">${pdfName}</div>
-            <div style="font-size: 12px; color: #64748b; font-weight: 500;">Vale oficial de combustible para gasolinera con firmas y sello</div>
+            <div style="font-weight: 800; font-size: 15px; color: #0f172a; margin-bottom: 3px;">${escapeHtmlSafe(pdfName)}</div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 500;">Documento Oficial Administrativo de Solicitud de Combustible</div>
           </td>
         </tr>
         <tr>
           <td colspan="2" style="padding-top: 14px; text-align: center;">
-            <a href="${pdfUrl}" target="_blank" style="display: block; background-color: ${cfg.headerColor || '#008f39'}; color: #ffffff; padding: 12px 20px; border-radius: 8px; font-weight: 800; font-size: 14px; text-decoration: none; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.12);">
-              📄 ABRIR Y DESCARGAR VALE OFICIAL EN PDF
+            <a href="${escapeHtmlSafe(pdfUrl)}" target="_blank" style="display: block; background-color: ${cfg.headerColor || '#008f39'}; color: #ffffff; padding: 12px 20px; border-radius: 8px; font-weight: 800; font-size: 14px; text-decoration: none; text-align: center;">
+              📄 ABRIR Y DESCARGAR DOCUMENTO OFICIAL EN PDF
             </a>
           </td>
         </tr>
       </table>
-      <div style="background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px; font-size: 12px; color: #334155; margin-bottom: 24px; border-left: 4px solid ${cfg.headerColor || '#008f39'};">
-        <strong>Enlace directo al vale oficial:</strong><br>
-        <a href="${pdfUrl}" target="_blank" style="color: #0284c7; word-break: break-all; font-weight: 600; text-decoration: underline;">${pdfUrl}</a>
-        <p style="margin: 6px 0 0 0; font-size: 11px; color: #64748b;">(Haga clic sobre el enlace o cópielo en su navegador para visualizar el Vale oficial emitido con sellos y firmas)</p>
+      <div style="background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px; font-size: 12px; color: #334155; margin-bottom: 20px; border-left: 4px solid ${cfg.headerColor || '#008f39'};">
+        <strong>Enlace directo al documento oficial:</strong><br>
+        <a href="${escapeHtmlSafe(pdfUrl)}" target="_blank" style="color: #0284c7; word-break: break-all; font-weight: 600; text-decoration: underline;">${escapeHtmlSafe(pdfUrl)}</a>
       </div>
 
     </div>
@@ -845,10 +944,10 @@ export function generarHtmlCorreoCombustible(
       <div class="footer-noreply">
         🚫 CORREO DE SÓLO ENVÍO (NO-REPLY) — NO RESPONDER A ESTE MENSAJE
       </div>
-      <p style="margin: 6px 0; font-size: 11px;">${cfg.leyendaNoReply}</p>
+      <p style="margin: 6px 0; font-size: 11px;">${escapeHtmlSafe(cfg.leyendaNoReply)}</p>
       <p style="margin: 8px 0 0; font-size: 11px; opacity: 0.85;">
-        Remitente: <strong>${params.remitenteNombre}</strong> &lt;${params.remitenteCorreo}&gt;<br>
-        Control de Combustible: ${cfg.telefonoContacto}
+        Remitente: <strong>${escapeHtmlSafe(params.remitenteNombre)}</strong> &lt;${escapeHtmlSafe(params.remitenteCorreo)}&gt;<br>
+        Control de Combustible: ${escapeHtmlSafe(cfg.telefonoContacto)}
       </p>
     </div>
   </div>

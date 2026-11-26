@@ -17,8 +17,20 @@ import CombustibleTemplateConfig from '../components/combustible/CombustibleTemp
 import ConfiguracionCargos from '../components/configuracion/ConfiguracionCargos';
 import ConfiguracionImagenes from '../components/configuracion/ConfiguracionImagenes';
 import { optimizeImageForUpload, getExtensionFromFile } from '../utils/imageOptimizer';
-import { CompraConfig, DEFAULT_COMPRA_CONFIG, DEFAULT_COMPRA_BLOCKS } from '../types/compra';
-import { CombustibleConfig, DEFAULT_COMBUSTIBLE_CONFIG, DEFAULT_COMBUSTIBLE_BLOCKS } from '../types/combustible';
+import {
+  CompraConfig,
+  DEFAULT_COMPRA_CONFIG,
+  DEFAULT_COMPRA_BLOCKS,
+  parseCompraConfigFromMap,
+  serializeCompraConfigToEntries,
+} from '../types/compra';
+import {
+  CombustibleConfig,
+  DEFAULT_COMBUSTIBLE_CONFIG,
+  DEFAULT_COMBUSTIBLE_BLOCKS,
+  parseCombustibleConfigFromMap,
+  serializeCombustibleConfigToEntries,
+} from '../types/combustible';
 
 interface PlantillaFormulario {
   id: string;
@@ -255,109 +267,20 @@ export default function Configuracion() {
         } catch (e) {}
 
         // 1. Cargar Compra
-        let parsedCompraBlocks = DEFAULT_COMPRA_CONFIG.pdfBloquesOrden;
-        if (confMap.solicitudes_pdf_bloques_orden) {
-          try { parsedCompraBlocks = JSON.parse(confMap.solicitudes_pdf_bloques_orden); } catch (e) {}
-        }
-        setCompraConfig(prev => ({
-          ...prev,
-          correoDestino: confMap.solicitudes_correo_destino || prev.correoDestino,
-          correoRemitente: confMap.solicitudes_correo_remitente || prev.correoRemitente,
-          correoCcDefault: confMap.solicitudes_correo_cc || prev.correoCcDefault,
-          asuntoPlantilla: confMap.solicitudes_asunto_plantilla || prev.asuntoPlantilla,
-          enviarCopiaSolicitante: confMap.solicitudes_enviar_copia_solicitante !== 'false',
-          correoTitulo: confMap.solicitudes_correo_titulo || prev.correoTitulo,
-          correoSubtitulo: confMap.solicitudes_correo_subtitulo || prev.correoSubtitulo,
-          correoFooterTexto: confMap.solicitudes_correo_footer_texto || prev.correoFooterTexto,
-          pdfTitulo: confMap.solicitudes_pdf_titulo || prev.pdfTitulo,
-          pdfDepartamento: confMap.solicitudes_pdf_departamento || prev.pdfDepartamento,
-          pdfSubtitulo: confMap.solicitudes_pdf_subtitulo || prev.pdfSubtitulo,
-          pdfFontFamily: (confMap.solicitudes_pdf_font_family as any) || prev.pdfFontFamily,
-          pdfFontSize: (confMap.solicitudes_pdf_font_size as any) || prev.pdfFontSize,
-          pdfWatermark: confMap.solicitudes_pdf_watermark !== 'false',
-          pdfWatermarkText: confMap.solicitudes_pdf_watermark_text || prev.pdfWatermarkText,
-          pdfWatermarkOpacity: confMap.solicitudes_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
-          pdfPiePagina: confMap.solicitudes_pdf_pie_pagina || prev.pdfPiePagina,
-          pdfMostrarLogo: confMap.solicitudes_pdf_mostrar_logo !== 'false',
-          pdfLogoUrl: confMap.solicitudes_pdf_logo_url ?? prev.pdfLogoUrl,
-          pdfLogoPosicion: (confMap.solicitudes_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
-          pdfLogoSize: (confMap.solicitudes_pdf_logo_size as any) || prev.pdfLogoSize,
-          pdfMostrarLogoSecundario: confMap.solicitudes_pdf_mostrar_logo_secundario === 'true',
-          pdfLogoSecundarioUrl: confMap.solicitudes_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
-          pdfLogoSecundarioPosicion: (confMap.solicitudes_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
-          pdfLogoSecundarioSize: (confMap.solicitudes_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
-          pdfMostrarSello: confMap.solicitudes_pdf_mostrar_sello !== 'false',
-          pdfMostrarSelloImg: confMap.solicitudes_pdf_mostrar_sello_img === 'true',
-          pdfSelloImgUrl: confMap.solicitudes_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
-          pdfSelloImgPosicion: (confMap.solicitudes_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
-          pdfSelloImgSize: (confMap.solicitudes_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
-          pdfMostrarFooterImg: confMap.solicitudes_pdf_mostrar_footer_img === 'true',
-          pdfFooterImgUrl: confMap.solicitudes_pdf_footer_img_url ?? prev.pdfFooterImgUrl,
-          pdfFooterImgPosicion: (confMap.solicitudes_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
-          pdfFooterImgSize: (confMap.solicitudes_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
-          pdfSelloTextoSuperior: confMap.solicitudes_pdf_sello_texto_superior || prev.pdfSelloTextoSuperior,
-          pdfSelloTextoInferior: confMap.solicitudes_pdf_sello_texto_inferior || prev.pdfSelloTextoInferior,
-          pdfFirma1Titulo: confMap.solicitudes_pdf_firma1_titulo || prev.pdfFirma1Titulo,
-          pdfFirma1Subtitulo: confMap.solicitudes_pdf_firma1_subtitulo || prev.pdfFirma1Subtitulo,
-          pdfFirma2Titulo: confMap.solicitudes_pdf_firma2_titulo || prev.pdfFirma2Titulo,
-          pdfFirma2Subtitulo: confMap.solicitudes_pdf_firma2_subtitulo || prev.pdfFirma2Subtitulo,
-          pdfFirma3Titulo: confMap.solicitudes_pdf_firma3_titulo || prev.pdfFirma3Titulo,
-          pdfFirma3Subtitulo: confMap.solicitudes_pdf_firma3_subtitulo || prev.pdfFirma3Subtitulo,
-          pdfBloquesOrden: parsedCompraBlocks
-        }));
+        let storedLocalCompra: Partial<CompraConfig> = {};
+        try {
+          const cached = localStorage.getItem('cruz_verde_compra_config');
+          if (cached) storedLocalCompra = JSON.parse(cached);
+        } catch {}
+        setCompraConfig(prev => parseCompraConfigFromMap(confMap, storedLocalCompra, prev));
 
         // 2. Cargar Combustible
-        setCombustibleConfig(prev => ({
-          ...prev,
-          correoDestino: confMap.combustible_correo_destino || prev.correoDestino,
-          correoCcDefault: confMap.combustible_correo_cc || prev.correoCcDefault,
-          correoContactoTelefono: confMap.combustible_correo_contacto_telefono || prev.correoContactoTelefono,
-          asuntoPlantilla: confMap.combustible_correo_asunto_plantilla || prev.asuntoPlantilla,
-          enviarCopiaSolicitante: confMap.combustible_correo_enviar_copia_solicitante !== 'false',
-          correoTitulo: confMap.combustible_correo_titulo || prev.correoTitulo,
-          correoSubtitulo: confMap.combustible_correo_subtitulo || prev.correoSubtitulo,
-          correoFooterTexto: confMap.combustible_correo_footer_texto || prev.correoFooterTexto,
-          pdfTitulo: confMap.combustible_pdf_titulo || prev.pdfTitulo,
-          pdfSubtitulo: confMap.combustible_pdf_subtitulo || prev.pdfSubtitulo,
-          pdfFontFamily: (confMap.combustible_pdf_font_family as any) || prev.pdfFontFamily,
-          pdfFontSize: (confMap.combustible_pdf_font_size as any) || prev.pdfFontSize,
-          pdfCodigoFormulario: confMap.combustible_pdf_codigo_formulario || prev.pdfCodigoFormulario,
-          pdfWatermark: confMap.combustible_pdf_watermark !== 'false',
-          pdfWatermarkText: confMap.combustible_pdf_watermark_text || prev.pdfWatermarkText,
-          pdfWatermarkOpacity: confMap.combustible_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
-          pdfMostrarLogoHeader: confMap.combustible_pdf_mostrar_logo_header !== 'false',
-          pdfLogoHeaderUrl: confMap.combustible_pdf_logo_header_url ?? prev.pdfLogoHeaderUrl,
-          pdfLogoPosicion: (confMap.combustible_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
-          pdfLogoSize: (confMap.combustible_pdf_logo_size as any) || prev.pdfLogoSize,
-          pdfMostrarLogoSecundario: confMap.combustible_pdf_mostrar_logo_secundario === 'true',
-          pdfLogoSecundarioUrl: confMap.combustible_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
-          pdfLogoSecundarioPosicion: (confMap.combustible_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
-          pdfLogoSecundarioSize: (confMap.combustible_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
-          pdfMostrarSelloImg: confMap.combustible_pdf_mostrar_sello_img === 'true',
-          pdfSelloImgUrl: confMap.combustible_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
-          pdfSelloImgPosicion: (confMap.combustible_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
-          pdfSelloImgSize: (confMap.combustible_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
-          pdfMostrarLogoFooter: confMap.combustible_pdf_mostrar_logo_footer !== 'false',
-          pdfLogoFooterUrl: confMap.combustible_pdf_logo_footer_url ?? prev.pdfLogoFooterUrl,
-          pdfFooterImgPosicion: (confMap.combustible_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
-          pdfFooterImgSize: (confMap.combustible_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
-          pdfLabelSolicitante: confMap.combustible_pdf_label_solicitante || prev.pdfLabelSolicitante,
-          pdfLabelSeccional: confMap.combustible_pdf_label_seccional || prev.pdfLabelSeccional,
-          pdfLabelDirector: confMap.combustible_pdf_label_director || prev.pdfLabelDirector,
-          pdfLabelActividad: confMap.combustible_pdf_label_actividad || prev.pdfLabelActividad,
-          pdfLabelCorreo: confMap.combustible_pdf_label_correo || prev.pdfLabelCorreo,
-          pdfLabelContacto: confMap.combustible_pdf_label_contacto || prev.pdfLabelContacto,
-          pdfLabelLiquidacion: confMap.combustible_pdf_label_liquidacion || prev.pdfLabelLiquidacion,
-          pdfLabelMotivo: confMap.combustible_pdf_label_motivo || prev.pdfLabelMotivo,
-          pdfLabelObservaciones: confMap.combustible_pdf_label_observaciones || prev.pdfLabelObservaciones,
-          pdfLabelFirmaSolicitante: confMap.combustible_pdf_label_firma_solicitante || prev.pdfLabelFirmaSolicitante,
-          pdfLabelFirmaAdmin: confMap.combustible_pdf_label_firma_admin || prev.pdfLabelFirmaAdmin,
-          pdfLabelDui: confMap.combustible_pdf_label_dui || prev.pdfLabelDui,
-          pdfLabelFecha: confMap.combustible_pdf_label_fecha || prev.pdfLabelFecha,
-          pdfLabelFirmaSello: confMap.combustible_pdf_label_firma_sello || prev.pdfLabelFirmaSello,
-          pdfLabelAutoriza: confMap.combustible_pdf_label_autoriza || prev.pdfLabelAutoriza,
-          pdfLabelFechaAuto: confMap.combustible_pdf_label_fecha_auto || prev.pdfLabelFechaAuto
-        }));
+        let storedLocalComb: Partial<CombustibleConfig> = {};
+        try {
+          const cached = localStorage.getItem('cruz_verde_combustible_config');
+          if (cached) storedLocalComb = JSON.parse(cached);
+        } catch {}
+        setCombustibleConfig(prev => parseCombustibleConfigFromMap(confMap, storedLocalComb, prev));
       } catch (error: any) {
         console.error('Error loading config:', error);
       } finally {
@@ -459,51 +382,7 @@ export default function Configuracion() {
         localStorage.setItem('cruz_verde_compra_config', JSON.stringify(newConfig));
       } catch (e) {}
 
-      const entries = [
-        { clave: 'solicitudes_correo_destino', valor: newConfig.correoDestino },
-        { clave: 'solicitudes_correo_remitente', valor: newConfig.correoRemitente },
-        { clave: 'solicitudes_correo_cc', valor: newConfig.correoCcDefault },
-        { clave: 'solicitudes_asunto_plantilla', valor: newConfig.asuntoPlantilla },
-        { clave: 'solicitudes_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
-        { clave: 'solicitudes_correo_titulo', valor: newConfig.correoTitulo },
-        { clave: 'solicitudes_correo_subtitulo', valor: newConfig.correoSubtitulo },
-        { clave: 'solicitudes_correo_footer_texto', valor: newConfig.correoFooterTexto },
-        { clave: 'solicitudes_pdf_titulo', valor: newConfig.pdfTitulo },
-        { clave: 'solicitudes_pdf_departamento', valor: newConfig.pdfDepartamento },
-        { clave: 'solicitudes_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
-        { clave: 'solicitudes_pdf_font_family', valor: newConfig.pdfFontFamily },
-        { clave: 'solicitudes_pdf_font_size', valor: newConfig.pdfFontSize },
-        { clave: 'solicitudes_pdf_watermark', valor: String(newConfig.pdfWatermark) },
-        { clave: 'solicitudes_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
-        { clave: 'solicitudes_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
-        { clave: 'solicitudes_pdf_pie_pagina', valor: newConfig.pdfPiePagina },
-        { clave: 'solicitudes_pdf_mostrar_logo', valor: String(newConfig.pdfMostrarLogo) },
-        { clave: 'solicitudes_pdf_logo_url', valor: newConfig.pdfLogoUrl },
-        { clave: 'solicitudes_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion },
-        { clave: 'solicitudes_pdf_logo_size', valor: newConfig.pdfLogoSize },
-        { clave: 'solicitudes_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
-        { clave: 'solicitudes_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
-        { clave: 'solicitudes_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion },
-        { clave: 'solicitudes_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize },
-        { clave: 'solicitudes_pdf_mostrar_sello', valor: String(newConfig.pdfMostrarSello) },
-        { clave: 'solicitudes_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
-        { clave: 'solicitudes_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
-        { clave: 'solicitudes_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion },
-        { clave: 'solicitudes_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize },
-        { clave: 'solicitudes_pdf_mostrar_footer_img', valor: String(newConfig.pdfMostrarFooterImg) },
-        { clave: 'solicitudes_pdf_footer_img_url', valor: newConfig.pdfFooterImgUrl || '' },
-        { clave: 'solicitudes_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion },
-        { clave: 'solicitudes_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize },
-        { clave: 'solicitudes_pdf_sello_texto_superior', valor: newConfig.pdfSelloTextoSuperior },
-        { clave: 'solicitudes_pdf_sello_texto_inferior', valor: newConfig.pdfSelloTextoInferior },
-        { clave: 'solicitudes_pdf_firma1_titulo', valor: newConfig.pdfFirma1Titulo },
-        { clave: 'solicitudes_pdf_firma1_subtitulo', valor: newConfig.pdfFirma1Subtitulo },
-        { clave: 'solicitudes_pdf_firma2_titulo', valor: newConfig.pdfFirma2Titulo },
-        { clave: 'solicitudes_pdf_firma2_subtitulo', valor: newConfig.pdfFirma2Subtitulo },
-        { clave: 'solicitudes_pdf_firma3_titulo', valor: newConfig.pdfFirma3Titulo },
-        { clave: 'solicitudes_pdf_firma3_subtitulo', valor: newConfig.pdfFirma3Subtitulo },
-        { clave: 'solicitudes_pdf_bloques_orden', valor: JSON.stringify(newConfig.pdfBloquesOrden) }
-      ];
+      const entries = serializeCompraConfigToEntries(newConfig);
 
       try {
         const confObj: Record<string, string> = {};
@@ -544,56 +423,7 @@ export default function Configuracion() {
         localStorage.setItem('cruz_verde_combustible_config', JSON.stringify(newConfig));
       } catch (e) {}
 
-      const entries = [
-        { clave: 'combustible_correo_destino', valor: newConfig.correoDestino },
-        { clave: 'combustible_correo_cc', valor: newConfig.correoCcDefault },
-        { clave: 'combustible_correo_contacto_telefono', valor: newConfig.correoContactoTelefono },
-        { clave: 'combustible_correo_asunto_plantilla', valor: newConfig.asuntoPlantilla },
-        { clave: 'combustible_correo_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
-        { clave: 'combustible_correo_titulo', valor: newConfig.correoTitulo },
-        { clave: 'combustible_correo_subtitulo', valor: newConfig.correoSubtitulo },
-        { clave: 'combustible_correo_footer_texto', valor: newConfig.correoFooterTexto },
-        { clave: 'combustible_pdf_titulo', valor: newConfig.pdfTitulo },
-        { clave: 'combustible_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
-        { clave: 'combustible_pdf_font_family', valor: newConfig.pdfFontFamily },
-        { clave: 'combustible_pdf_font_size', valor: newConfig.pdfFontSize },
-        { clave: 'combustible_pdf_codigo_formulario', valor: newConfig.pdfCodigoFormulario },
-        { clave: 'combustible_pdf_watermark', valor: String(newConfig.pdfWatermark) },
-        { clave: 'combustible_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
-        { clave: 'combustible_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
-        { clave: 'combustible_pdf_mostrar_logo_header', valor: String(newConfig.pdfMostrarLogoHeader) },
-        { clave: 'combustible_pdf_logo_header_url', valor: newConfig.pdfLogoHeaderUrl || '' },
-        { clave: 'combustible_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion || 'left' },
-        { clave: 'combustible_pdf_logo_size', valor: newConfig.pdfLogoSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
-        { clave: 'combustible_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
-        { clave: 'combustible_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion || 'right' },
-        { clave: 'combustible_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
-        { clave: 'combustible_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
-        { clave: 'combustible_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion || 'center' },
-        { clave: 'combustible_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_logo_footer', valor: String(newConfig.pdfMostrarLogoFooter) },
-        { clave: 'combustible_pdf_logo_footer_url', valor: newConfig.pdfLogoFooterUrl || '' },
-        { clave: 'combustible_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion || 'center' },
-        { clave: 'combustible_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize || 'medium' },
-        { clave: 'combustible_pdf_label_solicitante', valor: newConfig.pdfLabelSolicitante },
-        { clave: 'combustible_pdf_label_seccional', valor: newConfig.pdfLabelSeccional },
-        { clave: 'combustible_pdf_label_director', valor: newConfig.pdfLabelDirector },
-        { clave: 'combustible_pdf_label_actividad', valor: newConfig.pdfLabelActividad },
-        { clave: 'combustible_pdf_label_correo', valor: newConfig.pdfLabelCorreo },
-        { clave: 'combustible_pdf_label_contacto', valor: newConfig.pdfLabelContacto },
-        { clave: 'combustible_pdf_label_liquidacion', valor: newConfig.pdfLabelLiquidacion },
-        { clave: 'combustible_pdf_label_motivo', valor: newConfig.pdfLabelMotivo },
-        { clave: 'combustible_pdf_label_observaciones', valor: newConfig.pdfLabelObservaciones },
-        { clave: 'combustible_pdf_label_firma_solicitante', valor: newConfig.pdfLabelFirmaSolicitante },
-        { clave: 'combustible_pdf_label_firma_admin', valor: newConfig.pdfLabelFirmaAdmin },
-        { clave: 'combustible_pdf_label_dui', valor: newConfig.pdfLabelDui },
-        { clave: 'combustible_pdf_label_fecha', valor: newConfig.pdfLabelFecha },
-        { clave: 'combustible_pdf_label_firma_sello', valor: newConfig.pdfLabelFirmaSello },
-        { clave: 'combustible_pdf_label_autoriza', valor: newConfig.pdfLabelAutoriza },
-        { clave: 'combustible_pdf_label_fecha_auto', valor: newConfig.pdfLabelFechaAuto }
-      ];
+      const entries = serializeCombustibleConfigToEntries(newConfig);
 
       try {
         const confObj: Record<string, string> = {};

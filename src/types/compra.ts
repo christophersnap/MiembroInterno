@@ -1,4 +1,5 @@
 export type { SolicitudCompra } from '../pages/SolicitudesCompra';
+import { PdfWatermarkPosition, normalizePdfWatermarkPosition } from '../components/common/PdfWatermarkOverlay';
 
 export interface CompraBlockItem {
   id: string;
@@ -24,8 +25,11 @@ export interface CompraConfig {
   pdfFontFamily: 'sans' | 'serif' | 'mono';
   pdfFontSize: 'small' | 'normal' | 'large';
   pdfWatermark: boolean;
+  pdfWatermarkImgUrl: string;
   pdfWatermarkText: string;
   pdfWatermarkOpacity: string;
+  pdfWatermarkScale: string;
+  pdfWatermarkPosition: PdfWatermarkPosition;
   pdfPiePagina: string;
 
   pdfMostrarLogo: boolean;
@@ -110,8 +114,11 @@ export const DEFAULT_COMPRA_CONFIG: CompraConfig = {
   pdfFontFamily: 'sans',
   pdfFontSize: 'normal',
   pdfWatermark: false,
-  pdfWatermarkText: 'NO VÁLIDO',
-  pdfWatermarkOpacity: '0.15',
+  pdfWatermarkImgUrl: '',
+  pdfWatermarkText: 'CRUZ VERDE SALVADOREÑA',
+  pdfWatermarkOpacity: '0.12',
+  pdfWatermarkScale: '45',
+  pdfWatermarkPosition: 'center',
   pdfPiePagina: 'Este documento es de carácter oficial e institucional de Cruz Verde Salvadoreña. Toda adquisición o servicio debe contar con las firmas y sellos correspondientes.',
 
   pdfMostrarLogo: true,
@@ -152,3 +159,164 @@ export const DEFAULT_COMPRA_CONFIG: CompraConfig = {
 
   pdfBloquesOrden: DEFAULT_COMPRA_BLOCKS
 };
+
+export function parseCompraConfigFromMap(
+  confMap: Record<string, string>,
+  storedLocalConfig: Partial<CompraConfig> = {},
+  base: CompraConfig = DEFAULT_COMPRA_CONFIG
+): CompraConfig {
+  const boolVal = (key: string, localVal: boolean | undefined, fallback: boolean): boolean => {
+    if (confMap[key] !== undefined && confMap[key] !== '') {
+      return confMap[key] === 'true';
+    }
+    if (typeof localVal === 'boolean') return localVal;
+    return fallback;
+  };
+
+  const strVal = (key: string, localVal: string | undefined, fallback: string): string => {
+    if (confMap[key] !== undefined && confMap[key] !== '') {
+      return confMap[key];
+    }
+    if (localVal !== undefined && localVal !== '') return localVal;
+    return fallback;
+  };
+
+  const strAllowEmpty = (key: string, localVal: string | undefined, fallback: string): string => {
+    if (confMap[key] !== undefined) return confMap[key];
+    if (localVal !== undefined) return localVal;
+    return fallback;
+  };
+
+  let parsedBlocks = storedLocalConfig.pdfBloquesOrden?.length
+    ? storedLocalConfig.pdfBloquesOrden
+    : base.pdfBloquesOrden;
+  if (confMap.solicitudes_pdf_bloques_orden) {
+    try {
+      const parsed = JSON.parse(confMap.solicitudes_pdf_bloques_orden);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        parsedBlocks = parsed;
+      }
+    } catch {
+      // mantener bloques actuales
+    }
+  }
+
+  return {
+    ...base,
+    ...storedLocalConfig,
+    correoDestino: strVal('solicitudes_correo_destino', storedLocalConfig.correoDestino, base.correoDestino),
+    correoRemitente: strVal('solicitudes_correo_remitente', storedLocalConfig.correoRemitente, base.correoRemitente || ''),
+    correoCcDefault: strAllowEmpty('solicitudes_correo_cc', storedLocalConfig.correoCcDefault, base.correoCcDefault),
+    asuntoPlantilla: strVal('solicitudes_asunto_plantilla', storedLocalConfig.asuntoPlantilla, base.asuntoPlantilla),
+    enviarCopiaSolicitante: boolVal('solicitudes_enviar_copia_solicitante', storedLocalConfig.enviarCopiaSolicitante, base.enviarCopiaSolicitante),
+    correoTitulo: strVal('solicitudes_correo_titulo', storedLocalConfig.correoTitulo, base.correoTitulo),
+    correoSubtitulo: strVal('solicitudes_correo_subtitulo', storedLocalConfig.correoSubtitulo, base.correoSubtitulo),
+    correoFooterTexto: strVal('solicitudes_correo_footer_texto', storedLocalConfig.correoFooterTexto, base.correoFooterTexto),
+
+    pdfTitulo: strVal('solicitudes_pdf_titulo', storedLocalConfig.pdfTitulo, base.pdfTitulo),
+    pdfDepartamento: strVal('solicitudes_pdf_departamento', storedLocalConfig.pdfDepartamento, base.pdfDepartamento),
+    pdfSubtitulo: strVal('solicitudes_pdf_subtitulo', storedLocalConfig.pdfSubtitulo, base.pdfSubtitulo),
+    pdfFontFamily: (strVal('solicitudes_pdf_font_family', storedLocalConfig.pdfFontFamily, base.pdfFontFamily) as CompraConfig['pdfFontFamily']),
+    pdfFontSize: (strVal('solicitudes_pdf_font_size', storedLocalConfig.pdfFontSize, base.pdfFontSize) as CompraConfig['pdfFontSize']),
+
+    pdfWatermark: boolVal('solicitudes_pdf_watermark', storedLocalConfig.pdfWatermark, base.pdfWatermark),
+    pdfWatermarkImgUrl: strAllowEmpty('solicitudes_pdf_watermark_img_url', storedLocalConfig.pdfWatermarkImgUrl, base.pdfWatermarkImgUrl),
+    pdfWatermarkText: strVal('solicitudes_pdf_watermark_text', storedLocalConfig.pdfWatermarkText, base.pdfWatermarkText),
+    pdfWatermarkOpacity: strVal('solicitudes_pdf_watermark_opacity', storedLocalConfig.pdfWatermarkOpacity, base.pdfWatermarkOpacity),
+    pdfWatermarkScale: strVal('solicitudes_pdf_watermark_scale', storedLocalConfig.pdfWatermarkScale, base.pdfWatermarkScale),
+    pdfWatermarkPosition: normalizePdfWatermarkPosition(
+      strVal('solicitudes_pdf_watermark_position', storedLocalConfig.pdfWatermarkPosition, base.pdfWatermarkPosition),
+      base.pdfWatermarkPosition
+    ),
+    pdfPiePagina: strVal('solicitudes_pdf_pie_pagina', storedLocalConfig.pdfPiePagina, base.pdfPiePagina),
+
+    pdfMostrarLogo: boolVal('solicitudes_pdf_mostrar_logo', storedLocalConfig.pdfMostrarLogo, base.pdfMostrarLogo),
+    pdfLogoUrl: strAllowEmpty('solicitudes_pdf_logo_url', storedLocalConfig.pdfLogoUrl, base.pdfLogoUrl),
+    pdfLogoPosicion: (strVal('solicitudes_pdf_logo_posicion', storedLocalConfig.pdfLogoPosicion, base.pdfLogoPosicion) as CompraConfig['pdfLogoPosicion']),
+    pdfLogoSize: (strVal('solicitudes_pdf_logo_size', storedLocalConfig.pdfLogoSize, base.pdfLogoSize) as CompraConfig['pdfLogoSize']),
+
+    pdfMostrarLogoSecundario: boolVal('solicitudes_pdf_mostrar_logo_secundario', storedLocalConfig.pdfMostrarLogoSecundario, base.pdfMostrarLogoSecundario),
+    pdfLogoSecundarioUrl: strAllowEmpty('solicitudes_pdf_logo_secundario_url', storedLocalConfig.pdfLogoSecundarioUrl, base.pdfLogoSecundarioUrl),
+    pdfLogoSecundarioPosicion: (strVal('solicitudes_pdf_logo_secundario_posicion', storedLocalConfig.pdfLogoSecundarioPosicion, base.pdfLogoSecundarioPosicion) as CompraConfig['pdfLogoSecundarioPosicion']),
+    pdfLogoSecundarioSize: (strVal('solicitudes_pdf_logo_secundario_size', storedLocalConfig.pdfLogoSecundarioSize, base.pdfLogoSecundarioSize) as CompraConfig['pdfLogoSecundarioSize']),
+
+    pdfMostrarSello: boolVal('solicitudes_pdf_mostrar_sello', storedLocalConfig.pdfMostrarSello, base.pdfMostrarSello),
+    pdfMostrarSelloImg: boolVal('solicitudes_pdf_mostrar_sello_img', storedLocalConfig.pdfMostrarSelloImg, base.pdfMostrarSelloImg),
+    pdfSelloImgUrl: strAllowEmpty('solicitudes_pdf_sello_img_url', storedLocalConfig.pdfSelloImgUrl, base.pdfSelloImgUrl),
+    pdfSelloImgPosicion: (strVal('solicitudes_pdf_sello_img_posicion', storedLocalConfig.pdfSelloImgPosicion, base.pdfSelloImgPosicion) as CompraConfig['pdfSelloImgPosicion']),
+    pdfSelloImgSize: (strVal('solicitudes_pdf_sello_img_size', storedLocalConfig.pdfSelloImgSize, base.pdfSelloImgSize) as CompraConfig['pdfSelloImgSize']),
+    pdfSelloTextoSuperior: strAllowEmpty('solicitudes_pdf_sello_texto_superior', storedLocalConfig.pdfSelloTextoSuperior, base.pdfSelloTextoSuperior || ''),
+    pdfSelloTextoInferior: strAllowEmpty('solicitudes_pdf_sello_texto_inferior', storedLocalConfig.pdfSelloTextoInferior, base.pdfSelloTextoInferior || ''),
+
+    pdfMostrarFooterImg: boolVal('solicitudes_pdf_mostrar_footer_img', storedLocalConfig.pdfMostrarFooterImg, base.pdfMostrarFooterImg),
+    pdfFooterImgUrl: strAllowEmpty('solicitudes_pdf_footer_img_url', storedLocalConfig.pdfFooterImgUrl, base.pdfFooterImgUrl),
+    pdfFooterImgPosicion: (strVal('solicitudes_pdf_footer_img_posicion', storedLocalConfig.pdfFooterImgPosicion, base.pdfFooterImgPosicion) as CompraConfig['pdfFooterImgPosicion']),
+    pdfFooterImgSize: (strVal('solicitudes_pdf_footer_img_size', storedLocalConfig.pdfFooterImgSize, base.pdfFooterImgSize) as CompraConfig['pdfFooterImgSize']),
+
+    pdfFirma1Titulo: strVal('solicitudes_pdf_firma1_titulo', storedLocalConfig.pdfFirma1Titulo, base.pdfFirma1Titulo),
+    pdfFirma1Subtitulo: strVal('solicitudes_pdf_firma1_subtitulo', storedLocalConfig.pdfFirma1Subtitulo, base.pdfFirma1Subtitulo),
+    pdfFirma2Titulo: strVal('solicitudes_pdf_firma2_titulo', storedLocalConfig.pdfFirma2Titulo, base.pdfFirma2Titulo),
+    pdfFirma2Subtitulo: strVal('solicitudes_pdf_firma2_subtitulo', storedLocalConfig.pdfFirma2Subtitulo, base.pdfFirma2Subtitulo),
+    pdfFirma3Titulo: strVal('solicitudes_pdf_firma3_titulo', storedLocalConfig.pdfFirma3Titulo, base.pdfFirma3Titulo),
+    pdfFirma3Subtitulo: strVal('solicitudes_pdf_firma3_subtitulo', storedLocalConfig.pdfFirma3Subtitulo, base.pdfFirma3Subtitulo),
+    pdfBloquesOrden: parsedBlocks,
+  };
+}
+
+export function serializeCompraConfigToEntries(cfg: CompraConfig): Array<{ clave: string; valor: string }> {
+  return [
+    { clave: 'solicitudes_correo_destino', valor: cfg.correoDestino || '' },
+    { clave: 'solicitudes_correo_remitente', valor: cfg.correoRemitente || '' },
+    { clave: 'solicitudes_correo_cc', valor: cfg.correoCcDefault || '' },
+    { clave: 'solicitudes_asunto_plantilla', valor: cfg.asuntoPlantilla || '' },
+    { clave: 'solicitudes_enviar_copia_solicitante', valor: String(cfg.enviarCopiaSolicitante) },
+    { clave: 'solicitudes_correo_titulo', valor: cfg.correoTitulo || '' },
+    { clave: 'solicitudes_correo_subtitulo', valor: cfg.correoSubtitulo || '' },
+    { clave: 'solicitudes_correo_footer_texto', valor: cfg.correoFooterTexto || '' },
+
+    { clave: 'solicitudes_pdf_titulo', valor: cfg.pdfTitulo || '' },
+    { clave: 'solicitudes_pdf_departamento', valor: cfg.pdfDepartamento || '' },
+    { clave: 'solicitudes_pdf_subtitulo', valor: cfg.pdfSubtitulo || '' },
+    { clave: 'solicitudes_pdf_font_family', valor: cfg.pdfFontFamily || 'sans' },
+    { clave: 'solicitudes_pdf_font_size', valor: cfg.pdfFontSize || 'normal' },
+
+    { clave: 'solicitudes_pdf_watermark', valor: String(cfg.pdfWatermark) },
+    { clave: 'solicitudes_pdf_watermark_img_url', valor: cfg.pdfWatermarkImgUrl || '' },
+    { clave: 'solicitudes_pdf_watermark_text', valor: cfg.pdfWatermarkText || '' },
+    { clave: 'solicitudes_pdf_watermark_opacity', valor: cfg.pdfWatermarkOpacity || '0.12' },
+    { clave: 'solicitudes_pdf_watermark_scale', valor: cfg.pdfWatermarkScale || '45' },
+    { clave: 'solicitudes_pdf_watermark_position', valor: cfg.pdfWatermarkPosition || 'center' },
+    { clave: 'solicitudes_pdf_pie_pagina', valor: cfg.pdfPiePagina || '' },
+
+    { clave: 'solicitudes_pdf_mostrar_logo', valor: String(cfg.pdfMostrarLogo) },
+    { clave: 'solicitudes_pdf_logo_url', valor: cfg.pdfLogoUrl || '' },
+    { clave: 'solicitudes_pdf_logo_posicion', valor: cfg.pdfLogoPosicion || 'left' },
+    { clave: 'solicitudes_pdf_logo_size', valor: cfg.pdfLogoSize || 'medium' },
+
+    { clave: 'solicitudes_pdf_mostrar_logo_secundario', valor: String(cfg.pdfMostrarLogoSecundario) },
+    { clave: 'solicitudes_pdf_logo_secundario_url', valor: cfg.pdfLogoSecundarioUrl || '' },
+    { clave: 'solicitudes_pdf_logo_secundario_posicion', valor: cfg.pdfLogoSecundarioPosicion || 'right' },
+    { clave: 'solicitudes_pdf_logo_secundario_size', valor: cfg.pdfLogoSecundarioSize || 'medium' },
+
+    { clave: 'solicitudes_pdf_mostrar_sello', valor: String(cfg.pdfMostrarSello) },
+    { clave: 'solicitudes_pdf_mostrar_sello_img', valor: String(cfg.pdfMostrarSelloImg) },
+    { clave: 'solicitudes_pdf_sello_img_url', valor: cfg.pdfSelloImgUrl || '' },
+    { clave: 'solicitudes_pdf_sello_img_posicion', valor: cfg.pdfSelloImgPosicion || 'center' },
+    { clave: 'solicitudes_pdf_sello_img_size', valor: cfg.pdfSelloImgSize || 'medium' },
+    { clave: 'solicitudes_pdf_sello_texto_superior', valor: cfg.pdfSelloTextoSuperior || '' },
+    { clave: 'solicitudes_pdf_sello_texto_inferior', valor: cfg.pdfSelloTextoInferior || '' },
+
+    { clave: 'solicitudes_pdf_mostrar_footer_img', valor: String(cfg.pdfMostrarFooterImg) },
+    { clave: 'solicitudes_pdf_footer_img_url', valor: cfg.pdfFooterImgUrl || '' },
+    { clave: 'solicitudes_pdf_footer_img_posicion', valor: cfg.pdfFooterImgPosicion || 'left' },
+    { clave: 'solicitudes_pdf_footer_img_size', valor: cfg.pdfFooterImgSize || 'medium' },
+
+    { clave: 'solicitudes_pdf_firma1_titulo', valor: cfg.pdfFirma1Titulo || '' },
+    { clave: 'solicitudes_pdf_firma1_subtitulo', valor: cfg.pdfFirma1Subtitulo || '' },
+    { clave: 'solicitudes_pdf_firma2_titulo', valor: cfg.pdfFirma2Titulo || '' },
+    { clave: 'solicitudes_pdf_firma2_subtitulo', valor: cfg.pdfFirma2Subtitulo || '' },
+    { clave: 'solicitudes_pdf_firma3_titulo', valor: cfg.pdfFirma3Titulo || '' },
+    { clave: 'solicitudes_pdf_firma3_subtitulo', valor: cfg.pdfFirma3Subtitulo || '' },
+    { clave: 'solicitudes_pdf_bloques_orden', valor: JSON.stringify(cfg.pdfBloquesOrden || DEFAULT_COMPRA_BLOCKS) },
+  ];
+}

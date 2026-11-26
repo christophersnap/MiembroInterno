@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Save, RotateCcw, Check, Type, FileText, Mail, Image as ImageIcon, 
   Sliders, Shield, Eye, GripVertical, ChevronUp, ChevronDown, 
@@ -7,6 +7,7 @@ import {
 import { CompraConfig, DEFAULT_COMPRA_CONFIG, DEFAULT_COMPRA_BLOCKS, CompraBlockItem } from '../../types/compra';
 import CompraPdfPreviewModal from './CompraPdfPreviewModal';
 import ImageUploadConfigCard from '../common/ImageUploadConfigCard';
+import PdfWatermarkConfigCard from '../common/PdfWatermarkConfigCard';
 
 interface CompraTemplateConfigProps {
   config: CompraConfig;
@@ -31,6 +32,21 @@ export default function CompraTemplateConfig({
         : DEFAULT_COMPRA_BLOCKS
     };
   });
+
+  useEffect(() => {
+    if (initialConfig) {
+      setCurrentConfig((prev) => ({
+        ...DEFAULT_COMPRA_CONFIG,
+        ...prev,
+        ...initialConfig,
+        pdfBloquesOrden: initialConfig?.pdfBloquesOrden?.length
+          ? initialConfig.pdfBloquesOrden
+          : prev.pdfBloquesOrden?.length
+            ? prev.pdfBloquesOrden
+            : DEFAULT_COMPRA_BLOCKS,
+      }));
+    }
+  }, [initialConfig]);
 
   const [activeSubTab, setActiveSubTab] = useState<'disenador' | 'imagenes' | 'pdf' | 'textos' | 'correo'>('disenador');
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -667,6 +683,20 @@ export default function CompraTemplateConfig({
               defaultPlaceholderText="Cintillo Oficial Cruz Verde"
               defaultLogoName="Sin imagen de pie por defecto"
             />
+
+            {/* 5. Marca de Agua de PDF */}
+            <PdfWatermarkConfigCard
+              enabled={currentConfig.pdfWatermark}
+              imageUrl={currentConfig.pdfWatermarkImgUrl || ''}
+              text={currentConfig.pdfWatermarkText || ''}
+              opacity={currentConfig.pdfWatermarkOpacity || '0.12'}
+              scale={currentConfig.pdfWatermarkScale || '45'}
+              position={currentConfig.pdfWatermarkPosition || 'center'}
+              storageFolder="compra"
+              documentLabel={currentConfig.pdfSubtitulo || 'SOLICITUD DE COMPRA'}
+              onChange={(patch) => setCurrentConfig((prev) => ({ ...prev, ...patch }))}
+              onAutoSave={(patch) => handleUpdateAndAutoSave(patch)}
+            />
           </div>
 
           {/* Información de almacenamiento SQL */}
@@ -812,49 +842,20 @@ export default function CompraTemplateConfig({
               />
             </div>
 
-            {/* Marca de Agua */}
+            {/* Marca de Agua de PDF (Imagen o Texto con Opacidad, Escala y Ubicación) */}
             <div className="md:col-span-2 pt-2 border-t border-gray-100">
-              <label className="inline-flex items-center space-x-2.5 cursor-pointer mb-3">
-                <input
-                  type="checkbox"
-                  checked={currentConfig.pdfWatermark}
-                  onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermark: e.target.checked })}
-                  className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
-                />
-                <span className="text-xs font-bold text-gray-800">
-                  Activar Marca de Agua Diagonal en Fondo del Documento
-                </span>
-              </label>
-
-              {currentConfig.pdfWatermark && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Texto de la Marca de Agua:
-                    </label>
-                    <input
-                      type="text"
-                      value={currentConfig.pdfWatermarkText}
-                      onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermarkText: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary outline-none font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Opacidad de la Marca de Agua (0.05 a 0.20):
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      max="0.5"
-                      value={currentConfig.pdfWatermarkOpacity}
-                      onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermarkOpacity: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary outline-none"
-                    />
-                  </div>
-                </div>
-              )}
+              <PdfWatermarkConfigCard
+                enabled={currentConfig.pdfWatermark}
+                imageUrl={currentConfig.pdfWatermarkImgUrl || ''}
+                text={currentConfig.pdfWatermarkText || ''}
+                opacity={currentConfig.pdfWatermarkOpacity || '0.12'}
+                scale={currentConfig.pdfWatermarkScale || '45'}
+                position={currentConfig.pdfWatermarkPosition || 'center'}
+                storageFolder="compra"
+                documentLabel={currentConfig.pdfSubtitulo || 'SOLICITUD DE COMPRA'}
+                onChange={(patch) => setCurrentConfig((prev) => ({ ...prev, ...patch }))}
+                onAutoSave={(patch) => handleUpdateAndAutoSave(patch)}
+              />
             </div>
 
           </div>

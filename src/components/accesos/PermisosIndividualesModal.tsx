@@ -442,6 +442,23 @@ export default function PermisosIndividualesModal({
     };
   });
 
+  const [extraSolicitudesEnProceso, setExtraSolicitudesEnProceso] = useState<
+    Record<CreateSolicitudModuleKey, number>
+  >(() => {
+    const raw = user.custom_permissions?._extra_solicitudes_en_proceso || {};
+    const parseVal = (v: any): number => {
+      if (v === undefined || v === null || v === '') return 0;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 0;
+      if (n < 0) return -1;
+      return Math.min(99, Math.floor(n));
+    };
+    return {
+      solicitudes_combustible: parseVal(raw.solicitudes_combustible),
+      solicitudes_compra: parseVal(raw.solicitudes_compra),
+    };
+  });
+
   const [secConfig, setSecConfig] = useState<SeccionalesSocorristasConfig>(() => {
     const raw = user.custom_permissions?._seccionales_socorristas;
     if (raw && (raw.mode === 'all' || raw.mode === 'custom' || raw.mode === 'default')) {
@@ -578,6 +595,19 @@ export default function PermisosIndividualesModal({
     setCreateSeccionales({
       solicitudes_combustible: parseSingleSec('solicitudes_combustible'),
       solicitudes_compra: parseSingleSec('solicitudes_compra'),
+    });
+
+    const srcExtra = srcCp._extra_solicitudes_en_proceso || {};
+    const parseExtraVal = (v: any): number => {
+      if (v === undefined || v === null || v === '') return 0;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 0;
+      if (n < 0) return -1;
+      return Math.min(99, Math.floor(n));
+    };
+    setExtraSolicitudesEnProceso({
+      solicitudes_combustible: parseExtraVal(srcExtra.solicitudes_combustible),
+      solicitudes_compra: parseExtraVal(srcExtra.solicitudes_compra),
     });
 
     const srcSecCfg = srcCp._seccionales_socorristas;
@@ -942,6 +972,7 @@ export default function PermisosIndividualesModal({
         _module_seccionales: moduleSeccionales,
         _create_scopes: createScopes,
         _create_seccionales: createSeccionales,
+        _extra_solicitudes_en_proceso: extraSolicitudesEnProceso,
         _seccionales_socorristas: secConfig,
       };
 
@@ -1785,6 +1816,92 @@ export default function PermisosIndividualesModal({
                                       </div>
                                     </div>
                                   )}
+
+                                {(mod.key === 'solicitudes_combustible' ||
+                                  mod.key === 'solicitudes_compra') &&
+                                  canCreate && (() => {
+                                    const cKey = mod.key as CreateSolicitudModuleKey;
+                                    const currentExtra = extraSolicitudesEnProceso[cKey] ?? 0;
+                                    const presets: { label: string; value: number }[] = [
+                                      { label: 'Ninguna', value: 0 },
+                                      { label: '+1', value: 1 },
+                                      { label: '+2', value: 2 },
+                                      { label: '+3', value: 3 },
+                                      { label: '+5', value: 5 },
+                                      { label: '+7', value: 7 },
+                                      { label: 'Sin límite', value: -1 },
+                                    ];
+                                    const summaryText =
+                                      currentExtra < 0
+                                        ? 'Sin límite · Puede enviar solicitudes aunque existan otras en proceso'
+                                        : currentExtra === 0
+                                        ? 'Ninguna adicional · Máx. 1 en proceso hasta finalizar la anterior'
+                                        : `Puede realizar ${currentExtra} ${
+                                            currentExtra === 1 ? 'solicitud más' : 'solicitudes más'
+                                          } teniendo una activa (máx. ${currentExtra + 1} en proceso)`;
+
+                                    return (
+                                      <div className="pt-2.5 border-t border-slate-200/70 space-y-2">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <span className="text-xs font-medium text-slate-700 block">
+                                              Solicitudes adicionales teniendo una en proceso
+                                            </span>
+                                            <span className="text-[11px] text-slate-500 block mt-0.5 tabular-nums">
+                                              {summaryText}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            <label className="text-[11px] text-slate-500 whitespace-nowrap">
+                                              Cantidad:
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min={0}
+                                              max={99}
+                                              disabled={currentExtra < 0}
+                                              value={currentExtra < 0 ? '' : currentExtra}
+                                              placeholder="∞"
+                                              onChange={(e) => {
+                                                const rawVal = e.target.value;
+                                                const parsed = rawVal === '' ? 0 : Math.max(0, Math.min(99, Math.floor(Number(rawVal) || 0)));
+                                                setExtraSolicitudesEnProceso((prev) => ({
+                                                  ...prev,
+                                                  [cKey]: parsed,
+                                                }));
+                                              }}
+                                              className="w-16 px-2.5 py-1 text-xs font-semibold text-center tabular-nums text-slate-900 bg-white border border-slate-200 rounded-lg outline-none focus:border-slate-400 disabled:bg-slate-100 disabled:text-slate-400"
+                                            />
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          {presets.map((preset) => {
+                                            const active = currentExtra === preset.value;
+                                            return (
+                                              <button
+                                                key={preset.label}
+                                                type="button"
+                                                onClick={() =>
+                                                  setExtraSolicitudesEnProceso((prev) => ({
+                                                    ...prev,
+                                                    [cKey]: preset.value,
+                                                  }))
+                                                }
+                                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 border ${
+                                                  active
+                                                    ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                                                }`}
+                                              >
+                                                {preset.label}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                               </div>
                             )}
 

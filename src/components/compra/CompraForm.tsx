@@ -37,6 +37,9 @@ interface CompraFormProps {
   userSeccionalNombre: string | null;
   userSeccionalId: number | null;
   submitting: boolean;
+  blockedByActive?: boolean;
+  blockedNotice?: React.ReactNode;
+  onSeccionalChange?: (seccional: { id: number | null; nombre: string }) => void;
   onSubmit: (data: {
     seccional_id?: number;
     seccional_nombre: string;
@@ -74,9 +77,13 @@ export default function CompraForm({
   userSeccionalNombre,
   userSeccionalId,
   submitting,
+  blockedByActive = false,
+  blockedNotice,
+  onSeccionalChange,
   onSubmit,
 }: CompraFormProps) {
   const allowSelectSeccional = canSelectAnySeccional ?? isAdmin;
+  const lastEmittedSecRef = useRef<string>('');
   const [seccionalId, setSeccionalId] = useState<string>(() => {
     if (userSeccionalId) {
       const match = seccionales.find((s) => Number(s.id) === Number(userSeccionalId));
@@ -113,6 +120,16 @@ export default function CompraForm({
   }, [allowSelectSeccional, userSeccionalId, userSeccionalNombre, seccionales, seccionalId]);
 
   const selectedSec = seccionales.find((s) => String(s.id) === seccionalId) || seccionales[0];
+
+  useEffect(() => {
+    if (!onSeccionalChange) return;
+    const resolvedId = selectedSec ? Number(selectedSec.id) : (userSeccionalId ? Number(userSeccionalId) : null);
+    const resolvedNombre = selectedSec ? selectedSec.nombre : (userSeccionalNombre || '');
+    const key = `${resolvedId ?? ''}::${resolvedNombre}`;
+    if (lastEmittedSecRef.current === key) return;
+    lastEmittedSecRef.current = key;
+    onSeccionalChange({ id: resolvedId, nombre: resolvedNombre });
+  }, [selectedSec, userSeccionalId, userSeccionalNombre, onSeccionalChange]);
 
   const getDirectorDisplay = () => {
     if (selectedSec) {
@@ -231,6 +248,7 @@ export default function CompraForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    if (blockedByActive) return;
 
     if (!seccionalId && seccionales.length > 0) {
       setFormError('Seleccione una seccional o dependencia.');
@@ -347,6 +365,8 @@ export default function CompraForm({
             </div>
           )}
         </div>
+
+        {blockedNotice}
 
         {formError && (
           <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2.5">
@@ -762,8 +782,8 @@ export default function CompraForm({
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              disabled={submitting || uploadingFiles}
-              className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              disabled={submitting || uploadingFiles || blockedByActive}
+              className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {submitting ? (
                 <>

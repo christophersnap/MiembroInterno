@@ -10,7 +10,12 @@ import {
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/logger';
 import { useAuth } from '../contexts/AuthContext';
-import { CompraConfig, DEFAULT_COMPRA_CONFIG } from '../types/compra';
+import {
+  CompraConfig,
+  DEFAULT_COMPRA_CONFIG,
+  parseCompraConfigFromMap,
+  serializeCompraConfigToEntries,
+} from '../types/compra';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
 import { useSolicitudReadTracker } from '../utils/solicitudReadTracker';
 import CompraTemplateConfig from '../components/compra/CompraTemplateConfig';
@@ -26,6 +31,13 @@ import {
   getElSalvadorDateTime,
   getElSalvadorIsoTimestamp,
 } from '../utils/dateUtils';
+import SolicitudEnProcesoModal from '../components/solicitudes/SolicitudEnProcesoModal';
+import {
+  SolicitudQuotaResult,
+  evaluateSolicitudQuota,
+  fetchActiveSolicitudesForSeccional,
+  isSolicitudFinalizada,
+} from '../utils/solicitudLimite';
 
 export interface SolicitudCompra {
   id: number;
@@ -84,7 +96,7 @@ const TIPOS_SOLICITUD = [
 
 export default function SolicitudesCompra() {
   const navigate = useNavigate();
-  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, loading: authLoading, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId, getExtraSolicitudesEnProceso } = useAuth();
   const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
@@ -92,6 +104,7 @@ export default function SolicitudesCompra() {
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_compra');
   const compraCreateScope = getCreateSolicitudScope('solicitudes_compra');
   const compraCreateSeccionalId = getCreateSolicitudSeccionalId('solicitudes_compra');
+  const extraCompraAllowed = getExtraSolicitudesEnProceso('solicitudes_compra');
   const canSelectAnySeccionalOnCreate = isAdmin || compraCreateScope === 'global';
   const canCreateCompra = isAdmin || (permissions.crear_solicitudes_compra ?? true);
   const hasNivelNacional = isAdmin || compraScope === 'global';
@@ -144,6 +157,17 @@ export default function SolicitudesCompra() {
   const [activeTab, setActiveTab] = useState<'lista' | 'nueva' | 'plantillas'>(
     canViewHistorial && (!canCreateCompra || isAdmin || hasNivelNacional) ? 'lista' : 'nueva'
   );
+
+  // Control de solicitudes activas en proceso por seccional
+  const [selectedFormSeccional, setSelectedFormSeccional] = useState<{ id: number | null; nombre: string } | null>(null);
+  const [activeQuota, setActiveQuota] = useState<SolicitudQuotaResult | null>(null);
+  const [showActiveLockModal, setShowActiveLockModal] = useState(false);
+
+  const handleFormSeccionalChange = React.useCallback((sec: { id: number | null; nombre: string }) => {
+    setSelectedFormSeccional((prev) =>
+      prev && prev.id === sec.id && prev.nombre === sec.nombre ? prev : sec
+    );
+  }, []);
 
   // Sincronizar pestaña inicial una vez que el contexto de autenticación termina de cargar
   const initialResolvedRef = useRef(false);
@@ -356,62 +380,15 @@ export default function SolicitudesCompra() {
           pdfPiePagina: confMap.solicitudes_pdf_pie_pagina || prev.pdfPiePagina
         }));
 
-        // Cargar bloques de configuración compra si existen
-        let parsedBlocks = DEFAULT_COMPRA_CONFIG.pdfBloquesOrden;
-        if (confMap.solicitudes_pdf_bloques_orden) {
-          try {
-            parsedBlocks = JSON.parse(confMap.solicitudes_pdf_bloques_orden);
-          } catch (e) {
-            console.warn('Error parsing stored bloques orden:', e);
-          }
+        let storedLocalCompra: Partial<CompraConfig> = {};
+        try {
+          const cached = localStorage.getItem('cruz_verde_compra_config');
+          if (cached) storedLocalCompra = JSON.parse(cached);
+        } catch {
+          // ignorar caché inválido
         }
 
-        setCompraConfig(prev => ({
-          ...prev,
-          correoDestino: confMap.solicitudes_correo_destino || prev.correoDestino,
-          correoRemitente: confMap.solicitudes_correo_remitente || prev.correoRemitente,
-          correoCcDefault: confMap.solicitudes_correo_cc || prev.correoCcDefault,
-          asuntoPlantilla: confMap.solicitudes_asunto_plantilla || prev.asuntoPlantilla,
-          enviarCopiaSolicitante: confMap.solicitudes_enviar_copia_solicitante !== 'false',
-          correoTitulo: confMap.solicitudes_correo_titulo || prev.correoTitulo,
-          correoSubtitulo: confMap.solicitudes_correo_subtitulo || prev.correoSubtitulo,
-          correoFooterTexto: confMap.solicitudes_correo_footer_texto || prev.correoFooterTexto,
-          pdfTitulo: confMap.solicitudes_pdf_titulo || prev.pdfTitulo,
-          pdfDepartamento: confMap.solicitudes_pdf_departamento || prev.pdfDepartamento,
-          pdfSubtitulo: confMap.solicitudes_pdf_subtitulo || prev.pdfSubtitulo,
-          pdfFontFamily: (confMap.solicitudes_pdf_font_family as any) || prev.pdfFontFamily,
-          pdfFontSize: (confMap.solicitudes_pdf_font_size as any) || prev.pdfFontSize,
-          pdfWatermark: confMap.solicitudes_pdf_watermark !== 'false',
-          pdfWatermarkText: confMap.solicitudes_pdf_watermark_text || prev.pdfWatermarkText,
-          pdfWatermarkOpacity: confMap.solicitudes_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
-          pdfPiePagina: confMap.solicitudes_pdf_pie_pagina || prev.pdfPiePagina,
-          pdfMostrarLogo: confMap.solicitudes_pdf_mostrar_logo !== 'false',
-          pdfLogoUrl: confMap.solicitudes_pdf_logo_url ?? prev.pdfLogoUrl,
-          pdfLogoPosicion: (confMap.solicitudes_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
-          pdfLogoSize: (confMap.solicitudes_pdf_logo_size as any) || prev.pdfLogoSize,
-          pdfMostrarLogoSecundario: confMap.solicitudes_pdf_mostrar_logo_secundario === 'true',
-          pdfLogoSecundarioUrl: confMap.solicitudes_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
-          pdfLogoSecundarioPosicion: (confMap.solicitudes_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
-          pdfLogoSecundarioSize: (confMap.solicitudes_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
-          pdfMostrarSello: confMap.solicitudes_pdf_mostrar_sello !== 'false',
-          pdfMostrarSelloImg: confMap.solicitudes_pdf_mostrar_sello_img === 'true',
-          pdfSelloImgUrl: confMap.solicitudes_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
-          pdfSelloImgPosicion: (confMap.solicitudes_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
-          pdfSelloImgSize: (confMap.solicitudes_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
-          pdfMostrarFooterImg: confMap.solicitudes_pdf_mostrar_footer_img === 'true',
-          pdfFooterImgUrl: confMap.solicitudes_pdf_footer_img_url ?? prev.pdfFooterImgUrl,
-          pdfFooterImgPosicion: (confMap.solicitudes_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
-          pdfFooterImgSize: (confMap.solicitudes_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
-          pdfSelloTextoSuperior: confMap.solicitudes_pdf_sello_texto_superior || prev.pdfSelloTextoSuperior,
-          pdfSelloTextoInferior: confMap.solicitudes_pdf_sello_texto_inferior || prev.pdfSelloTextoInferior,
-          pdfFirma1Titulo: confMap.solicitudes_pdf_firma1_titulo || prev.pdfFirma1Titulo,
-          pdfFirma1Subtitulo: confMap.solicitudes_pdf_firma1_subtitulo || prev.pdfFirma1Subtitulo,
-          pdfFirma2Titulo: confMap.solicitudes_pdf_firma2_titulo || prev.pdfFirma2Titulo,
-          pdfFirma2Subtitulo: confMap.solicitudes_pdf_firma2_subtitulo || prev.pdfFirma2Subtitulo,
-          pdfFirma3Titulo: confMap.solicitudes_pdf_firma3_titulo || prev.pdfFirma3Titulo,
-          pdfFirma3Subtitulo: confMap.solicitudes_pdf_firma3_subtitulo || prev.pdfFirma3Subtitulo,
-          pdfBloquesOrden: parsedBlocks
-        }));
+        setCompraConfig(prev => parseCompraConfigFromMap(confMap, storedLocalCompra, prev));
       }
 
       // 4. Cargar Solicitudes de Compra y Mantenimiento
@@ -514,51 +491,7 @@ export default function SolicitudesCompra() {
         pdfFirma3Subtitulo: newConfig.pdfFirma3Subtitulo
       }));
 
-      const entries = [
-        { clave: 'solicitudes_correo_destino', valor: newConfig.correoDestino },
-        { clave: 'solicitudes_correo_remitente', valor: newConfig.correoRemitente },
-        { clave: 'solicitudes_correo_cc', valor: newConfig.correoCcDefault },
-        { clave: 'solicitudes_asunto_plantilla', valor: newConfig.asuntoPlantilla },
-        { clave: 'solicitudes_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
-        { clave: 'solicitudes_correo_titulo', valor: newConfig.correoTitulo },
-        { clave: 'solicitudes_correo_subtitulo', valor: newConfig.correoSubtitulo },
-        { clave: 'solicitudes_correo_footer_texto', valor: newConfig.correoFooterTexto },
-        { clave: 'solicitudes_pdf_titulo', valor: newConfig.pdfTitulo },
-        { clave: 'solicitudes_pdf_departamento', valor: newConfig.pdfDepartamento },
-        { clave: 'solicitudes_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
-        { clave: 'solicitudes_pdf_font_family', valor: newConfig.pdfFontFamily },
-        { clave: 'solicitudes_pdf_font_size', valor: newConfig.pdfFontSize },
-        { clave: 'solicitudes_pdf_watermark', valor: String(newConfig.pdfWatermark) },
-        { clave: 'solicitudes_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
-        { clave: 'solicitudes_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
-        { clave: 'solicitudes_pdf_pie_pagina', valor: newConfig.pdfPiePagina },
-        { clave: 'solicitudes_pdf_mostrar_logo', valor: String(newConfig.pdfMostrarLogo) },
-        { clave: 'solicitudes_pdf_logo_url', valor: newConfig.pdfLogoUrl },
-        { clave: 'solicitudes_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion },
-        { clave: 'solicitudes_pdf_logo_size', valor: newConfig.pdfLogoSize },
-        { clave: 'solicitudes_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
-        { clave: 'solicitudes_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
-        { clave: 'solicitudes_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion },
-        { clave: 'solicitudes_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize },
-        { clave: 'solicitudes_pdf_mostrar_sello', valor: String(newConfig.pdfMostrarSello) },
-        { clave: 'solicitudes_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
-        { clave: 'solicitudes_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
-        { clave: 'solicitudes_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion },
-        { clave: 'solicitudes_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize },
-        { clave: 'solicitudes_pdf_mostrar_footer_img', valor: String(newConfig.pdfMostrarFooterImg) },
-        { clave: 'solicitudes_pdf_footer_img_url', valor: newConfig.pdfFooterImgUrl || '' },
-        { clave: 'solicitudes_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion },
-        { clave: 'solicitudes_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize },
-        { clave: 'solicitudes_pdf_sello_texto_superior', valor: newConfig.pdfSelloTextoSuperior },
-        { clave: 'solicitudes_pdf_sello_texto_inferior', valor: newConfig.pdfSelloTextoInferior },
-        { clave: 'solicitudes_pdf_firma1_titulo', valor: newConfig.pdfFirma1Titulo },
-        { clave: 'solicitudes_pdf_firma1_subtitulo', valor: newConfig.pdfFirma1Subtitulo },
-        { clave: 'solicitudes_pdf_firma2_titulo', valor: newConfig.pdfFirma2Titulo },
-        { clave: 'solicitudes_pdf_firma2_subtitulo', valor: newConfig.pdfFirma2Subtitulo },
-        { clave: 'solicitudes_pdf_firma3_titulo', valor: newConfig.pdfFirma3Titulo },
-        { clave: 'solicitudes_pdf_firma3_subtitulo', valor: newConfig.pdfFirma3Subtitulo },
-        { clave: 'solicitudes_pdf_bloques_orden', valor: JSON.stringify(newConfig.pdfBloquesOrden) }
-      ];
+      const entries = serializeCompraConfigToEntries(newConfig);
 
       // 1. Guardar en SQLite del Backend
       try {
@@ -905,6 +838,60 @@ NOTIFY pgrst, 'reload schema';`;
     }
   };
 
+  // Verificar si la seccional seleccionada ya tiene una solicitud de compra en proceso al abrir el formulario
+  useEffect(() => {
+    if (activeTab !== 'nueva' || !canCreateCompra) {
+      setShowActiveLockModal(false);
+      return;
+    }
+
+    const lockedId = !canSelectAnySeccionalOnCreate
+      ? (compraCreateSeccionalId || effectiveSeccionalId)
+      : userSeccionalId;
+    const lockedObj = lockedId ? seccionales.find((s) => Number(s.id) === Number(lockedId)) : null;
+
+    const targetId = selectedFormSeccional?.id ?? (lockedId ? Number(lockedId) : null);
+    const targetNombre =
+      (selectedFormSeccional?.nombre || '').trim() ||
+      (lockedObj?.nombre || userSeccionalNombre || '').trim();
+
+    if (!targetId && !targetNombre) {
+      setActiveQuota(null);
+      setShowActiveLockModal(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const activeItems = await fetchActiveSolicitudesForSeccional(
+        'compra',
+        targetId,
+        targetNombre,
+        solicitudes
+      );
+      if (cancelled) return;
+      const result = evaluateSolicitudQuota(activeItems, extraCompraAllowed);
+      setActiveQuota(result);
+      setShowActiveLockModal(result.blocked);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    canCreateCompra,
+    canSelectAnySeccionalOnCreate,
+    compraCreateSeccionalId,
+    effectiveSeccionalId,
+    userSeccionalId,
+    userSeccionalNombre,
+    seccionales,
+    selectedFormSeccional,
+    extraCompraAllowed,
+    solicitudes,
+  ]);
+
   // Crear solicitud desde el formulario limpio y simplificado CompraForm
   const handleCrearCompraFromForm = async (payloadData: {
     seccional_id?: number;
@@ -924,6 +911,21 @@ NOTIFY pgrst, 'reload schema';`;
   }) => {
     setSubmitting(true);
     try {
+      // Verificación estricta de solicitudes en proceso antes de registrar
+      const activeItems = await fetchActiveSolicitudesForSeccional(
+        'compra',
+        payloadData.seccional_id ?? null,
+        payloadData.seccional_nombre,
+        solicitudes
+      );
+      const quotaCheck = evaluateSolicitudQuota(activeItems, extraCompraAllowed);
+      setActiveQuota(quotaCheck);
+      if (quotaCheck.blocked) {
+        setShowActiveLockModal(true);
+        setSubmitting(false);
+        return;
+      }
+
       const infoFecha = getFechaHoraElSalvador();
       const lugarFechaStr = `San Salvador, ${infoFecha.fechaTexto} (${infoFecha.horaTexto})`;
 
@@ -1605,6 +1607,8 @@ Cruz Verde Salvadoreña`;
           : userSeccionalId;
         const lockedObj = lockedId ? seccionales.find(s => Number(s.id) === Number(lockedId)) : null;
         const resolvedSecNombre = lockedObj?.nombre || userSeccionalNombre;
+        const isBlocked = Boolean(activeQuota?.blocked);
+        const activeSecDisplay = selectedFormSeccional?.nombre || resolvedSecNombre || 'esta seccional';
 
         return (
           <CompraForm
@@ -1615,6 +1619,32 @@ Cruz Verde Salvadoreña`;
             userSeccionalNombre={resolvedSecNombre}
             userSeccionalId={lockedId}
             submitting={submitting}
+            blockedByActive={isBlocked}
+            onSeccionalChange={handleFormSeccionalChange}
+            blockedNotice={
+              isBlocked && activeQuota ? (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs min-w-0">
+                      <p className="font-semibold text-amber-950">
+                        Tiene una solicitud de compra en proceso ({activeSecDisplay})
+                      </p>
+                      <p className="text-amber-800 mt-0.5">
+                        Podrá realizar otra hasta que finalice la solicitud anterior ({activeQuota.activeCount} de {activeQuota.maxAllowed ?? 1} activas).
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowActiveLockModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-center"
+                  >
+                    Ver detalle
+                  </button>
+                </div>
+              ) : undefined
+            }
             onSubmit={handleCrearCompraFromForm}
           />
         );
@@ -1811,6 +1841,7 @@ Cruz Verde Salvadoreña`;
                   <tbody className="bg-white divide-y divide-gray-200">
                     {paginatedSolicitudes.map((sol) => {
                       const rowUnread = isUnread('compra', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
+                      const rowFinalizada = isSolicitudFinalizada(sol.estado);
                       return (
                         <tr
                           key={sol.id}
@@ -1820,6 +1851,8 @@ Cruz Verde Salvadoreña`;
                           className={`transition-colors ${
                             rowUnread
                               ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                              : rowFinalizada
+                              ? 'bg-emerald-50/75 hover:bg-emerald-100/65 border-l-4 border-l-emerald-500'
                               : 'bg-white hover:bg-gray-50/80 border-l-4 border-l-transparent'
                           }`}
                         >
@@ -2476,6 +2509,19 @@ Cruz Verde Salvadoreña`;
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL DE BLOQUEO POR SOLICITUD EN PROCESO */}
+      {activeQuota && (
+        <SolicitudEnProcesoModal
+          open={showActiveLockModal}
+          tipo="compra"
+          seccionalNombre={selectedFormSeccional?.nombre || userSeccionalNombre || 'Seccional'}
+          quota={activeQuota}
+          canViewHistorial={canViewHistorial}
+          onGoToHistorial={() => setActiveTab('lista')}
+          onClose={() => setShowActiveLockModal(false)}
+        />
       )}
 
     </div>

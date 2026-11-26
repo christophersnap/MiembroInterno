@@ -11,7 +11,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   SolicitudCombustible, 
   CombustibleConfig, 
-  DEFAULT_COMBUSTIBLE_CONFIG 
+  DEFAULT_COMBUSTIBLE_CONFIG,
+  parseCombustibleConfigFromMap,
+  serializeCombustibleConfigToEntries,
+  resolveCombustibleLogoUrl,
 } from '../types/combustible';
 import { isSolicitudRealizadaPorUsuario } from '../utils/solicitudFilter';
 import { useSolicitudReadTracker } from '../utils/solicitudReadTracker';
@@ -29,10 +32,17 @@ import {
   getElSalvadorIsoTimestamp,
 } from '../utils/dateUtils';
 import { getOfficialSolicitudPdfUrl } from '../utils/appUrl';
+import SolicitudEnProcesoModal from '../components/solicitudes/SolicitudEnProcesoModal';
+import {
+  SolicitudQuotaResult,
+  evaluateSolicitudQuota,
+  fetchActiveSolicitudesForSeccional,
+  isSolicitudFinalizada,
+} from '../utils/solicitudLimite';
 
 export default function SolicitudesCombustible() {
   const navigate = useNavigate();
-  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId } = useAuth();
+  const { user, userName, role, directorSeccionalId, userSeccionalId, userSeccionalNombre, permissions, getModuleScope, getModuleSeccionalIds, getCreateSolicitudScope, getCreateSolicitudSeccionalId, getExtraSolicitudesEnProceso } = useAuth();
   const { isUnread, markAsRead, markManyAsRead } = useSolicitudReadTracker(user?.id);
   const isAdmin = role === 'admin';
   const effectiveSeccionalId = directorSeccionalId || userSeccionalId;
@@ -40,6 +50,7 @@ export default function SolicitudesCombustible() {
   const allowedSeccionalIds = getModuleSeccionalIds('solicitudes_combustible');
   const combustibleCreateScope = getCreateSolicitudScope('solicitudes_combustible');
   const combustibleCreateSeccionalId = getCreateSolicitudSeccionalId('solicitudes_combustible');
+  const extraCombustibleAllowed = getExtraSolicitudesEnProceso('solicitudes_combustible');
   const canSelectAnySeccionalOnCreate = isAdmin || combustibleCreateScope === 'global';
   const canCreateCombustible = isAdmin || (permissions.crear_solicitudes_combustible ?? true);
   const hasNivelNacional = isAdmin || combustibleScope === 'global';
@@ -83,11 +94,23 @@ export default function SolicitudesCombustible() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [dbTableMissing, setDbTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Navegación de pestañas
   const [activeTab, setActiveTab] = useState<'formulario' | 'historial' | 'plantillas'>(
     canCreateCombustible ? 'formulario' : (canViewHistorial ? 'historial' : 'formulario')
   );
+
+  // Control de solicitudes activas en proceso por seccional
+  const [selectedFormSeccional, setSelectedFormSeccional] = useState<{ id: number | null; nombre: string } | null>(null);
+  const [activeQuota, setActiveQuota] = useState<SolicitudQuotaResult | null>(null);
+  const [showActiveLockModal, setShowActiveLockModal] = useState(false);
+
+  const handleFormSeccionalChange = React.useCallback((sec: { id: number | null; nombre: string }) => {
+    setSelectedFormSeccional((prev) =>
+      prev && prev.id === sec.id && prev.nombre === sec.nombre ? prev : sec
+    );
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'formulario' && !canCreateCombustible && canViewHistorial) {
@@ -201,7 +224,7 @@ NOTIFY pgrst, 'reload schema';`;
         if (apiRes.ok) {
           const apiJson = await apiRes.json();
           Object.entries(apiJson).forEach(([k, v]) => {
-            if (k.startsWith('combustible_')) {
+            if (k.startsWith('combustible_') || k === 'email_template_logo') {
               confMap[k] = String(v);
             }
           });
@@ -213,72 +236,19 @@ NOTIFY pgrst, 'reload schema';`;
         const { data: confData } = await supabase
           .from('configuracion')
           .select('*')
-          .like('clave', 'combustible_%');
+          .or('clave.like.combustible_%,clave.eq.email_template_logo');
 
         if (confData && confData.length > 0) {
-          confData.forEach(c => { confMap[c.clave] = c.valor; });
+          confData.forEach(c => {
+            if (c.clave && c.valor !== null && c.valor !== undefined) {
+              confMap[c.clave] = String(c.valor);
+            }
+          });
         }
       } catch (e) {}
 
       if (Object.keys(confMap).length > 0 || Object.keys(storedLocalConfig).length > 0) {
-        setConfig(prev => ({
-          ...prev,
-          ...storedLocalConfig,
-          correoDestino: confMap.combustible_correo_destino || storedLocalConfig.correoDestino || prev.correoDestino,
-          correoCcDefault: confMap.combustible_correo_cc || storedLocalConfig.correoCcDefault || prev.correoCcDefault,
-          correoContactoTelefono: confMap.combustible_correo_contacto_telefono || storedLocalConfig.correoContactoTelefono || prev.correoContactoTelefono,
-          asuntoPlantilla: confMap.combustible_correo_asunto_plantilla || storedLocalConfig.asuntoPlantilla || prev.asuntoPlantilla,
-          enviarCopiaSolicitante: confMap.combustible_correo_enviar_copia_solicitante !== undefined 
-            ? confMap.combustible_correo_enviar_copia_solicitante !== 'false' 
-            : (storedLocalConfig.enviarCopiaSolicitante !== undefined ? storedLocalConfig.enviarCopiaSolicitante : prev.enviarCopiaSolicitante),
-          correoTitulo: confMap.combustible_correo_titulo || storedLocalConfig.correoTitulo || prev.correoTitulo,
-          correoSubtitulo: confMap.combustible_correo_subtitulo || storedLocalConfig.correoSubtitulo || prev.correoSubtitulo,
-          correoFooterTexto: confMap.combustible_correo_footer_texto || storedLocalConfig.correoFooterTexto || prev.correoFooterTexto,
-
-          pdfTitulo: confMap.combustible_pdf_titulo || prev.pdfTitulo,
-          pdfSubtitulo: confMap.combustible_pdf_subtitulo || prev.pdfSubtitulo,
-          pdfFontFamily: (confMap.combustible_pdf_font_family as any) || prev.pdfFontFamily,
-          pdfFontSize: (confMap.combustible_pdf_font_size as any) || prev.pdfFontSize,
-          pdfCodigoFormulario: confMap.combustible_pdf_codigo_formulario || prev.pdfCodigoFormulario,
-          pdfWatermark: confMap.combustible_pdf_watermark !== 'false',
-          pdfWatermarkText: confMap.combustible_pdf_watermark_text || prev.pdfWatermarkText,
-          pdfWatermarkOpacity: confMap.combustible_pdf_watermark_opacity || prev.pdfWatermarkOpacity,
-
-          pdfMostrarLogoHeader: confMap.combustible_pdf_mostrar_logo_header !== 'false',
-          pdfLogoHeaderUrl: confMap.combustible_pdf_logo_header_url ?? prev.pdfLogoHeaderUrl,
-          pdfLogoPosicion: (confMap.combustible_pdf_logo_posicion as any) || prev.pdfLogoPosicion,
-          pdfLogoSize: (confMap.combustible_pdf_logo_size as any) || prev.pdfLogoSize,
-          pdfMostrarLogoSecundario: confMap.combustible_pdf_mostrar_logo_secundario === 'true',
-          pdfLogoSecundarioUrl: confMap.combustible_pdf_logo_secundario_url ?? prev.pdfLogoSecundarioUrl,
-          pdfLogoSecundarioPosicion: (confMap.combustible_pdf_logo_secundario_posicion as any) || prev.pdfLogoSecundarioPosicion,
-          pdfLogoSecundarioSize: (confMap.combustible_pdf_logo_secundario_size as any) || prev.pdfLogoSecundarioSize,
-          pdfMostrarSelloImg: confMap.combustible_pdf_mostrar_sello_img === 'true',
-          pdfSelloImgUrl: confMap.combustible_pdf_sello_img_url ?? prev.pdfSelloImgUrl,
-          pdfSelloImgPosicion: (confMap.combustible_pdf_sello_img_posicion as any) || prev.pdfSelloImgPosicion,
-          pdfSelloImgSize: (confMap.combustible_pdf_sello_img_size as any) || prev.pdfSelloImgSize,
-          pdfMostrarLogoFooter: confMap.combustible_pdf_mostrar_logo_footer !== 'false',
-          pdfLogoFooterUrl: confMap.combustible_pdf_logo_footer_url ?? prev.pdfLogoFooterUrl,
-          pdfFooterImgPosicion: (confMap.combustible_pdf_footer_img_posicion as any) || prev.pdfFooterImgPosicion,
-          pdfFooterImgSize: (confMap.combustible_pdf_footer_img_size as any) || prev.pdfFooterImgSize,
-
-          pdfLabelSolicitante: confMap.combustible_pdf_label_solicitante || prev.pdfLabelSolicitante,
-          pdfLabelSeccional: confMap.combustible_pdf_label_seccional || prev.pdfLabelSeccional,
-          pdfLabelDirector: confMap.combustible_pdf_label_director || prev.pdfLabelDirector,
-          pdfLabelActividad: confMap.combustible_pdf_label_actividad || prev.pdfLabelActividad,
-          pdfLabelCorreo: confMap.combustible_pdf_label_correo || prev.pdfLabelCorreo,
-          pdfLabelContacto: confMap.combustible_pdf_label_contacto || prev.pdfLabelContacto,
-          pdfLabelLiquidacion: confMap.combustible_pdf_label_liquidacion || prev.pdfLabelLiquidacion,
-          pdfLabelMotivo: confMap.combustible_pdf_label_motivo || prev.pdfLabelMotivo,
-          pdfLabelObservaciones: confMap.combustible_pdf_label_observaciones || prev.pdfLabelObservaciones,
-
-          pdfLabelFirmaSolicitante: confMap.combustible_pdf_label_firma_solicitante || prev.pdfLabelFirmaSolicitante,
-          pdfLabelFirmaAdmin: confMap.combustible_pdf_label_firma_admin || prev.pdfLabelFirmaAdmin,
-          pdfLabelDui: confMap.combustible_pdf_label_dui || prev.pdfLabelDui,
-          pdfLabelFecha: confMap.combustible_pdf_label_fecha || prev.pdfLabelFecha,
-          pdfLabelFirmaSello: confMap.combustible_pdf_label_firma_sello || prev.pdfLabelFirmaSello,
-          pdfLabelAutoriza: confMap.combustible_pdf_label_autoriza || prev.pdfLabelAutoriza,
-          pdfLabelFechaAuto: confMap.combustible_pdf_label_fecha_auto || prev.pdfLabelFechaAuto
-        }));
+        setConfig(prev => parseCombustibleConfigFromMap(confMap, storedLocalConfig, prev));
       }
 
       // C. Cargar Solicitudes de Combustible
@@ -326,16 +296,85 @@ NOTIFY pgrst, 'reload schema';`;
     fetchData();
   }, [isAdmin, combustibleScope, allowedSecKey, effectiveSeccionalId, userSeccionalNombre, user?.email, user?.id, userName]);
 
+  // Verificar si la seccional seleccionada ya tiene solicitud en proceso al entrar al formulario
+  useEffect(() => {
+    if (activeTab !== 'formulario' || !canCreateCombustible) {
+      setShowActiveLockModal(false);
+      return;
+    }
+
+    const lockedId = !canSelectAnySeccionalOnCreate
+      ? (combustibleCreateSeccionalId || effectiveSeccionalId)
+      : effectiveSeccionalId;
+    const lockedObj = lockedId ? seccionales.find((s) => Number(s.id) === Number(lockedId)) : null;
+
+    const targetId = selectedFormSeccional?.id ?? (!canSelectAnySeccionalOnCreate ? (lockedId ? Number(lockedId) : null) : null);
+    const targetNombre =
+      (selectedFormSeccional?.nombre || '').trim() ||
+      (!canSelectAnySeccionalOnCreate ? (lockedObj?.nombre || userSeccionalNombre || '').trim() : '');
+
+    if (!targetId && !targetNombre) {
+      setActiveQuota(null);
+      setShowActiveLockModal(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const activeItems = await fetchActiveSolicitudesForSeccional(
+        'combustible',
+        targetId,
+        targetNombre,
+        solicitudes
+      );
+      if (cancelled) return;
+      const result = evaluateSolicitudQuota(activeItems, extraCombustibleAllowed);
+      setActiveQuota(result);
+      setShowActiveLockModal(result.blocked);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    canCreateCombustible,
+    canSelectAnySeccionalOnCreate,
+    combustibleCreateSeccionalId,
+    effectiveSeccionalId,
+    userSeccionalNombre,
+    seccionales,
+    selectedFormSeccional,
+    extraCombustibleAllowed,
+    solicitudes,
+  ]);
+
   // 2. Manejar envío de formulario
   const handleSubmitForm = async (formData: Omit<SolicitudCombustible, 'id' | 'folio' | 'estado' | 'created_at'>) => {
     setSubmitting(true);
+    setActionError(null);
     try {
+      // Verificación estricta de solicitudes en proceso antes de registrar
+      const activeItems = await fetchActiveSolicitudesForSeccional(
+        'combustible',
+        formData.seccional_id ?? null,
+        formData.seccional_nombre,
+        solicitudes
+      );
+      const quotaCheck = evaluateSolicitudQuota(activeItems, extraCombustibleAllowed);
+      setActiveQuota(quotaCheck);
+      if (quotaCheck.blocked) {
+        setShowActiveLockModal(true);
+        setSubmitting(false);
+        return;
+      }
+
       const svTime = getElSalvadorDateTime();
       const randomNum = Math.floor(1000 + Math.random() * 9000);
       const folioGenerado = `COMB-${svTime.year}-${randomNum}`;
-      const horaStr = svTime.hora24;
+      const horaStr = svTime.hora12;
       const fechaStr = svTime.fechaISO; // Formato YYYY-MM-DD según día en El Salvador
-      const fechaCompletaStr = `${svTime.fechaSV} ${svTime.hora12}`;
+      const fechaCompletaStr = `${svTime.fechaSV} · ${svTime.hora12}`;
 
       // Determinar destinatarios efectivos respetando la configuración guardada
       let activeCorreoDestino = config.correoDestino;
@@ -368,7 +407,7 @@ NOTIFY pgrst, 'reload schema';`;
       }
       const correosUnicos = Array.from(new Set(correosArr.filter(Boolean)));
 
-      const payload = {
+      const payload: Record<string, any> = {
         ...formData,
         folio: folioGenerado,
         fecha_solicitud: fechaStr,
@@ -376,7 +415,9 @@ NOTIFY pgrst, 'reload schema';`;
         fecha_envio_completa: fechaCompletaStr,
         estado: 'Pendiente' as const,
         correo_enviado: true,
-        correos_notificados: correosUnicos.join(', ')
+        correos_notificados: correosUnicos.join(', '),
+        created_at: svTime.isoTimestamp,
+        updated_at: svTime.isoTimestamp,
       };
 
       let newRecord: SolicitudCombustible;
@@ -384,32 +425,55 @@ NOTIFY pgrst, 'reload schema';`;
       if (dbTableMissing) {
         newRecord = {
           id: Date.now(),
-          ...payload,
-          created_at: getElSalvadorIsoTimestamp()
+          ...(payload as any),
         };
         const updatedList = [newRecord, ...solicitudes];
         setSolicitudes(updatedList);
         sessionStorage.setItem('cruz_verde_solicitudes_combustible', JSON.stringify(updatedList));
       } else {
-        const { data, error: insErr } = await supabase
+        let insertRes = await supabase
           .from('solicitudes_combustible')
           .insert([payload])
           .select()
           .single();
 
-        if (insErr) {
-          console.warn('Error insertando en Supabase, guardando localmente:', insErr);
+        // Si alguna columna opcional aún no existe en Supabase (antes de migración 58), reintentar con columnas base
+        if (insertRes.error && /column .* does not exist|schema cache/i.test(insertRes.error.message || '')) {
+          const {
+            vehiculo_marca: _vm,
+            vehiculo_modelo: _vmo,
+            vehiculo_placa: _vp,
+            tipo_combustible: _tc,
+            galones_solicitados: _gs,
+            cantidad_dinero: _cd,
+            ...basePayload
+          } = payload;
+          insertRes = await supabase
+            .from('solicitudes_combustible')
+            .insert([basePayload])
+            .select()
+            .single();
+        }
+
+        if (insertRes.error) {
+          console.warn('Error insertando en Supabase, guardando localmente:', insertRes.error);
           setDbTableMissing(true);
           newRecord = {
             id: Date.now(),
-            ...payload,
-            created_at: getElSalvadorIsoTimestamp()
+            ...(payload as any),
           };
           const updatedList = [newRecord, ...solicitudes];
           setSolicitudes(updatedList);
           sessionStorage.setItem('cruz_verde_solicitudes_combustible', JSON.stringify(updatedList));
         } else {
-          newRecord = data;
+          newRecord = {
+            ...insertRes.data,
+            vehiculo_marca: insertRes.data.vehiculo_marca ?? formData.vehiculo_marca,
+            vehiculo_placa: insertRes.data.vehiculo_placa ?? formData.vehiculo_placa,
+            tipo_combustible: insertRes.data.tipo_combustible ?? formData.tipo_combustible,
+            galones_solicitados: insertRes.data.galones_solicitados ?? formData.galones_solicitados,
+            cantidad_dinero: insertRes.data.cantidad_dinero ?? formData.cantidad_dinero,
+          };
           await fetchData();
         }
       }
@@ -422,7 +486,7 @@ NOTIFY pgrst, 'reload schema';`;
         fecha_sv: fechaStr
       });
 
-      // Enviar notificación automática por correo SMTP (Hostinger / Servidor)
+      // Enviar notificación automática por correo SMTP
       try {
         const asuntoGenerado = (config.asuntoPlantilla || 'Solicitud de Combustible: {folio} - {seccional}')
           .replace('{folio}', folioGenerado)
@@ -433,23 +497,51 @@ NOTIFY pgrst, 'reload schema';`;
           .replace('[FECHA]', svTime.fechaSV)
           .replace('[SOLICITANTE]', formData.nombre_solicitante);
 
-        const htmlEmail = generarHtmlCorreoCombustible({
-          folio: folioGenerado,
-          codigoSolicitud: folioGenerado,
-          seccional: formData.seccional_nombre,
-          seccionalNombre: formData.seccional_nombre,
-          solicitante: formData.nombre_solicitante,
-          telefonoSolicitante: formData.telefono_solicitante,
-          correoSolicitante: formData.correo_electronico,
-          actividad: formData.actividad,
-          entregoLiquidacionAnterior: !!formData.entrego_liquidacion_anterior,
-          motivoNoLiquidacion: formData.motivo_no_liquidacion,
-          fecha: svTime.fechaSV,
-          fechaEnvio: fechaCompletaStr,
-          asunto: asuntoGenerado,
-          nombreArchivoPdf: `${folioGenerado}.pdf`,
-          pdfUrl: getOfficialSolicitudPdfUrl('combustible', folioGenerado)
-        });
+        const resolvedLogoUrl = resolveCombustibleLogoUrl(config);
+        const vehiculoDisplay = [formData.vehiculo_marca, formData.vehiculo_modelo].filter(Boolean).join(' ').trim();
+
+        const htmlEmail = generarHtmlCorreoCombustible(
+          {
+            remitenteNombre: 'Cruz Verde Salvadoreña (No Responder)',
+            remitenteCorreo: 'notificaciones@cruzverdesv.org',
+            destinatarioCorreo: correosUnicos.join(', '),
+            destinatarioNombre: formData.nombre_solicitante,
+            asunto: asuntoGenerado,
+            seccionalNombre: formData.seccional_nombre,
+            numeroSolicitud: folioGenerado,
+          },
+          {
+            codigoSolicitud: folioGenerado,
+            folio: folioGenerado,
+            seccional: formData.seccional_nombre,
+            seccionalNombre: formData.seccional_nombre,
+            director: formData.director_nombre,
+            solicitante: formData.nombre_solicitante,
+            telefonoSolicitante: formData.telefono_solicitante,
+            correoSolicitante: formData.correo_electronico,
+            actividad: formData.actividad,
+            entregoLiquidacionAnterior: !!formData.entrego_liquidacion_anterior,
+            motivoNoLiquidacion: formData.motivo_no_liquidacion,
+            observaciones: formData.observaciones,
+            vehiculo: vehiculoDisplay || undefined,
+            placa: formData.vehiculo_placa || undefined,
+            tipoCombustible: formData.tipo_combustible || undefined,
+            galonesSolicitados: formData.galones_solicitados,
+            cantidadDinero: formData.cantidad_dinero,
+            fecha: svTime.fechaSV,
+            fechaEnvio: fechaCompletaStr,
+            nombreArchivoPdf: `Solicitud_Combustible_${folioGenerado}.pdf`,
+            pdfUrl: getOfficialSolicitudPdfUrl('combustible', folioGenerado),
+            logoUrl: resolvedLogoUrl || undefined,
+            subtituloSecundario: config.pdfSubtituloSecundario || 'Documento Oficial Administrativo',
+            mostrarVehiculo: config.mostrarVehiculo,
+            mostrarPlaca: config.mostrarPlaca,
+            mostrarGalones: config.mostrarGalones,
+            mostrarTipoGasolina: config.mostrarTipoGasolina,
+            mostrarCantidadDinero: config.mostrarCantidadDinero,
+          },
+          resolvedLogoUrl ? { logoUrl: resolvedLogoUrl, mostrarLogo: true } : undefined
+        );
 
         await sendEmailNotification({
           destinatario: correosUnicos.join(', '),
@@ -463,14 +555,13 @@ NOTIFY pgrst, 'reload schema';`;
         console.warn('[COMBUSTIBLE] Aviso al despachar correo automático:', mailErr);
       }
 
-      // Mostrar modal de confirmación con el acuse de recibo
       setLastSubmittedSolicitud(newRecord);
       setShowCelebrationModal(true);
       window.dispatchEvent(new Event('solicitudes_updated'));
 
     } catch (err: any) {
       console.error('Error guardando solicitud de combustible:', err);
-      alert(`Error al guardar solicitud: ${err.message || 'Error desconocido'}`);
+      setActionError(`Error al guardar solicitud: ${err.message || 'Error desconocido'}`);
     } finally {
       setSubmitting(false);
     }
@@ -487,56 +578,7 @@ NOTIFY pgrst, 'reload schema';`;
         console.warn('localStorage quota excedida para combustible_config, omitiendo guardado local:', storageErr);
       }
 
-      const entries = [
-        { clave: 'combustible_correo_destino', valor: newConfig.correoDestino },
-        { clave: 'combustible_correo_cc', valor: newConfig.correoCcDefault },
-        { clave: 'combustible_correo_contacto_telefono', valor: newConfig.correoContactoTelefono },
-        { clave: 'combustible_correo_asunto_plantilla', valor: newConfig.asuntoPlantilla },
-        { clave: 'combustible_correo_enviar_copia_solicitante', valor: String(newConfig.enviarCopiaSolicitante) },
-        { clave: 'combustible_correo_titulo', valor: newConfig.correoTitulo },
-        { clave: 'combustible_correo_subtitulo', valor: newConfig.correoSubtitulo },
-        { clave: 'combustible_correo_footer_texto', valor: newConfig.correoFooterTexto },
-        { clave: 'combustible_pdf_titulo', valor: newConfig.pdfTitulo },
-        { clave: 'combustible_pdf_subtitulo', valor: newConfig.pdfSubtitulo },
-        { clave: 'combustible_pdf_font_family', valor: newConfig.pdfFontFamily },
-        { clave: 'combustible_pdf_font_size', valor: newConfig.pdfFontSize },
-        { clave: 'combustible_pdf_codigo_formulario', valor: newConfig.pdfCodigoFormulario },
-        { clave: 'combustible_pdf_watermark', valor: String(newConfig.pdfWatermark) },
-        { clave: 'combustible_pdf_watermark_text', valor: newConfig.pdfWatermarkText },
-        { clave: 'combustible_pdf_watermark_opacity', valor: newConfig.pdfWatermarkOpacity },
-        { clave: 'combustible_pdf_mostrar_logo_header', valor: String(newConfig.pdfMostrarLogoHeader) },
-        { clave: 'combustible_pdf_logo_header_url', valor: newConfig.pdfLogoHeaderUrl || '' },
-        { clave: 'combustible_pdf_logo_posicion', valor: newConfig.pdfLogoPosicion || 'left' },
-        { clave: 'combustible_pdf_logo_size', valor: newConfig.pdfLogoSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_logo_secundario', valor: String(newConfig.pdfMostrarLogoSecundario) },
-        { clave: 'combustible_pdf_logo_secundario_url', valor: newConfig.pdfLogoSecundarioUrl || '' },
-        { clave: 'combustible_pdf_logo_secundario_posicion', valor: newConfig.pdfLogoSecundarioPosicion || 'right' },
-        { clave: 'combustible_pdf_logo_secundario_size', valor: newConfig.pdfLogoSecundarioSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_sello_img', valor: String(newConfig.pdfMostrarSelloImg) },
-        { clave: 'combustible_pdf_sello_img_url', valor: newConfig.pdfSelloImgUrl || '' },
-        { clave: 'combustible_pdf_sello_img_posicion', valor: newConfig.pdfSelloImgPosicion || 'center' },
-        { clave: 'combustible_pdf_sello_img_size', valor: newConfig.pdfSelloImgSize || 'medium' },
-        { clave: 'combustible_pdf_mostrar_logo_footer', valor: String(newConfig.pdfMostrarLogoFooter) },
-        { clave: 'combustible_pdf_logo_footer_url', valor: newConfig.pdfLogoFooterUrl || '' },
-        { clave: 'combustible_pdf_footer_img_posicion', valor: newConfig.pdfFooterImgPosicion || 'center' },
-        { clave: 'combustible_pdf_footer_img_size', valor: newConfig.pdfFooterImgSize || 'medium' },
-        { clave: 'combustible_pdf_label_solicitante', valor: newConfig.pdfLabelSolicitante },
-        { clave: 'combustible_pdf_label_seccional', valor: newConfig.pdfLabelSeccional },
-        { clave: 'combustible_pdf_label_director', valor: newConfig.pdfLabelDirector },
-        { clave: 'combustible_pdf_label_actividad', valor: newConfig.pdfLabelActividad },
-        { clave: 'combustible_pdf_label_correo', valor: newConfig.pdfLabelCorreo },
-        { clave: 'combustible_pdf_label_contacto', valor: newConfig.pdfLabelContacto },
-        { clave: 'combustible_pdf_label_liquidacion', valor: newConfig.pdfLabelLiquidacion },
-        { clave: 'combustible_pdf_label_motivo', valor: newConfig.pdfLabelMotivo },
-        { clave: 'combustible_pdf_label_observaciones', valor: newConfig.pdfLabelObservaciones },
-        { clave: 'combustible_pdf_label_firma_solicitante', valor: newConfig.pdfLabelFirmaSolicitante },
-        { clave: 'combustible_pdf_label_firma_admin', valor: newConfig.pdfLabelFirmaAdmin },
-        { clave: 'combustible_pdf_label_dui', valor: newConfig.pdfLabelDui },
-        { clave: 'combustible_pdf_label_fecha', valor: newConfig.pdfLabelFecha },
-        { clave: 'combustible_pdf_label_firma_sello', valor: newConfig.pdfLabelFirmaSello },
-        { clave: 'combustible_pdf_label_autoriza', valor: newConfig.pdfLabelAutoriza },
-        { clave: 'combustible_pdf_label_fecha_auto', valor: newConfig.pdfLabelFechaAuto }
-      ];
+      const entries = serializeCombustibleConfigToEntries(newConfig);
 
       // 1. Guardar en SQLite del Backend
       try {
@@ -606,7 +648,7 @@ NOTIFY pgrst, 'reload schema';`;
       setShowStatusModal(false);
 
     } catch (err: any) {
-      alert(`Error al actualizar estado: ${err.message}`);
+      setActionError(`Error al actualizar estado: ${err.message}`);
     } finally {
       setUpdatingStatus(false);
     }
@@ -655,6 +697,22 @@ NOTIFY pgrst, 'reload schema';`;
 
   return (
     <div className="space-y-6">
+
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex items-center justify-between gap-3 text-xs text-red-900">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span className="font-semibold">{actionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-800 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       
       {/* Banner de Ayuda si falta la tabla en Supabase */}
       {dbTableMissing && (
@@ -782,6 +840,8 @@ NOTIFY pgrst, 'reload schema';`;
         const lockedObj = lockedId ? seccionales.find(s => Number(s.id) === Number(lockedId)) : null;
         const resolvedSecNombre = lockedObj?.nombre || userSeccionalNombre;
         const resolvedDirector = lockedObj?.director || (resolvedSecNombre ? seccionales.find(s => s.nombre.toLowerCase() === resolvedSecNombre.toLowerCase())?.director : undefined) || 'Director Seccional';
+        const isBlocked = Boolean(activeQuota?.blocked);
+        const activeSecDisplay = selectedFormSeccional?.nombre || resolvedSecNombre || 'esta seccional';
 
         return (
           <CombustibleForm
@@ -793,7 +853,34 @@ NOTIFY pgrst, 'reload schema';`;
             defaultDirector={resolvedDirector}
             defaultEmail={user?.email || ''}
             defaultSolicitante={userName && userName !== 'Usuario' ? userName : ''}
+            config={config}
             submitting={submitting}
+            blockedByActive={isBlocked}
+            onSeccionalChange={handleFormSeccionalChange}
+            blockedNotice={
+              isBlocked && activeQuota ? (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs min-w-0">
+                      <p className="font-semibold text-amber-950">
+                        Tiene una solicitud de combustible en proceso ({activeSecDisplay})
+                      </p>
+                      <p className="text-amber-800 mt-0.5">
+                        Podrá realizar otra hasta que finalice la solicitud anterior ({activeQuota.activeCount} de {activeQuota.maxAllowed ?? 1} activas).
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowActiveLockModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-center"
+                  >
+                    Ver detalle
+                  </button>
+                </div>
+              ) : undefined
+            }
             onSubmit={handleSubmitForm}
           />
         );
@@ -839,11 +926,12 @@ NOTIFY pgrst, 'reload schema';`;
                 className="px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white font-medium"
               >
                 <option value="Todos">Todos los Estados</option>
-                <option value="Pendiente">🟡 Pendiente</option>
-                <option value="Aprobada">🟢 Aprobada</option>
-                <option value="En Proceso">🔵 En Proceso</option>
-                <option value="Rechazada">🔴 Rechazada</option>
-                <option value="Entregada">⚪ Entregada</option>
+                <option value="Pendiente">Pendiente</option>
+                <option value="Aprobada">Aprobada</option>
+                <option value="En Proceso">En Proceso</option>
+                <option value="Finalizada">Finalizada</option>
+                <option value="Entregada">Entregada</option>
+                <option value="Rechazada">Rechazada</option>
               </select>
 
               {(hasNivelNacional || (isSeccionalOnly && allowedSeccionalIds.length > 1)) && (
@@ -892,6 +980,7 @@ NOTIFY pgrst, 'reload schema';`;
                   ) : (
                     paginatedSolicitudes.map((sol) => {
                       const rowUnread = isUnread('combustible', sol.id, sol.estado, sol.created_at || sol.fecha_solicitud);
+                      const rowFinalizada = isSolicitudFinalizada(sol.estado);
                       return (
                         <tr
                           key={sol.id}
@@ -901,6 +990,8 @@ NOTIFY pgrst, 'reload schema';`;
                           className={`transition ${
                             rowUnread
                               ? 'bg-sky-50/85 hover:bg-sky-100/75 border-l-4 border-l-rose-500 cursor-pointer'
+                              : rowFinalizada
+                              ? 'bg-emerald-50/75 hover:bg-emerald-100/65 border-l-4 border-l-emerald-500'
                               : 'bg-white hover:bg-gray-50 border-l-4 border-l-transparent'
                           }`}
                         >
@@ -1195,6 +1286,19 @@ NOTIFY pgrst, 'reload schema';`;
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL DE BLOQUEO POR SOLICITUD EN PROCESO */}
+      {activeQuota && (
+        <SolicitudEnProcesoModal
+          open={showActiveLockModal}
+          tipo="combustible"
+          seccionalNombre={selectedFormSeccional?.nombre || userSeccionalNombre || 'Seccional'}
+          quota={activeQuota}
+          canViewHistorial={canViewHistorial}
+          onGoToHistorial={() => setActiveTab('historial')}
+          onClose={() => setShowActiveLockModal(false)}
+        />
       )}
 
     </div>

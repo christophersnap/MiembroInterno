@@ -1,7 +1,13 @@
 import React, { useRef } from 'react';
-import { X, Printer, Download } from 'lucide-react';
-import { SolicitudCombustible, CombustibleConfig } from '../../types/combustible';
-import { formatFechaSV, getElSalvadorDateString } from '../../utils/dateUtils';
+import { X, Printer } from 'lucide-react';
+import {
+  SolicitudCombustible,
+  CombustibleConfig,
+  resolveCombustibleLogoUrl,
+  formatSolicitudCombustibleFechaHoraSV,
+} from '../../types/combustible';
+import SmartStorageImage from '../common/SmartStorageImage';
+import PdfWatermarkOverlay from '../common/PdfWatermarkOverlay';
 
 interface CombustiblePdfModalProps {
   solicitud: SolicitudCombustible;
@@ -16,9 +22,9 @@ export default function CombustiblePdfModal({
 }: CombustiblePdfModalProps) {
   const printAreaRef = useRef<HTMLDivElement>(null);
 
-  const fechaEnvioFormateada = solicitud.fecha_envio_completa || `${solicitud.fecha_solicitud || getElSalvadorDateString()} ${solicitud.hora_solicitud || '12:00:00'}`;
+  const fechaHoraSV = formatSolicitudCombustibleFechaHoraSV(solicitud);
+  const resolvedLogoUrl = resolveCombustibleLogoUrl(config);
 
-  // Tipografía dinámica
   const getFontFamilyClass = () => {
     switch (config.pdfFontFamily) {
       case 'serif':
@@ -30,7 +36,6 @@ export default function CombustiblePdfModal({
     }
   };
 
-  // Tamaño de letra dinámico
   const getFontSizeClass = () => {
     switch (config.pdfFontSize) {
       case 'small':
@@ -42,15 +47,35 @@ export default function CombustiblePdfModal({
     }
   };
 
+  const logoSizeClass =
+    config.pdfLogoSize === 'small'
+      ? 'w-12 h-12'
+      : config.pdfLogoSize === 'large'
+        ? 'w-20 h-20'
+        : 'w-16 h-16';
+
   const handlePrint = () => {
     window.print();
   };
 
+  const vehiculoDisplay = [solicitud.vehiculo_marca, solicitud.vehiculo_modelo].filter(Boolean).join(' ').trim();
+  const hasOptionalRow =
+    (config.mostrarVehiculo && Boolean(vehiculoDisplay)) ||
+    (config.mostrarPlaca && Boolean(solicitud.vehiculo_placa)) ||
+    (config.mostrarTipoGasolina && Boolean(solicitud.tipo_combustible)) ||
+    (config.mostrarGalones && solicitud.galones_solicitados !== undefined && solicitud.galones_solicitados !== null && String(solicitud.galones_solicitados).trim() !== '') ||
+    (config.mostrarCantidadDinero && solicitud.cantidad_dinero !== undefined && solicitud.cantidad_dinero !== null && String(solicitud.cantidad_dinero).trim() !== '');
+
+  const nombreJefatura = (config.pdfNombreJefaturaOperaciones || solicitud.autorizado_por || '').trim();
+  const cargoJefatura = (config.pdfLabelFirmaAdmin || 'Jefatura de Operaciones').trim();
+  const labelFirmaSolicitante = (config.pdfLabelFirmaSolicitante || 'Firma del Solicitante').trim();
+  const textoSello = (config.pdfTextoSelloInstitucional || 'Sello Institucional Oficial').trim();
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex flex-col items-center justify-start p-4 md:p-8">
-      
+
       {/* Barra de control superior */}
-      <div className="w-full max-w-4xl bg-white rounded-xl shadow-lg p-4 mb-4 flex items-center justify-between">
+      <div className="w-full max-w-4xl bg-white rounded-xl shadow-lg p-4 mb-4 flex items-center justify-between print:hidden">
         <div className="flex items-center space-x-2">
           <Printer className="w-5 h-5 text-emerald-600" />
           <span className="font-bold text-gray-900 text-sm">
@@ -75,7 +100,7 @@ export default function CombustiblePdfModal({
         </div>
       </div>
 
-      {/* DOCUMENTO OFICIAL PDF (DOCUMENTO 3 ADJUNTO) */}
+      {/* DOCUMENTO OFICIAL PDF */}
       <div
         ref={printAreaRef}
         id="hoja-solicitud-combustible-print"
@@ -83,65 +108,57 @@ export default function CombustiblePdfModal({
         style={{ boxSizing: 'border-box' }}
       >
         {/* Marca de agua institucional */}
-        {config.pdfWatermark && (
-          <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0 overflow-hidden"
-            style={{ opacity: Number(config.pdfWatermarkOpacity) || 0.08 }}
-          >
-            <span className="text-5xl md:text-6xl font-black uppercase text-gray-900 transform -rotate-45 text-center leading-relaxed max-w-lg">
-              {config.pdfWatermarkText}
-            </span>
-          </div>
-        )}
+        <PdfWatermarkOverlay
+          enabled={config.pdfWatermark}
+          imageUrl={config.pdfWatermarkImgUrl}
+          text={config.pdfWatermarkText}
+          opacity={config.pdfWatermarkOpacity}
+          scale={config.pdfWatermarkScale}
+          position={config.pdfWatermarkPosition}
+        />
 
         <div className="relative z-10 space-y-6">
-          
-          {/* Encabezado: Logo + Título Oficial + Fecha/Hora */}
-          <div className="flex items-center justify-between border-b-2 border-black pb-4">
-            
+
+          {/* Encabezado: Logo + Título Oficial + Fecha/Hora (El Salvador) */}
+          <div className="flex items-center justify-between border-b-2 border-black pb-4 gap-4">
+
             <div className="flex items-center space-x-4">
               {config.pdfMostrarLogoHeader && (
-                config.pdfLogoHeaderUrl ? (
-                  <img
-                    src={config.pdfLogoHeaderUrl}
-                    alt="Logo Principal Cruz Verde"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                    className={`object-contain ${
-                      config.pdfLogoSize === 'small' ? 'w-12 h-12' : config.pdfLogoSize === 'large' ? 'w-20 h-20' : 'w-16 h-16'
-                    }`}
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-full border-2 border-green-800 bg-white flex flex-col items-center justify-center text-center p-1 shrink-0 shadow-xs">
-                    <span className="text-[7px] font-bold text-green-900 leading-none">CRUZ VERDE</span>
-                    <span className="text-2xl font-black text-green-800 leading-none my-0.5">+</span>
-                    <span className="text-[7px] font-bold text-green-900 leading-none">EL SALVADOR</span>
-                  </div>
-                )
+                <SmartStorageImage
+                  src={resolvedLogoUrl}
+                  alt="Logo Institucional Cruz Verde"
+                  className={`object-contain shrink-0 ${logoSizeClass}`}
+                  fallback={
+                    <div className="w-16 h-16 rounded-full border-2 border-green-800 bg-white flex flex-col items-center justify-center text-center p-1 shrink-0 shadow-xs">
+                      <span className="text-[7px] font-bold text-green-900 leading-none">CRUZ VERDE</span>
+                      <span className="text-2xl font-black text-green-800 leading-none my-0.5">+</span>
+                      <span className="text-[7px] font-bold text-green-900 leading-none">EL SALVADOR</span>
+                    </div>
+                  }
+                />
               )}
 
               <div>
-                <h1 className="text-lg md:text-xl font-black text-gray-900 tracking-wider uppercase">
+                <h1 className="text-lg md:text-xl font-black text-gray-900 tracking-wider uppercase leading-tight">
                   {config.pdfTitulo}
                 </h1>
-                <h2 className="text-sm md:text-base font-extrabold text-gray-800 tracking-wide uppercase mt-0.5">
+                <h2 className="text-sm md:text-base font-extrabold text-gray-800 tracking-wide uppercase mt-0.5 leading-tight">
                   {config.pdfSubtitulo}
                 </h2>
-                <span className="text-xs text-gray-600 block mt-0.5">
+                <p className="text-xs font-semibold text-gray-600 mt-0.5">
+                  {config.pdfSubtituloSecundario || 'Documento Oficial Administrativo'}
+                </p>
+                <span className="text-xs text-gray-600 block mt-1">
                   Folio: <strong className="text-black font-mono">{solicitud.folio}</strong>
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 shrink-0">
               {config.pdfMostrarLogoSecundario && config.pdfLogoSecundarioUrl && (
-                <img
+                <SmartStorageImage
                   src={config.pdfLogoSecundarioUrl}
-                  alt="Logo Secundario / Cooperante"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
+                  alt="Logo Secundario"
                   className={`object-contain ${
                     config.pdfLogoSecundarioSize === 'small' ? 'w-10 h-10' : config.pdfLogoSecundarioSize === 'large' ? 'w-18 h-18' : 'w-14 h-14'
                   }`}
@@ -149,11 +166,14 @@ export default function CombustiblePdfModal({
               )}
 
               <div className="text-right text-xs space-y-1">
-                <span className="text-gray-500 block text-3xs uppercase tracking-wider">
-                  Fecha y Hora de Solicitud:
+                <span className="text-gray-500 block text-3xs uppercase tracking-wider font-semibold">
+                  Fecha y Hora de Solicitud
                 </span>
                 <span className="font-bold text-gray-900 block font-mono">
-                  {fechaEnvioFormateada}
+                  {fechaHoraSV.completa}
+                </span>
+                <span className="text-[10px] text-gray-500 block">
+                  (Hora de El Salvador)
                 </span>
                 <span className="inline-block px-2 py-0.5 rounded bg-gray-100 font-semibold border border-gray-300 text-2xs">
                   Estado: {solicitud.estado}
@@ -163,9 +183,9 @@ export default function CombustiblePdfModal({
 
           </div>
 
-          {/* Grid de 2 Columnas de Tarjetas Grises Redondeadas (Documento 3) */}
+          {/* Grid de 2 Columnas de Datos */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            
+
             {/* 1. Nombre del solicitante */}
             <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
@@ -196,17 +216,17 @@ export default function CombustiblePdfModal({
               </span>
             </div>
 
-            {/* 4. Actividad o Eventualidad */}
+            {/* 4. Tipo de Actividad */}
             <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
-                {config.pdfLabelActividad}:
+                {config.pdfLabelActividad || 'Tipo de Actividad'}:
               </span>
-              <span className="font-semibold text-gray-900 block">
+              <span className="font-bold text-gray-900 block">
                 {solicitud.actividad}
               </span>
             </div>
 
-            {/* 5. Correo Electronico */}
+            {/* 5. Correo Electrónico */}
             <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
                 {config.pdfLabelCorreo}:
@@ -216,18 +236,18 @@ export default function CombustiblePdfModal({
               </span>
             </div>
 
-            {/* 6. Contacto */}
+            {/* 6. Teléfono / Contacto */}
             <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
                 {config.pdfLabelContacto}:
               </span>
-              <span className="font-semibold text-gray-900 block">
+              <span className="font-semibold text-gray-900 block font-mono">
                 {solicitud.telefono_solicitante}
               </span>
             </div>
 
-            {/* 7. A entregado liquidación de combustible del mes anterior? */}
-            <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
+            {/* 7. ¿Entregó liquidación del mes anterior? */}
+            <div className={`bg-[#f3f4f6] rounded-xl p-3 border border-gray-200 ${solicitud.entrego_liquidacion_anterior ? 'md:col-span-2' : ''}`}>
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
                 {config.pdfLabelLiquidacion}
               </span>
@@ -236,17 +256,55 @@ export default function CombustiblePdfModal({
               </span>
             </div>
 
-            {/* 8. En caso de responder NO, favor especifique */}
-            <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
-              <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
-                {config.pdfLabelMotivo}:
-              </span>
-              <span className="font-medium text-gray-900 block">
-                {solicitud.entrego_liquidacion_anterior ? 'N/A' : (solicitud.motivo_no_liquidacion || 'No especificado')}
-              </span>
-            </div>
+            {/* 8. Motivo (solo se muestra si respondió NO) */}
+            {!solicitud.entrego_liquidacion_anterior && (
+              <div className="bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
+                <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
+                  {config.pdfLabelMotivo}:
+                </span>
+                <span className="font-medium text-gray-900 block">
+                  {solicitud.motivo_no_liquidacion || 'No especificado'}
+                </span>
+              </div>
+            )}
 
-            {/* 9. Observaciones (Ancho Completo) */}
+            {/* Campos Opcionales: solo si están activos en Plantilla */}
+            {hasOptionalRow && (
+              <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-3 bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
+                {config.mostrarVehiculo && vehiculoDisplay && (
+                  <div>
+                    <span className="text-3xs font-bold text-gray-600 uppercase block">Vehículo / Unidad:</span>
+                    <span className="font-semibold text-gray-900">{vehiculoDisplay}</span>
+                  </div>
+                )}
+                {config.mostrarPlaca && solicitud.vehiculo_placa && (
+                  <div>
+                    <span className="text-3xs font-bold text-gray-600 uppercase block">Placa:</span>
+                    <span className="font-bold font-mono text-gray-900">{solicitud.vehiculo_placa}</span>
+                  </div>
+                )}
+                {config.mostrarTipoGasolina && solicitud.tipo_combustible && (
+                  <div>
+                    <span className="text-3xs font-bold text-gray-600 uppercase block">Tipo de Gasolina:</span>
+                    <span className="font-semibold text-gray-900">{solicitud.tipo_combustible}</span>
+                  </div>
+                )}
+                {config.mostrarGalones && solicitud.galones_solicitados !== undefined && solicitud.galones_solicitados !== null && String(solicitud.galones_solicitados).trim() !== '' && (
+                  <div>
+                    <span className="text-3xs font-bold text-gray-600 uppercase block">Galones:</span>
+                    <span className="font-bold text-gray-900">{solicitud.galones_solicitados} Gl.</span>
+                  </div>
+                )}
+                {config.mostrarCantidadDinero && solicitud.cantidad_dinero !== undefined && solicitud.cantidad_dinero !== null && String(solicitud.cantidad_dinero).trim() !== '' && (
+                  <div>
+                    <span className="text-3xs font-bold text-gray-600 uppercase block">Cantidad de Dinero:</span>
+                    <span className="font-bold text-gray-900">${Number(solicitud.cantidad_dinero).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Observaciones */}
             <div className="md:col-span-2 bg-[#f3f4f6] rounded-xl p-3 border border-gray-200">
               <span className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1">
                 {config.pdfLabelObservaciones}
@@ -258,99 +316,86 @@ export default function CombustiblePdfModal({
 
           </div>
 
-          {/* Sección de Firmas (2 Recuadros Idénticos a Documento 3) */}
-          <div className="grid grid-cols-2 gap-4 pt-6">
-            
-            {/* Recuadro 1: Llenado por solicitante */}
-            <div className="border-2 border-black rounded-lg p-4 flex flex-col justify-between min-h-[160px] bg-white">
-              <div className="border-b border-black pb-1 mb-2 text-center">
-                <span className="text-xs font-bold uppercase tracking-wider text-black">
-                  {config.pdfLabelFirmaSolicitante}
-                </span>
-              </div>
+          {/* Sección de Firmas y Sello Institucional Oficial */}
+          <div className="pt-10 grid grid-cols-3 gap-5 items-end text-center">
 
-              {/* Espacio Firma */}
-              <div className="my-auto text-center">
-                <div className="w-48 border-b border-dashed border-gray-400 mx-auto mb-1"></div>
-                <span className="text-3xs text-gray-500 uppercase">Firma del Solicitante</span>
+            {/* Firma 1: Solicitante (F. arriba, nombre abajo) */}
+            <div className="flex flex-col items-center justify-end px-2">
+              <div className="w-full flex items-end gap-1.5 mb-2">
+                <span className="text-sm font-bold text-gray-900 leading-none shrink-0">F.</span>
+                <div className="flex-1 border-b border-gray-900 h-7"></div>
               </div>
-
-              <div className="space-y-1 text-xs pt-2 border-t border-gray-200">
-                <p>
-                  <strong>{config.pdfLabelDui}</strong> {solicitud.nombre_solicitante}
-                </p>
-                <p>
-                  <strong>{config.pdfLabelFecha}</strong> {solicitud.fecha_solicitud}
-                </p>
-              </div>
+              <p className="text-xs font-bold text-gray-900 leading-tight">
+                {solicitud.nombre_solicitante}
+              </p>
+              <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide mt-0.5">
+                {labelFirmaSolicitante}
+              </p>
             </div>
 
-            {/* Recuadro 2: Llenado por Area Administrativa */}
-            <div className="border-2 border-black rounded-lg p-4 flex flex-col justify-between min-h-[160px] bg-white">
-              <div className="border-b border-black pb-1 mb-2 text-center">
-                <span className="text-xs font-bold uppercase tracking-wider text-black">
-                  {config.pdfLabelFirmaAdmin}
-                </span>
-              </div>
+            {/* Centro: Cuadro Sutil para Sello Institucional Oficial */}
+            <div className="flex flex-col items-center justify-center px-1">
+              {config.pdfMostrarSelloImg && config.pdfSelloImgUrl ? (
+                <div className="w-36 h-24 rounded-md border border-dashed border-gray-300/60 flex flex-col items-center justify-center p-2">
+                  <SmartStorageImage
+                    src={config.pdfSelloImgUrl}
+                    alt="Sello Institucional Oficial"
+                    className="max-h-16 max-w-full object-contain opacity-85"
+                  />
+                  <span className="text-[9px] text-gray-400/80 uppercase tracking-wider mt-1">
+                    {textoSello}
+                  </span>
+                </div>
+              ) : (
+                <div className="w-36 h-24 rounded-md border border-dashed border-gray-300/60 flex items-center justify-center p-2">
+                  <span className="text-[10px] text-gray-400/75 font-medium uppercase tracking-wider text-center leading-tight">
+                    {textoSello}
+                  </span>
+                </div>
+              )}
+            </div>
 
-              {/* Espacio Firma y Sello */}
-              <div className="my-auto text-center relative py-1">
-                {config.pdfMostrarSelloImg && config.pdfSelloImgUrl ? (
-                  <div className={`flex items-center my-1 ${
-                    config.pdfSelloImgPosicion === 'left' ? 'justify-start' : config.pdfSelloImgPosicion === 'right' ? 'justify-end' : 'justify-center'
-                  }`}>
-                    <img
-                      src={config.pdfSelloImgUrl}
-                      alt="Sello Oficial"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                      className={`object-contain opacity-90 ${
-                        config.pdfSelloImgSize === 'small' ? 'h-12 max-w-[120px]' : config.pdfSelloImgSize === 'large' ? 'h-20 max-w-[200px]' : 'h-16 max-w-[160px]'
-                      }`}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-48 border-b border-dashed border-gray-400 mx-auto mb-1"></div>
-                )}
-                <span className="text-3xs text-gray-500 uppercase block">{config.pdfLabelFirmaSello}</span>
+            {/* Firma 2: Jefatura de Operaciones (F. arriba, nombre editable abajo) */}
+            <div className="flex flex-col items-center justify-end px-2">
+              <div className="w-full flex items-end gap-1.5 mb-2">
+                <span className="text-sm font-bold text-gray-900 leading-none shrink-0">F.</span>
+                <div className="flex-1 border-b border-gray-900 h-7"></div>
               </div>
-
-              <div className="space-y-1 text-xs pt-2 border-t border-gray-200">
-                <p>
-                  <strong>{config.pdfLabelAutoriza}</strong> {solicitud.autorizado_por || 'Área Administrativa Central'}
+              {nombreJefatura ? (
+                <p className="text-xs font-bold text-gray-900 leading-tight">
+                  {nombreJefatura}
                 </p>
-                <p>
-                  <strong>{config.pdfLabelFechaAuto}</strong> {solicitud.fecha_autorizacion ? formatFechaSV(solicitud.fecha_autorizacion) : 'Pendiente de autorización'}
+              ) : (
+                <p className="text-xs font-bold text-gray-900 leading-tight">
+                  {cargoJefatura}
                 </p>
-              </div>
+              )}
+              <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide mt-0.5">
+                {nombreJefatura ? cargoJefatura : 'Autorización Institucional'}
+              </p>
             </div>
 
           </div>
 
         </div>
 
-        {/* Pie de página institucional (Documento 3) */}
-        <div className="relative z-10 pt-6 mt-6 border-t border-gray-400 flex items-center justify-between text-xs text-gray-600">
+        {/* Pie de página institucional */}
+        <div className="relative z-10 pt-6 mt-8 border-t border-gray-300 flex items-center justify-between text-xs text-gray-600">
           <div className="flex items-center space-x-2">
             {config.pdfMostrarLogoFooter && (
-              config.pdfLogoFooterUrl ? (
-                <img 
-                  src={config.pdfLogoFooterUrl} 
-                  alt="Logo" 
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                  className="w-7 h-7 object-contain" 
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full border border-green-800 flex items-center justify-center font-bold text-green-900 text-xs">
-                  +
-                </div>
-              )
+              <SmartStorageImage
+                src={config.pdfLogoFooterUrl || resolvedLogoUrl}
+                alt="Logo"
+                className="w-7 h-7 object-contain"
+                fallback={
+                  <div className="w-7 h-7 rounded-full border border-green-800 flex items-center justify-center font-bold text-green-900 text-xs">
+                    +
+                  </div>
+                }
+              />
             )}
             <span className="font-semibold text-3xs uppercase tracking-wider text-gray-800">
-              Cruz Verde Salvadoreña • Departamento Administrativo
+              Cruz Verde Salvadoreña • {config.pdfSubtituloSecundario || 'Documento Oficial Administrativo'}
             </span>
           </div>
 

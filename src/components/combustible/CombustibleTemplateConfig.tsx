@@ -13,10 +13,11 @@ import {
 } from '../../types/combustible';
 import CombustiblePdfModal from './CombustiblePdfModal';
 import ImageUploadConfigCard from '../common/ImageUploadConfigCard';
+import PdfWatermarkConfigCard from '../common/PdfWatermarkConfigCard';
 import { supabase } from '../../lib/supabase';
 import { getApiUrl } from '../../lib/api';
 import { optimizeImageForUpload, getExtensionFromFile } from '../../utils/imageOptimizer';
-import { getElSalvadorDateString } from '../../utils/dateUtils';
+import { getElSalvadorDateTime } from '../../utils/dateUtils';
 
 interface CombustibleTemplateConfigProps {
   config: CombustibleConfig;
@@ -35,15 +36,14 @@ export default function CombustibleTemplateConfig({
     ...DEFAULT_COMBUSTIBLE_CONFIG,
     ...initialConfig,
     pdfBloquesOrden: (initialConfig?.pdfBloquesOrden && initialConfig.pdfBloquesOrden.length > 0)
-      ? initialConfig.pdfBloquesOrden 
+      ? initialConfig.pdfBloquesOrden
       : DEFAULT_COMBUSTIBLE_BLOCKS
   }));
 
-  const isInitializedRef = useRef(false);
   useEffect(() => {
-    if (initialConfig && !isInitializedRef.current) {
-      isInitializedRef.current = true;
+    if (initialConfig) {
       setCurrentConfig(prev => ({
+        ...DEFAULT_COMBUSTIBLE_CONFIG,
         ...prev,
         ...initialConfig,
         pdfBloquesOrden: (initialConfig.pdfBloquesOrden && initialConfig.pdfBloquesOrden.length > 0)
@@ -55,10 +55,11 @@ export default function CombustibleTemplateConfig({
     }
   }, [initialConfig]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'disenador' | 'imagenes' | 'pdf' | 'textos' | 'correo'>('disenador');
+  const [activeSubTab, setActiveSubTab] = useState<'disenador' | 'campos' | 'imagenes' | 'pdf' | 'textos' | 'correo'>('disenador');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   // Auto-guardado inmediato en Supabase
   const handleUpdateAndAutoSave = async (partial: Partial<CombustibleConfig>) => {
@@ -223,9 +224,12 @@ export default function CombustibleTemplateConfig({
   };
 
   const handleReset = () => {
-    if (window.confirm('¿Está seguro de restablecer todos los textos y configuraciones a los valores de fábrica?')) {
-      setCurrentConfig(DEFAULT_COMBUSTIBLE_CONFIG);
-    }
+    setConfirmReset(true);
+  };
+
+  const confirmResetFactory = () => {
+    setCurrentConfig(DEFAULT_COMBUSTIBLE_CONFIG);
+    setConfirmReset(false);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -235,21 +239,29 @@ export default function CombustibleTemplateConfig({
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
+  const svNow = getElSalvadorDateTime();
+
   // Solicitud de demostración para el modal de vista previa
   const demoSolicitud: SolicitudCombustible = {
     id: 999,
-    folio: 'SC-2026-DEMO',
+    folio: 'COMB-2026-DEMO',
     seccional_id: 1,
     seccional_nombre: 'Santa Anita',
     nombre_solicitante: 'Carlos Hernández',
-    director_nombre: 'Ing. Salvador Alvarado',
-    actividad: 'Cobertura de emergencias y traslados en turnos 24/7',
+    director_nombre: '(SANTA ANITA) - Ing. Salvador Alvarado',
+    actividad: 'Emergencias Cotidianas',
     correo_electronico: 'santaanita@cruzverdesv.org',
     telefono_solicitante: '7023-4567',
     entrego_liquidacion_anterior: true,
-    estado: 'Aprobada',
-    fecha_solicitud: getElSalvadorDateString(),
-    hora_solicitud: '09:45 AM'
+    estado: 'Pendiente',
+    fecha_solicitud: svNow.fechaISO,
+    hora_solicitud: svNow.hora12,
+    fecha_envio_completa: `${svNow.fechaSV} · ${svNow.hora12}`,
+    vehiculo_marca: 'Ambulancia Unidad 04',
+    vehiculo_placa: 'P-458-902',
+    tipo_combustible: 'Diésel',
+    galones_solicitados: '15',
+    cantidad_dinero: 60.00,
   };
 
   return (
@@ -269,6 +281,19 @@ export default function CombustibleTemplateConfig({
           >
             <Sliders className="w-4 h-4 mr-1.5" />
             Diseñador Visual y Bloques
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('campos')}
+            className={`inline-flex items-center px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
+              activeSubTab === 'campos'
+                ? 'bg-emerald-600 text-white shadow-2xs'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <Shield className="w-4 h-4 mr-1.5" />
+            Campos Opcionales
           </button>
 
           <button
@@ -370,7 +395,138 @@ export default function CombustibleTemplateConfig({
         </div>
       </div>
 
+      {confirmReset && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+          <span className="font-semibold">
+            ¿Desea restablecer todos los textos y configuraciones de la plantilla a los valores institucionales predeterminados?
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setConfirmReset(false)}
+              className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 font-semibold cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmResetFactory}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+            >
+              Sí, restablecer
+            </button>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-6">
+
+        {/* SUBTAB: CAMPOS OPCIONALES DEL FORMULARIO, PDF Y CORREO */}
+        {activeSubTab === 'campos' && (
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 md:p-8 space-y-6 shadow-2xs">
+            <div className="border-b border-gray-100 pb-4">
+              <h3 className="text-base font-bold text-gray-900 flex items-center">
+                <Shield className="w-5 h-5 text-emerald-600 mr-2" />
+                Campos Opcionales en Solicitud, PDF y Correo
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Active o desactive individualmente si desea solicitar estos datos en el formulario de combustible y si deben mostrarse en el PDF oficial y en el correo de notificación.
+              </p>
+            </div>
+
+            <div className="overflow-x-auto border border-gray-200 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 text-gray-600 uppercase font-bold border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3">Campo Opcional</th>
+                    <th className="px-4 py-3 text-center">Solicitar en Formulario</th>
+                    <th className="px-4 py-3 text-center">Mostrar en PDF y Correo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {[
+                    {
+                      label: 'Vehículo / Unidad',
+                      desc: 'Marca, modelo o número de unidad asignada',
+                      reqKey: 'solicitarVehiculo' as const,
+                      showKey: 'mostrarVehiculo' as const,
+                    },
+                    {
+                      label: 'Placa',
+                      desc: 'Número de placa oficial del vehículo',
+                      reqKey: 'solicitarPlaca' as const,
+                      showKey: 'mostrarPlaca' as const,
+                    },
+                    {
+                      label: 'Tipo de Gasolina',
+                      desc: 'Regular, Especial o Diésel',
+                      reqKey: 'solicitarTipoGasolina' as const,
+                      showKey: 'mostrarTipoGasolina' as const,
+                    },
+                    {
+                      label: 'Galones',
+                      desc: 'Cantidad de galones de combustible solicitados',
+                      reqKey: 'solicitarGalones' as const,
+                      showKey: 'mostrarGalones' as const,
+                    },
+                    {
+                      label: 'Cantidad de Dinero ($)',
+                      desc: 'Monto solicitado en dólares (USD)',
+                      reqKey: 'solicitarCantidadDinero' as const,
+                      showKey: 'mostrarCantidadDinero' as const,
+                    },
+                  ].map((item) => (
+                    <tr key={item.reqKey} className="hover:bg-gray-50/70">
+                      <td className="px-4 py-3.5">
+                        <span className="font-bold text-gray-900 block">{item.label}</span>
+                        <span className="text-3xs text-gray-500">{item.desc}</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(currentConfig[item.reqKey])}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setCurrentConfig({
+                                ...currentConfig,
+                                [item.reqKey]: checked,
+                                // Si se activa solicitar, sugerir mostrar automáticamente; si se desactiva, mantener elección del usuario
+                                ...(checked ? { [item.showKey]: true } : {}),
+                              });
+                            }}
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span className={`font-semibold ${currentConfig[item.reqKey] ? 'text-emerald-700' : 'text-gray-400'}`}>
+                            {currentConfig[item.reqKey] ? 'Sí solicitar' : 'No solicitar'}
+                          </span>
+                        </label>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(currentConfig[item.showKey])}
+                            onChange={(e) =>
+                              setCurrentConfig({
+                                ...currentConfig,
+                                [item.showKey]: e.target.checked,
+                              })
+                            }
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span className={`font-semibold ${currentConfig[item.showKey] ? 'text-emerald-700' : 'text-gray-400'}`}>
+                            {currentConfig[item.showKey] ? 'Visible' : 'Oculto'}
+                          </span>
+                        </label>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* SUBTAB 0: DISEÑADOR VISUAL Y ORDENAMIENTO DE BLOQUES POR ARRASTRE */}
         {activeSubTab === 'disenador' && (
@@ -704,46 +860,34 @@ export default function CombustibleTemplateConfig({
                 />
               </div>
 
-              {/* Marca de Agua */}
+              {/* Subtítulo Secundario debajo de Solicitud de Combustible */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-gray-700">
-                    Marca de Agua Diagonal:
-                  </label>
-                  <label className="flex items-center space-x-1.5 cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={currentConfig.pdfWatermark}
-                      onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermark: e.target.checked })}
-                      className="rounded text-emerald-600"
-                    />
-                    <span>Habilitada</span>
-                  </label>
-                </div>
+                <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                  Texto debajo de Solicitud de Combustible:
+                </label>
                 <input
                   type="text"
-                  disabled={!currentConfig.pdfWatermark}
-                  value={currentConfig.pdfWatermarkText}
-                  onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermarkText: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-40"
-                  placeholder="CRUZ VERDE SALVADOREÑA - COMBUSTIBLE"
+                  value={currentConfig.pdfSubtituloSecundario || 'Documento Oficial Administrativo'}
+                  onChange={(e) => setCurrentConfig({ ...currentConfig, pdfSubtituloSecundario: e.target.value })}
+                  placeholder="Documento Oficial Administrativo"
+                  className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-semibold"
                 />
-                <div className="flex items-center space-x-2 mt-2">
-                  <span className="text-3xs text-gray-500">Opacidad:</span>
-                  <input
-                    type="range"
-                    min="0.02"
-                    max="0.25"
-                    step="0.01"
-                    disabled={!currentConfig.pdfWatermark}
-                    value={currentConfig.pdfWatermarkOpacity}
-                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfWatermarkOpacity: e.target.value })}
-                    className="flex-1"
-                  />
-                  <span className="text-3xs font-mono font-bold text-gray-700">
-                    {Math.round(Number(currentConfig.pdfWatermarkOpacity) * 100)}%
-                  </span>
-                </div>
+              </div>
+
+              {/* Marca de Agua de PDF (Imagen o Texto con Opacidad, Escala y Ubicación) */}
+              <div className="md:col-span-2 pt-2 border-t border-gray-100">
+                <PdfWatermarkConfigCard
+                  enabled={currentConfig.pdfWatermark}
+                  imageUrl={currentConfig.pdfWatermarkImgUrl || ''}
+                  text={currentConfig.pdfWatermarkText || ''}
+                  opacity={currentConfig.pdfWatermarkOpacity || '0.08'}
+                  scale={currentConfig.pdfWatermarkScale || '45'}
+                  position={currentConfig.pdfWatermarkPosition || 'center'}
+                  storageFolder="combustible"
+                  documentLabel={currentConfig.pdfSubtitulo || 'SOLICITUD DE COMBUSTIBLE'}
+                  onChange={(patch) => setCurrentConfig((prev) => ({ ...prev, ...patch }))}
+                  onAutoSave={(patch) => handleUpdateAndAutoSave(patch)}
+                />
               </div>
 
             </div>
@@ -901,6 +1045,20 @@ export default function CombustibleTemplateConfig({
                 onVisibilityChange={(visible) => handleUpdateAndAutoSave({ pdfMostrarLogoFooter: visible })}
                 defaultPlaceholderText="Cintillo Oficial Cruz Verde"
                 defaultLogoName="Sin cintillo por defecto"
+              />
+
+              {/* 5. Marca de Agua de PDF */}
+              <PdfWatermarkConfigCard
+                enabled={currentConfig.pdfWatermark}
+                imageUrl={currentConfig.pdfWatermarkImgUrl || ''}
+                text={currentConfig.pdfWatermarkText || ''}
+                opacity={currentConfig.pdfWatermarkOpacity || '0.08'}
+                scale={currentConfig.pdfWatermarkScale || '45'}
+                position={currentConfig.pdfWatermarkPosition || 'center'}
+                storageFolder="combustible"
+                documentLabel={currentConfig.pdfSubtitulo || 'SOLICITUD DE COMBUSTIBLE'}
+                onChange={(patch) => setCurrentConfig((prev) => ({ ...prev, ...patch }))}
+                onAutoSave={(patch) => handleUpdateAndAutoSave(patch)}
               />
             </div>
 
@@ -1069,81 +1227,64 @@ export default function CombustibleTemplateConfig({
               </div>
             </div>
 
-            {/* Textos de la Sección de Firmas */}
+            {/* Textos de la Sección de Firmas y Sello */}
             <div className="pt-4 border-t border-gray-100 space-y-4">
               <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                Rótulos y Textos del Bloque de Firmas
+                Firmas (F. arriba / Nombre abajo) y Sello Institucional
               </h4>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Título Cuadro 1: Solicitante
+                    Etiqueta Firma 1 (Solicitante):
                   </label>
                   <input
                     type="text"
                     value={currentConfig.pdfLabelFirmaSolicitante}
                     onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelFirmaSolicitante: e.target.value })}
+                    placeholder="Firma del Solicitante"
                     className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Título Cuadro 2: Administración
+                    Cargo Firma 2 (Jefatura / Autorización):
                   </label>
                   <input
                     type="text"
                     value={currentConfig.pdfLabelFirmaAdmin}
                     onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelFirmaAdmin: e.target.value })}
+                    placeholder="Jefatura de Operaciones"
                     className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
                   />
                 </div>
 
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Rótulo: DUI
+                    Nombre en Firma de Jefatura de Operaciones (aparece debajo de la línea F.):
                   </label>
                   <input
                     type="text"
-                    value={currentConfig.pdfLabelDui}
-                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelDui: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
+                    value={currentConfig.pdfNombreJefaturaOperaciones || ''}
+                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfNombreJefaturaOperaciones: e.target.value })}
+                    placeholder="Ej: Ing. Juan Pérez (dejar vacío si solo desea mostrar el cargo)"
+                    className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                   />
+                  <span className="text-3xs text-gray-400 mt-1 block">
+                    Puede editar este nombre en cualquier momento para indicar a nombre de quién sale la firma de Jefatura de Operaciones en el PDF.
+                  </span>
                 </div>
 
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Rótulo: Firma y Sello
+                    Texto del Cuadro de Sello Institucional:
                   </label>
                   <input
                     type="text"
-                    value={currentConfig.pdfLabelFirmaSello}
-                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelFirmaSello: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Rótulo: Nombre Quién Autoriza
-                  </label>
-                  <input
-                    type="text"
-                    value={currentConfig.pdfLabelAutoriza}
-                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelAutoriza: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Rótulo: Fecha de Autorización
-                  </label>
-                  <input
-                    type="text"
-                    value={currentConfig.pdfLabelFechaAuto}
-                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfLabelFechaAuto: e.target.value })}
+                    value={currentConfig.pdfTextoSelloInstitucional || 'Sello Institucional Oficial'}
+                    onChange={(e) => setCurrentConfig({ ...currentConfig, pdfTextoSelloInstitucional: e.target.value })}
+                    placeholder="Sello Institucional Oficial"
                     className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg outline-none"
                   />
                 </div>

@@ -52,6 +52,11 @@ const DEFAULT_CREATE_SECCIONALES: Record<CreateSolicitudModuleKey, number | null
   solicitudes_compra: null,
 };
 
+const DEFAULT_EXTRA_SOLICITUDES_EN_PROCESO: Record<CreateSolicitudModuleKey, number> = {
+  solicitudes_combustible: 0,
+  solicitudes_compra: 0,
+};
+
 const DEFAULT_SECCIONALES_ACCESS: SeccionalesSocorristasConfig = {
   mode: 'default',
   seccionales: {},
@@ -68,12 +73,14 @@ interface AuthContextType {
   moduleSeccionales: Record<ScopedModuleKey, number[]>;
   createSolicitudScopes: Record<CreateSolicitudModuleKey, CreateSolicitudScope>;
   createSolicitudSeccionales: Record<CreateSolicitudModuleKey, number | null>;
+  extraSolicitudesEnProceso: Record<CreateSolicitudModuleKey, number>;
   seccionalesSocorristasAccess: SeccionalesSocorristasConfig;
   canAddAnySocorrista: boolean;
   getModuleScope: (mod: ScopedModuleKey) => ModuleScope;
   getModuleSeccionalIds: (mod: ScopedModuleKey) => number[];
   getCreateSolicitudScope: (mod: CreateSolicitudModuleKey) => CreateSolicitudScope;
   getCreateSolicitudSeccionalId: (mod: CreateSolicitudModuleKey) => number | null;
+  getExtraSolicitudesEnProceso: (mod: CreateSolicitudModuleKey) => number;
   canAccessSeccionalSocorristas: (seccionalId: number | null | undefined, action: 'view' | 'add' | 'edit') => boolean;
   getAllowedSocorristaSeccionalIds: () => number[] | 'all';
   getAddAllowedSocorristaSeccionalIds: () => number[] | 'all';
@@ -99,12 +106,14 @@ const AuthContext = createContext<AuthContextType>({
   moduleSeccionales: DEFAULT_MODULE_SECCIONALES,
   createSolicitudScopes: DEFAULT_CREATE_SCOPES,
   createSolicitudSeccionales: DEFAULT_CREATE_SECCIONALES,
+  extraSolicitudesEnProceso: DEFAULT_EXTRA_SOLICITUDES_EN_PROCESO,
   seccionalesSocorristasAccess: DEFAULT_SECCIONALES_ACCESS,
   canAddAnySocorrista: false,
   getModuleScope: () => 'usuario',
   getModuleSeccionalIds: () => [],
   getCreateSolicitudScope: () => 'seccional',
   getCreateSolicitudSeccionalId: () => null,
+  getExtraSolicitudesEnProceso: () => 0,
   canAccessSeccionalSocorristas: () => false,
   getAllowedSocorristaSeccionalIds: () => [],
   getAddAllowedSocorristaSeccionalIds: () => [],
@@ -132,6 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [moduleSeccionales, setModuleSeccionales] = useState<Record<ScopedModuleKey, number[]>>(DEFAULT_MODULE_SECCIONALES);
   const [createSolicitudScopes, setCreateSolicitudScopes] = useState<Record<CreateSolicitudModuleKey, CreateSolicitudScope>>(DEFAULT_CREATE_SCOPES);
   const [createSolicitudSeccionales, setCreateSolicitudSeccionales] = useState<Record<CreateSolicitudModuleKey, number | null>>(DEFAULT_CREATE_SECCIONALES);
+  const [extraSolicitudesEnProceso, setExtraSolicitudesEnProceso] = useState<Record<CreateSolicitudModuleKey, number>>(DEFAULT_EXTRA_SOLICITUDES_EN_PROCESO);
   const [seccionalesSocorristasAccess, setSeccionalesSocorristasAccess] = useState<SeccionalesSocorristasConfig>(DEFAULT_SECCIONALES_ACCESS);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(true);
   const [requiresPasswordReset, setRequiresPasswordReset] = useState<boolean>(false);
@@ -210,6 +220,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setModuleSeccionales(DEFAULT_MODULE_SECCIONALES);
         setCreateSolicitudScopes(DEFAULT_CREATE_SCOPES);
         setCreateSolicitudSeccionales(DEFAULT_CREATE_SECCIONALES);
+        setExtraSolicitudesEnProceso(DEFAULT_EXTRA_SOLICITUDES_EN_PROCESO);
         setSeccionalesSocorristasAccess(DEFAULT_SECCIONALES_ACCESS);
         setLoading(false);
       }
@@ -719,6 +730,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         solicitudes_compra: parseCreateSec(rawCreateSeccs.solicitudes_compra, resolvedModSeccs.solicitudes_compra),
       };
 
+      const rawExtraSolicitudes = userCustomPerms._extra_solicitudes_en_proceso || {};
+      const parseExtraQuota = (val: any): number => {
+        if (val === undefined || val === null || val === '') return 0;
+        const parsed = Number(val);
+        if (!Number.isFinite(parsed)) return 0;
+        if (parsed < 0) return -1;
+        return Math.min(99, Math.floor(parsed));
+      };
+      const resolvedExtraSolicitudes: Record<CreateSolicitudModuleKey, number> = {
+        solicitudes_combustible: parseExtraQuota(rawExtraSolicitudes.solicitudes_combustible),
+        solicitudes_compra: parseExtraQuota(rawExtraSolicitudes.solicitudes_compra),
+      };
+
       setPermissions(finalMergedPerms);
       setCustomPermissions(userCustomPerms);
       setSeccionalesSocorristasAccess(parsedSecAccess);
@@ -726,6 +750,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setModuleSeccionales(resolvedModSeccs);
       setCreateSolicitudScopes(resolvedCreateScopes);
       setCreateSolicitudSeccionales(resolvedCreateSeccs);
+      setExtraSolicitudesEnProceso(resolvedExtraSolicitudes);
 
     } catch (error) {
       console.error('Error in fetchUserRoleAndPermissions:', error);
@@ -751,6 +776,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getCreateSolicitudSeccionalId = (mod: CreateSolicitudModuleKey): number | null => {
     if (role === 'admin') return null;
     return createSolicitudSeccionales[mod] ?? userSeccionalId ?? null;
+  };
+
+  const getExtraSolicitudesEnProceso = (mod: CreateSolicitudModuleKey): number => {
+    const val = extraSolicitudesEnProceso[mod];
+    if (typeof val === 'number' && Number.isFinite(val)) return val;
+    return 0;
   };
 
   const canAccessSeccionalSocorristas = (
@@ -862,12 +893,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       moduleSeccionales,
       createSolicitudScopes,
       createSolicitudSeccionales,
+      extraSolicitudesEnProceso,
       seccionalesSocorristasAccess,
       canAddAnySocorrista,
       getModuleScope,
       getModuleSeccionalIds,
       getCreateSolicitudScope,
       getCreateSolicitudSeccionalId,
+      getExtraSolicitudesEnProceso,
       canAccessSeccionalSocorristas,
       getAllowedSocorristaSeccionalIds,
       getAddAllowedSocorristaSeccionalIds,

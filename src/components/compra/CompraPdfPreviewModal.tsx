@@ -3,6 +3,7 @@ import { X, Printer, Download, Eye, Sparkles, Check } from 'lucide-react';
 import { CompraConfig } from '../../types/compra';
 import { SolicitudCompra } from '../../pages/SolicitudesCompra';
 import { getElSalvadorDateString } from '../../utils/dateUtils';
+import PdfWatermarkOverlay from '../common/PdfWatermarkOverlay';
 
 interface CompraPdfPreviewModalProps {
   solicitud?: SolicitudCompra;
@@ -443,16 +444,14 @@ export default function CompraPdfPreviewModal({
         style={{ letterSpacing: '-0.01em' }}
       >
         {/* Marca de agua si está activada */}
-        {config.pdfWatermark && (
-          <div 
-            className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0 overflow-hidden"
-            style={{ opacity: Number(config.pdfWatermarkOpacity) || 0.08 }}
-          >
-            <span className="text-4xl md:text-5xl font-black text-gray-900 transform -rotate-35 uppercase tracking-widest text-center max-w-2xl">
-              {config.pdfWatermarkText}
-            </span>
-          </div>
-        )}
+        <PdfWatermarkOverlay
+          enabled={config.pdfWatermark}
+          imageUrl={config.pdfWatermarkImgUrl}
+          text={config.pdfWatermarkText}
+          opacity={config.pdfWatermarkOpacity}
+          scale={config.pdfWatermarkScale}
+          position={config.pdfWatermarkPosition}
+        />
 
         {/* Renderizado de Bloques en el Orden Configurado */}
         <div className="relative z-10 space-y-4">
